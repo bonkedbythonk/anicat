@@ -1,0 +1,187 @@
+# The iOS app target. SwiftPM cannot emit an iOS `.app` — it builds
+# frameworks and command-line executables only — so the phone build needs an
+# Xcode project even though every line of source it compiles already lives in
+# this package. Generated with `xcodegen generate` rather than committed:
+# a hand-edited .xcodeproj is 3000 lines of unreviewable XML that conflicts
+# on every branch, and there is nothing in it a human should be authoring.
+#
+# The macOS app does NOT come through here. It is still
+# `swift build --product Anicat` plus scripts/package-anicat-macos-app.sh;
+# adding it would mean two descriptions of one target that drift apart.
+name: Anicat
+options:
+  bundleIdPrefix: com.anicat
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+packages:
+  # The package this project sits inside. Xcode resolves a local package by
+  # path, so there is no version to pin and no checkout: the project always
+  # builds the working tree, which is the point.
+  AnicatApple:
+    path: .
+
+targets:
+  AnicatiOS:
+    type: application
+    platform: iOS
+    sources:
+      # The same entry file the macOS executable target uses. Its macOS half
+      # is behind `#if os(macOS)`, so on iOS this compiles down to the scene
+      # in the `#else` branch and nothing else.
+      - path: Sources/AnicatApp
+      # Home-screen icon, light, dark and tinted. Rendered by
+      # scripts/build-brand-assets.sh from assets/branding/paw.svg, the same
+      # run that writes the macOS icon.icns, so the two platforms cannot
+      # drift. It lives outside the SwiftPM target's resources on purpose:
+      # an app icon has to be compiled into the *app* by actool, and a
+      # package resource bundle is not where iOS looks for it.
+      - path: Sources/AnicatUI/Resources/AppIcon.xcassets
+      # The widget snapshot and the Live Activity attributes, compiled into
+      # this target and into the widget extension. Not in the package: the
+      # extension cannot depend on AnicatUI without pulling MPVKit in.
+      - path: Shared
+    dependencies:
+      - package: AnicatApple
+        product: AnicatUI
+      - package: AnicatApple
+        product: AnicatCoreKit
+      - target: AnicatWidgets
+        embed: true
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: Anicat
+        CFBundleShortVersionString: 1.0.0
+        CFBundleVersion: "1"
+        # Playback must survive the screen locking or the app leaving the
+        # foreground; without this the audio session is torn down the moment
+        # the user pockets the phone mid-episode.
+        UIBackgroundModes:
+          - audio
+        # librqbit talks to peers on the local subnet and BonjourDiscovery
+        # advertises/browses `_anicat-stream._tcp`. iOS 14 and later refuse
+        # both silently — no error, just no peers — unless the app declares
+        # why it wants the local network.
+        NSLocalNetworkUsageDescription: >-
+          Anicat finds other Anicat instances on your network and connects to
+          nearby peers while streaming.
+        NSBonjourServices:
+          - _anicat-stream._tcp
+        # The player is landscape; everything else is portrait. Upside-down
+        # is left out because a phone rotated 180 degrees mid-episode is an
+        # accident, not an intention.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # An empty launch-screen dictionary is what opts the app into the
+        # full screen. With no UILaunchScreen key at all iOS assumes a
+        # pre-iPhone-X app and letterboxes it inside black bars.
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        # How cinema mode reaches TMDB. The literal URL, not ${ANICAT_TMDB_PROXY}:
+        # xcodegen leaves an unset variable in the plist verbatim, so every
+        # build generated without that export shipped a proxy base URL of
+        # "${ANICAT_TMDB_PROXY}" -- cinema mode read as available and every
+        # request went to a hostname that does not exist. No key ships with
+        # it; the key lives on the worker (services/tmdb-proxy), which is the
+        # only arrangement where a public repo and a working cinema mode are
+        # the same build. A viewer's own key still wins, from Settings.
+        ANICATTMDBProxy: https://anicat-tmdb.anicat.workers.dev
+        # Without these the phone build is unreachable from outside itself:
+        # `anicat://title/<id>` is refused by LaunchServices, and Handoff
+        # from the Mac arrives as an activity type the app never claimed.
+        # The macOS bundle has carried both for a while; the iOS target
+        # started without them because nothing generated its plist before.
+        CFBundleURLTypes:
+          - CFBundleURLName: Anicat
+            CFBundleURLSchemes: [anicat]
+        NSUserActivityTypes:
+          - com.anicat.playback
+          - com.anicat.reading
+        # Without this the Live Activity request fails silently -- there is
+        # no error, `Activity.request` simply throws and the lock screen
+        # stays empty.
+        NSSupportsLiveActivities: true
+        # Home-screen quick actions. The address in `userInfo` is what
+        # `AnicatAppDelegate.application(_:performActionFor:)` hands to
+        # `handleOpenURL`; the type string is only a label.
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: com.anicat.ios.upnext
+            UIApplicationShortcutItemTitle: Continue Watching
+            UIApplicationShortcutItemIconSymbolName: play.circle
+            UIApplicationShortcutItemUserInfo:
+              url: anicat://section/home
+          - UIApplicationShortcutItemType: com.anicat.ios.search
+            UIApplicationShortcutItemTitle: Search
+            UIApplicationShortcutItemIconSymbolName: magnifyingglass
+            UIApplicationShortcutItemUserInfo:
+              url: anicat://search
+          - UIApplicationShortcutItemType: com.anicat.ios.remote
+            UIApplicationShortcutItemTitle: Remote for Mac
+            UIApplicationShortcutItemIconSymbolName: macbook.and.iphone
+            UIApplicationShortcutItemUserInfo:
+              url: anicat://remote
+    # The App Group the widgets read the snapshot from. A personal (free)
+    # team cannot sign an App Group; if automatic signing refuses, drop the
+    # `entitlements` lines from both targets and the widgets show their
+    # placeholders while everything else keeps working.
+    entitlements:
+      path: Entitlements/AnicatiOS.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios
+        # iPhone only. iPad would inherit the 200pt-rail desktop layout,
+        # which is the one thing this port is replacing.
+        TARGETED_DEVICE_FAMILY: "1"
+        # Read from the environment, not written here. A Team ID is not a
+        # credential -- it cannot sign anything without the private key --
+        # but it is the one stable handle that ties this pseudonymous repo
+        # to a named Apple developer account, and DISCLAIMER.md says that
+        # name stays private. It also cannot be rotated if it ever leaks.
+        # Set ANICAT_DEVELOPMENT_TEAM in your shell before `xcodegen
+        # generate`; unset it and generation still succeeds, which is what
+        # CI does, since it builds with CODE_SIGNING_ALLOWED=NO.
+        DEVELOPMENT_TEAM: ${ANICAT_DEVELOPMENT_TEAM}
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Marks code that only the Xcode app target can compile (it sees
+        # `Shared/`; the SwiftPM iOS library build compiles the same entry
+        # files without it).
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) ANICAT_XCODE
+
+
+  # The widget extension: three home-screen widgets (Up Next, Airing Today,
+  # Continue Reading) and the two Live Activities (a download, the Mac's
+  # playback while the phone is its remote). It reads only the snapshot
+  # the app writes into the App Group and fetches covers itself; it does
+  # not link the engine or the UI package.
+  AnicatWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+    info:
+      path: Generated/WidgetInfo.plist
+      properties:
+        CFBundleDisplayName: Anicat
+        CFBundleShortVersionString: 1.0.0
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Entitlements/AnicatWidgets.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.anicat.ios.widgets
+        TARGETED_DEVICE_FAMILY: "1"
+        DEVELOPMENT_TEAM: ${ANICAT_DEVELOPMENT_TEAM}
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES

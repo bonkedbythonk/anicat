@@ -1,0 +1,70 @@
+name: Bug report
+description: Something in Anicat is broken or behaves wrongly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If nothing loads at all, AniList may be in an outage; check before filing.
+        Security problems go through [a private advisory](https://github.com/bonkedbythonk/anicat/security/advisories/new), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Press ...
+        3. See ...
+    validations:
+      required: false
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Mac
+        - iPhone
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Anime
+        - Manga
+        - Light novels
+        - Films and TV
+        - Not specific to one mode
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: Anicat version
+      description: Anicat > About Anicat in the menu bar shows it. Include the -nightly part if you are on the nightly.
+      placeholder: "1.0.0 or 1.0.1-nightly.202609160300"
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: macOS or iOS version
+      placeholder: "macOS 26.0"
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Settings > Advanced > Reveal Log File opens ~/Library/Logs/Anicat/anicat.log. Paste the lines around the problem.
+      render: text
+    validations:
+      required: false

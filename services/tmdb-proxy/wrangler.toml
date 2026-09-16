@@ -1,0 +1,13 @@
+# Anicat's TMDB proxy. Deploy with `npx wrangler deploy` from this directory.
+#
+# The TMDB key is NOT here and must never be: it is a secret, set once with
+# `npx wrangler secret put TMDB_KEY`, stored by Cloudflare and readable by
+# nobody afterwards. Everything in this file is public the moment the repo is.
+name = "anicat-tmdb"
+main = "worker.js"
+compatibility_date = "2026-09-08"
+
+# The free plan covers this comfortably: every response is edge-cached for
+# six hours to a day (see `cacheSeconds` in worker.js), so a row that a
+# thousand installs open is a handful of requests to TMDB, not a thousand.
+workers_dev = true

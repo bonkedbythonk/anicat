@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Rust core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: cargo clippy
+        working-directory: core
+        run: cargo clippy --lib --tests -- -D warnings
+
+      # Tests that hit the network are #[ignore]d and stay that way here.
+      - name: cargo test
+        working-directory: core
+        run: cargo test --lib
+
+  apple:
+    name: Swift package
+    # macos-26, not macos-15: the image's Xcode decides the Swift version, and
+    # macos-15 tops out a generation behind what this project is developed,
+    # packaged and released on. The gap is not academic -- 6.3 infers that a
+    # `queue: .main` callback is the main actor and the older compiler does
+    # not, so main-actor writes, generated uniffi records and notification
+    # closures were all rejected here while every local build was green. CI
+    # that disagrees with the toolchain the release is cut with reports on a
+    # build nobody ships.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      # Produces Frameworks/AnicatCore.xcframework and the generated Swift
+      # bindings, none of which are committed.
+      - name: Build xcframework
+        run: bash scripts/build-xcframework.sh
+
+      - name: swift build
+        working-directory: AnicatApple
+        run: swift build --product Anicat
+
+      # AnicatUI compiles for the iOS Simulator since 2026-09-06 and has to
+      # stay that way; AppKit leaking into a shared view only shows up here.
+      - name: swift build (iOS Simulator)
+        working-directory: AnicatApple
+        run: swift build --product AnicatUI --triple arm64-apple-ios18.0-simulator --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" --scratch-path .build-ios
+
+      # The compile check above builds a library and stops there: it never
+      # links an executable, never reads Info.plist and never produces a
+      # bundle, so a missing product dependency, a malformed plist key or a
+      # target that cannot bundle all pass it. Only building the app catches
+      # those, and the project is generated rather than committed, so CI has
+      # to run xcodegen before it can build anything. `ARCHS=arm64` because a
+      # generic simulator destination asks for x86_64 as well, and
+      # build-xcframework.sh prelinks aarch64 targets only — the link then
+      # fails on a slice no runner needs.
+      - name: Build the iOS app
+        working-directory: AnicatApple
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project Anicat.xcodeproj -scheme AnicatiOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build-xcode \
+            ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
+
+      # Not `swift test`: several suites call the live AniList API and fail
+      # outright during its outages, which would make CI red for reasons
+      # unrelated to the change.

@@ -1,0 +1,819 @@
+import SwiftUI
+import AnicatCoreKit
+
+/// Cinema mode: films and series from TMDB.
+///
+/// A parallel world rather than more shelves in the anime one. The two
+/// catalogs number their titles independently -- AniList 550, TMDB movie 550
+/// and TMDB series 550 are three unrelated titles -- so a blended shelf could
+/// not say which id a card was holding, and the detail page it opened would
+/// be a coin flip. Everything below therefore carries a catalog beside every
+/// id, exactly as the engine's `MediaKey` does.
+///
+/// What is *not* duplicated is playback: `resolveAndPlay` has taken a catalog
+/// since it was written, the registry keys watch history on one, and the
+/// engine's `resolve_cinema_stream` picks a release by year or by SxxEyy.
+/// Pressing play on a film runs the same path as pressing play on an episode.
+extension AppModel {
+    /// One row of the cinema home page.
+    public struct CinemaShelf: Identifiable, Sendable, Equatable, Codable {
+        /// The engine's own row name (`trending_movies`), which is both the
+        /// id and what `cinemaRow` is called with.
+        public let id: String
+        public let title: String
+        public let items: [MediaCard.Item]
+    }
+
+    static func loadAppMode() -> AppMode {
+        let raw = UserDefaults.standard.string(forKey: appModeDefaultsKey) ?? ""
+        return AppMode(rawValue: raw) ?? .anime
+    }
+
+    /// The heading for one of the engine's row names.
+    ///
+    /// Written here rather than in the engine because it is display text: the
+    /// engine names the TMDB endpoint, the app decides what to call it. An
+    /// unknown row still gets a readable heading rather than being dropped,
+    /// since the engine is the side that decides which rows exist.
+    nonisolated static func cinemaShelfTitle(_ kind: String) -> String {
+        switch kind {
+        case "trending_movies": return "Trending Films"
+        case "trending_series": return "Trending Series"
+        case "popular_movies": return "Popular Films"
+        case "popular_series": return "Popular Series"
+        case "top_movies": return "Top Rated Films"
+        case "top_series": return "Top Rated Series"
+        case "upcoming_movies": return "Coming Soon"
+        case "airing_series": return "On the Air"
+        default: return kind.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    /// A cinema card, with the catalog its id belongs to carried on it.
+    nonisolated static func cinemaCard(_ summary: MediaSummary) -> MediaCard.Item {
+        MediaCard.Item(
+            id: summary.catalogId,
+            title: summary.title,
+            coverImageURL: URL(string: summary.coverImage),
+            score: summary.averageScore.map(Int.init),
+            totalEpisodesOrChapters: summary.episodes.map(Int.init),
+            catalog: summary.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        )
+    }
+
+    /// Hands a key typed in Settings to the live engine.
+    ///
+    /// `cinemaAvailable` was read once, at construction, from a client that
+    /// held whatever the constructor was given -- so pasting a key changed
+    /// nothing at all until the next launch, and the Settings card had to
+    /// carry "Restart to apply" to explain it. An empty field falls back to
+    /// the build's own credential, which is why this re-reads
+    /// `hasTmdbKey()` rather than assuming the paste succeeded.
+    public func applyTmdbKey() {
+        guard let engine else { return }
+        engine.setTmdbKey(key: TmdbCredential.key)
+        cinemaAvailable = engine.hasTmdbKey()
+        // A key taken away while cinema is showing leaves the rail pointed at
+        // shelves nothing can fill.
+        if !cinemaAvailable, appMode == .cinema { setAppMode(.anime) }
+    }
+
+    /// Switches worlds. The home page each mode lands on is loaded on the
+    /// way in rather than on first draw, so the switch is not a blank page
+    /// followed by shelves appearing one by one.
+    public func setAppMode(_ mode: AppMode) {
+        guard mode != appMode else { return }
+        guard mode == .anime || cinemaAvailable else { return }
+        appMode = mode
+        // Always the new mode's first page, not "keep the section if the new
+        // mode has it": the two rails share cases (Films is the Manga case,
+        // Series the Light Novels case), so a switch back from Films landed
+        // on Manga -- a page the viewer never chose. Settings and Downloads
+        // are the same in both worlds and stay.
+        if !SidebarView.NavSection.systemItems.contains(currentNavSection) {
+            currentNavSection = mode == .cinema ? .manga : .upNext
+        }
+        // `clearDetail`, not `closeDetail`: the stacks hold pages from the
+        // world being left, and a back step across modes is exactly the
+        // mixing this switch is supposed to prevent.
+        clearDetail()
+        if mode == .cinema {
+            Task {
+                if !isCinemaLoading { await loadCinemaHome() }
+                await loadCinemaLibrary()
+                redirectHomeInCinema()
+            }
+        }
+        loadWatchStats()
+    }
+
+    /// Cinema has no Home: it was the same shelves Films and Series draw,
+    /// under a resume queue that now heads the Watching page. A restored
+    /// or keyed `.upNext` lands on Films.
+    func redirectHomeInCinema() {
+        guard appMode == .cinema, currentNavSection == .upNext else { return }
+        currentNavSection = .manga
+    }
+
+    /// Fills the cinema home rows.
+    ///
+    /// The rows are fetched together: they are eight independent TMDB
+    /// endpoints, and serially this is eight round trips stacked end to end
+    /// on a page that shows nothing until the last of them lands. A row that
+    /// fails contributes nothing and does not take the page down with it --
+    /// TMDB retires an endpoint far more readily than it retires the API.
+    public func loadCinemaHome() async {
+        guard let engine, cinemaAvailable else { return }
+        isCinemaLoading = cinemaShelves.isEmpty
+        defer { isCinemaLoading = false }
+
+        let kinds = engine.cinemaRowKinds()
+        var built: [CinemaShelf] = []
+        var failure: String?
+        await withTaskGroup(of: (Int, [MediaSummary], String?).self) { group in
+            for (index, kind) in kinds.enumerated() {
+                group.addTask {
+                    do {
+                        let rows = try await engine.cinemaRow(kind: kind, page: 1)
+                        AppLog.write("cinema row \(kind): \(rows.count)")
+                        return (index, rows, nil)
+                    } catch {
+                        AppLog.write("cinema row \(kind) failed: \(error)")
+                        return (index, [], "\(error)")
+                    }
+                }
+            }
+            var byIndex: [Int: [MediaSummary]] = [:]
+            for await (index, rows, error) in group {
+                byIndex[index] = rows
+                if failure == nil { failure = error }
+            }
+            for (index, kind) in kinds.enumerated() {
+                let rows = byIndex[index] ?? []
+                guard !rows.isEmpty else { continue }
+                built.append(
+                    CinemaShelf(
+                        id: kind,
+                        title: Self.cinemaShelfTitle(kind),
+                        items: rows.map(Self.cinemaCard)
+                    )
+                )
+            }
+        }
+        // One line per load, always: a row that comes back empty is silent
+        // otherwise, and a page with one shelf of eight looked like a layout
+        // choice rather than seven failed requests.
+        AppLog.write("cinema home: " + kinds.map { kind in
+            "\(kind)=\(built.first { $0.id == kind }?.items.count ?? 0)"
+        }.joined(separator: " ") + (failure.map { " first failure: \($0)" } ?? ""))
+        cinemaShelves = built
+        // Only when nothing at all arrived: one retired endpoint out of eight
+        // is not a page worth explaining away.
+        cinemaError = built.isEmpty ? failure : nil
+    }
+
+    /// The Search section's results: a keyword search when there is text in
+    /// the field, a filtered browse when there is not.
+    ///
+    /// TMDB will not do both at once -- `/search` ignores a genre and
+    /// `/discover` ignores a query -- so this picks one rather than
+    /// pretending the filter row applies to a keyword search.
+    public func searchCinema(_ query: String, page: Int32 = 1, append: Bool = false) async {
+        guard let engine, cinemaAvailable else { return }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if append { isLoadingMoreCinema = true }
+        defer { isLoadingMoreCinema = false }
+
+        let results: [MediaSummary]
+        if trimmed.isEmpty {
+            results = (try? await engine.cinemaDiscover(
+                isSeries: cinemaFilter.isSeries,
+                genreId: cinemaFilter.genreId,
+                year: cinemaFilter.year.map(Int32.init),
+                sort: cinemaFilter.sort,
+                page: page
+            )) ?? []
+        } else {
+            results = (try? await engine.searchCinema(query: trimmed, limit: 40, page: page)) ?? []
+            // The field may have moved on while this was in flight; the anime
+            // search guards the same way.
+            guard searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+        }
+
+        let cards = results.map(Self.cinemaCard)
+        cinemaSearchResults = append ? cinemaSearchResults + cards : cards
+        cinemaSearchPage = page
+        // TMDB answers twenty to a page and says nothing useful about the
+        // total for a filtered browse, so a short page is the end of it.
+        cinemaSearchHasMore = results.count >= 20
+    }
+
+    /// The genre list behind the filter row. Loaded once per kind per
+    /// launch; the engine caches it for six hours on top of that.
+    public func loadCinemaGenres() async {
+        guard let engine, cinemaAvailable else { return }
+        let rows = (try? await engine.cinemaGenres(isSeries: cinemaFilter.isSeries)) ?? []
+        cinemaGenres = rows
+    }
+
+    /// Re-runs the Search section after a filter change, from page one --
+    /// keeping the old page number would ask for page 4 of a list nobody has
+    /// seen page 1 of.
+    public func applyCinemaFilter(_ change: (inout CinemaFilter) -> Void) {
+        var filter = cinemaFilter
+        change(&filter)
+        guard filter != cinemaFilter else { return }
+        let kindChanged = filter.isSeries != cinemaFilter.isSeries
+        cinemaFilter = filter
+        Task {
+            if kindChanged {
+                // Film genres and series genres are different lists, and a
+                // genre id from one means something else in the other.
+                cinemaFilter.genreId = nil
+                await loadCinemaGenres()
+            }
+            await searchCinema(searchQuery, page: 1, append: false)
+        }
+    }
+
+    /// Opens the Films or Series section on its own browse.
+    ///
+    /// Not `applyCinemaFilter` plus a search: that one fires its own
+    /// `searchCinema(searchQuery)` from a detached task, so arriving at
+    /// Series with "dune" still in the search field raced a keyword search
+    /// against this browse and the keyword one landed last -- the Series
+    /// section drew the Dune results. The kind is set here and exactly one
+    /// request follows it.
+    public func openCinemaBrowse(isSeries: Bool) async {
+        let kindChanged = cinemaFilter.isSeries != isSeries
+        cinemaFilter.isSeries = isSeries
+        if kindChanged {
+            // Film genres and series genres are different lists, and a genre
+            // id from one means something else in the other.
+            cinemaFilter.genreId = nil
+            await loadCinemaGenres()
+        } else if cinemaGenres.isEmpty {
+            await loadCinemaGenres()
+        }
+        await searchCinema("", page: 1, append: false)
+    }
+
+    /// The palette's own search: a handful of matches, no state written.
+    /// `searchCinema` fills the Search section and would fight the field
+    /// there with what someone typed into ⌘K.
+    public func quickSearchCinema(_ query: String) async -> [MediaCard.Item] {
+        guard let engine, cinemaAvailable else { return [] }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return [] }
+        let results = (try? await engine.searchCinema(query: trimmed, limit: 8, page: 1)) ?? []
+        return results.map(Self.cinemaCard)
+    }
+
+    /// Opens a cinema card's detail page.
+    ///
+    /// A separate entry point from `openDetail`, which is AniList's: that
+    /// path keys its snapshot cache, its history stack and its refreshes on
+    /// `(id, isManga)` alone, and a TMDB id dropped into it would collide
+    /// with whatever anime shares the number. This one writes the same
+    /// observable state the page draws from and marks the catalog, so every
+    /// refresh path on that page knows not to run.
+    public func openCinemaDetail(
+        catalog: MediaCard.CardCatalog,
+        id: Int64,
+        title: String? = nil,
+        coverURL: URL? = nil
+    ) async {
+        guard let engine, catalog != .anilist else { return }
+        let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+
+        // The page being left is a step back, exactly as it is on the anime
+        // side -- otherwise a recommendation or a cast credit opened from
+        // here had no way back to what opened it, and Back popped whatever
+        // AniList page was last on the stack instead.
+        if let current = selectedMediaDetails, current.id != id, !isDetailLoading {
+            detailHistory.append(currentDetailStep(current))
+            detailForwardStack = []
+        }
+        activeDetailTask?.cancel()
+        activeDetailExtrasTask?.cancel()
+        loadingCatalogId = id
+        detailGeneration += 1
+        let generation = detailGeneration
+
+        // Render the last snapshot before the fetch, exactly as the AniList
+        // path does. Without it every open of a title already seen was a
+        // spinner for as long as TMDB took, which is what made cinema feel
+        // slower than anime rather than any difference in the animations.
+        cinemaExtras = nil
+        isCinemaExtrasLoading = true
+        cinemaListStatus = try? engine.cinemaListStatus(
+            catalog: catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv, catalogId: id
+        )
+        let cached = DetailCache.load(id: id, isManga: false, catalog: catalog)
+        if var cached {
+            isDetailLoading = false
+            // A snapshot written before `Details` carried a catalog decodes
+            // without one, and would read as AniList for as long as it is on
+            // screen -- long enough to draw AniList's list controls over a
+            // film. The catalog is known here: it is the one being opened.
+            cached.details.catalog = catalog
+            withAnimation(.easeInOut(duration: 0.32)) {
+                selectedEpisodes = cached.episodes
+                selectedMangaChapters = []
+                selectedRelations = cached.relations
+                selectedRecommendations = cached.recommendations
+                selectedCharacters = cached.characters
+                selectedDiscussions = []
+                selectedMediaDetails = cached.details
+            }
+        } else {
+            isDetailLoading = true
+            withAnimation(.easeInOut(duration: 0.32)) {
+                selectedEpisodes = []
+                selectedMangaChapters = []
+                selectedRelations = []
+                selectedRecommendations = []
+                selectedCharacters = []
+                selectedDiscussions = []
+                selectedMediaDetails = HeroBanner.Details(
+                    id: id,
+                    title: title ?? "Loading...",
+                    coverURL: coverURL,
+                    format: catalog == .tmdbMovie ? "MOVIE" : "TV",
+                    catalog: catalog
+                )
+            }
+        }
+
+        defer { loadingCatalogId = nil }
+        guard let d = try? await engine.cinemaDetail(catalog: ffiCatalog, catalogId: id) else {
+            isDetailLoading = false
+            // No extras task will start to settle it.
+            isCinemaExtrasLoading = false
+            // A snapshot on screen is better than an error over it: the page
+            // is already readable and the fetch was only a refresh.
+            if cached == nil { errorMessage = "Could not load this title from TMDB." }
+            return
+        }
+        guard currentDetailCatalog == catalog, selectedMediaDetails?.id == id else { return }
+
+        selectedEpisodes = Self.episodeItems(from: d)
+        let details = Self.cinemaDetails(from: d, catalog: catalog)
+        withAnimation(.easeInOut(duration: 0.24)) {
+            selectedMediaDetails = details
+            selectedRecommendations = d.recommendations.map {
+                MediaDetailView.RecommendationItem(
+                    id: $0.catalogId,
+                    title: $0.title,
+                    format: $0.format,
+                    coverURL: URL(string: $0.coverImage),
+                    averageScore: $0.averageScore.map(Int.init)
+                )
+            }
+            isDetailLoading = false
+        }
+
+        // The cast and the facts panel come from the same cached TMDB detail
+        // the page just loaded, so these are two more calls and no more
+        // requests. Fetched after the page is on screen rather than before:
+        // nothing above the tabs waits on them.
+        activeDetailExtrasTask = Task { [weak self] in
+            guard let self else { return }
+            async let castTask = engine.cinemaCast(catalog: ffiCatalog, catalogId: id)
+            async let extrasTask = engine.cinemaExtras(catalog: ffiCatalog, catalogId: id)
+            let cast = (try? await castTask) ?? []
+            let extras = try? await extrasTask
+            // Settled whichever way the fetch went, but only by the load that
+            // started it: a newer page owns the flag once it has begun.
+            if self.detailGeneration == generation {
+                self.isCinemaExtrasLoading = false
+            }
+            // currentDetailCatalog/selectedMediaDetails?.id alone are not
+            // enough: loadDetail's own "already showing this id" fast path
+            // can leave both looking unchanged while a new (possibly
+            // AniList) load is already in flight, so a stale generation
+            // number is the only thing this task can trust.
+            guard !Task.isCancelled,
+                  self.detailGeneration == generation,
+                  self.currentDetailCatalog == catalog,
+                  self.selectedMediaDetails?.id == id else { return }
+            withAnimation(.smooth(duration: 0.25)) {
+                self.selectedCharacters = cast.map {
+                    MediaDetailView.CharacterItem(
+                        id: $0.id,
+                        name: $0.name,
+                        imageURL: $0.imageUrl.flatMap(URL.init(string:)),
+                        role: $0.role,
+                        voiceActorName: nil,
+                        voiceActorImageURL: nil
+                    )
+                }
+                self.cinemaExtras = extras
+            }
+        }
+
+        DetailCache.save(
+            DetailCache.Snapshot(
+                details: details,
+                episodes: selectedEpisodes,
+                mangaChapters: [],
+                relations: [],
+                recommendations: selectedRecommendations,
+                characters: selectedCharacters,
+                discussions: []
+            ),
+            id: id,
+            isManga: false,
+            catalog: catalog
+        )
+    }
+
+    /// A cinema title's header, mapped from `MediaDetail`.
+    ///
+    /// Built here rather than through the AniList path's own mapping: half of
+    /// what that fills in -- the list entry, the score, the fixtures that
+    /// stand in for personal data in screenshot mode -- is AniList's own and
+    /// has no counterpart on a TMDB title. Shared with the prefetch, so a
+    /// card hovered and a card opened write the same snapshot.
+    nonisolated static func cinemaDetails(
+        from d: MediaDetail,
+        catalog: MediaCard.CardCatalog
+    ) -> HeroBanner.Details {
+        HeroBanner.Details(
+            id: d.catalogId,
+            title: d.title,
+            romajiTitle: d.romajiTitle,
+            bannerURL: d.bannerImage.flatMap(URL.init(string:)),
+            coverURL: URL(string: d.coverImage),
+            format: d.format,
+            year: d.year.map(Int.init),
+            studio: d.studio,
+            synopsis: d.synopsis,
+            genres: d.genres,
+            averageScore: d.averageScore.map(Int.init),
+            nextEpisodeText: nil,
+            status: d.status,
+            episodeCount: d.episodeCount.map(Int.init),
+            resumeEpisode: d.resumeEpisode.map(Int.init),
+            resumeSeconds: d.resumeSeconds.map(Int.init),
+            prequel: nil,
+            sequel: nil,
+            listStatus: nil,
+            userScore: nil,
+            listEntryId: nil,
+            listProgress: nil,
+            isFavourite: false,
+            malId: nil,
+            trailerSite: d.trailerSite,
+            trailerId: d.trailerId,
+            trailerThumbnail: d.trailerThumbnail,
+            studios: [],
+            catalog: catalog
+        )
+    }
+
+    /// Warms the snapshot for a card the pointer is over, so opening it
+    /// paints from disk instead of from a spinner. Same idea as
+    /// `prefetchDetail` on the AniList side, and the same background
+    /// priority: it must never be what a real fetch is queued behind.
+    public func prefetchCinemaDetail(catalog: MediaCard.CardCatalog, id: Int64) {
+        guard let engine, catalog != .anilist, cinemaAvailable else { return }
+        guard DetailCache.load(id: id, isManga: false, catalog: catalog) == nil else { return }
+        guard !activePrefetches.contains(id) else { return }
+        activePrefetches.insert(id)
+        let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        Task(priority: .background) { [weak self] in
+            defer { self?.activePrefetches.remove(id) }
+            guard let d = try? await engine.cinemaDetail(catalog: ffiCatalog, catalogId: id) else { return }
+            DetailCache.save(
+                DetailCache.Snapshot(
+                    details: Self.cinemaDetails(from: d, catalog: catalog),
+                    episodes: Self.episodeItems(from: d),
+                    mangaChapters: [],
+                    relations: [],
+                    recommendations: [],
+                    characters: [],
+                    discussions: []
+                ),
+                id: id,
+                isManga: false,
+                catalog: catalog
+            )
+        }
+    }
+
+    /// The catalog a cinema id belongs to, as the resume queue knows it.
+    /// `UpNextQueueView.QueueEntry` carries an id and no catalog -- it
+    /// predates there being two -- so the row it was built from is the
+    /// answer.
+    public func cinemaCatalog(forId id: Int64) -> MediaCard.CardCatalog {
+        cinemaContinueWatching.first { $0.id == id }?.catalog ?? .tmdbMovie
+    }
+
+    /// Play from the resume queue: open the title's page first, then start
+    /// the stream over it. Closing the player then lands on the page of what
+    /// was just watched rather than back on the home rows, and a resolve
+    /// failure has that page underneath it -- the same shape as the anime
+    /// shelves' own Play.
+    public func playCinemaFromQueue(id: Int64, episode: Int, title: String, coverURL: URL?) async {
+        let catalog = cinemaCatalog(forId: id)
+        await openCinemaDetail(catalog: catalog, id: id, title: title, coverURL: coverURL)
+        await playCinemaEpisode(episode)
+    }
+
+    /// Puts the open title on the local list, or takes it off.
+    public func setCinemaListStatus(_ status: String?) {
+        guard let engine, let details = selectedMediaDetails, currentDetailCatalog != .anilist else { return }
+        let catalog: FfiCatalog = currentDetailCatalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        do {
+            try engine.setCinemaListStatus(catalog: catalog, catalogId: details.id, status: status)
+            cinemaListStatus = status
+            playFeedback(.watchedTick)
+            Task { await loadCinemaWatchlist() }
+        } catch {
+            errorMessage = "Could not update the list: \(error.localizedDescription)"
+        }
+    }
+
+    /// The local list for the Watching section's second tab.
+    public func loadCinemaWatchlist() async {
+        guard let engine, cinemaAvailable else { return }
+        let rows = (try? engine.cinemaList(status: cinemaWatchlistFilter)) ?? []
+        var items: [MediaCard.Item] = []
+        for row in rows.prefix(60) {
+            let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+            guard let known = await cinemaTitle(catalog: catalog, id: row.catalogId) else { continue }
+            let key = CinemaTitleKey(catalog: catalog, id: row.catalogId)
+            cinemaKnownTitles[key] = known.title
+            cinemaKnownCovers[key] = known.coverURL
+            items.append(
+                MediaCard.Item(
+                    id: row.catalogId,
+                    title: known.title,
+                    coverImageURL: known.coverURL,
+                    catalog: catalog
+                )
+            )
+        }
+        cinemaWatchlist = items
+    }
+
+    /// Re-reads the open cinema page after playback, so the episode row that
+    /// was just watched shows its tick and the resume position moves.
+    ///
+    /// Not `openCinemaDetail`: that resets the page, the scroll and the
+    /// season picker, which is the wrong thing to do to a page the viewer is
+    /// already looking at. The TMDB detail is cached, so this is the
+    /// registry's own progress and no request.
+    /// Forgets every local watch row of a title, which is what takes it off
+    /// Continue Watching and the resume queue: both are built from
+    /// `watchActivity`, and a row zeroed rather than deleted would stay in
+    /// the feed and the statistics as something watched.
+    public func removeFromCinemaContinueWatching(id: Int64) async {
+        guard let engine else { return }
+        let catalog: FfiCatalog = cinemaCatalog(forId: id) == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        await withCheckedContinuation { continuation in
+            engineIOQueue.async {
+                try? engine.clearProgressFrom(catalog: catalog, catalogId: id, episodeNumber: 1)
+                continuation.resume()
+            }
+        }
+        await loadCinemaLibrary()
+    }
+
+    func refreshCinemaDetailAfterPlayback(id: Int64) async {
+        guard let engine, currentDetailCatalog != .anilist,
+              selectedMediaDetails?.id == id else { return }
+        let catalog: FfiCatalog = currentDetailCatalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        guard let d = try? await engine.cinemaDetail(catalog: catalog, catalogId: id),
+              selectedMediaDetails?.id == id else { return }
+        selectedEpisodes = Self.episodeItems(from: d)
+        selectedMediaDetails = Self.cinemaDetails(from: d, catalog: currentDetailCatalog)
+    }
+
+    /// One cast member, for the sheet. Cached by the engine for a day, so
+    /// reopening the same face costs nothing.
+    public func cinemaPerson(id: Int64) async -> CinemaPerson? {
+        guard let engine, cinemaAvailable else { return nil }
+        return try? await engine.cinemaPerson(personId: id)
+    }
+
+    public func openCinemaPerson(id: Int64, name: String) {
+        openCinemaPersonName = name
+        openCinemaPersonId = id
+    }
+
+    /// Plays one episode of the open cinema title, or the film itself.
+    public func playCinemaEpisode(_ number: Int) async {
+        guard let details = selectedMediaDetails, currentDetailCatalog != .anilist else { return }
+        let catalog: FfiCatalog = currentDetailCatalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        do {
+            _ = try await resolveAndPlay(
+                catalog: catalog,
+                catalogId: details.id,
+                episode: Int64(number),
+                title: details.title
+            )
+        } catch is CancellationError {
+            // The viewer pressed Cancel on the resolving card. Caught with
+            // everything else, it raised "Could not play <title>" and the
+            // error sound for their own click.
+        } catch {
+            // No "Could not play <title>:" lead: `resolveAndPlay` throws a
+            // `PlaybackFailure` whose description is already the sentence.
+            errorMessage = error.localizedDescription
+            playFeedback(.error)
+        }
+    }
+}
+
+extension AppModel {
+    /// The catalog a play from the open detail page belongs to.
+    ///
+    /// The page itself carries only an id -- `HeroBanner.Details` predates
+    /// there being a second catalog -- so this is what keeps a press of Play
+    /// on a film from resolving the anime that happens to share its number.
+    public var playbackCatalogForOpenDetail: FfiCatalog {
+        switch currentDetailCatalog {
+        case .tmdbMovie: return .tmdbMovie
+        case .tmdbTv: return .tmdbTv
+        case .anilist: return .anilist
+        }
+    }
+}
+
+extension AppModel {
+    /// Continue-watching and history for cinema mode, out of the local
+    /// registry.
+    ///
+    /// Nothing here is AniList's: a film has no list entry and no progress
+    /// anywhere but this device, so the registry is the only source and the
+    /// titles have to be found separately. A title already opened has a
+    /// detail snapshot on disk and costs nothing; anything else is one
+    /// TMDB detail, cached for a day, and only for rows actually shown.
+    public func loadCinemaLibrary() async {
+        guard let engine, cinemaAvailable else { return }
+        let rows = ((try? engine.watchActivity(limit: 200)) ?? [])
+            .filter { $0.catalog != .anilist }
+        cinemaActivity = rows
+
+        // Newest first, one entry per title: a binge leaves ten rows for one
+        // show and the shelf wants the show, not the episodes.
+        var seen = Set<CinemaTitleKey>()
+        var ordered: [ActivityRow] = []
+        for row in rows.sorted(by: { $0.watchedAt > $1.watchedAt })
+            where seen.insert(CinemaTitleKey(catalog: row.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv, id: row.catalogId)).inserted {
+            ordered.append(row)
+        }
+
+        var items: [MediaCard.Item] = []
+        for row in ordered.prefix(24) {
+            let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+            guard let known = await cinemaTitle(catalog: catalog, id: row.catalogId) else { continue }
+            let key = CinemaTitleKey(catalog: catalog, id: row.catalogId)
+            cinemaKnownTitles[key] = known.title
+            cinemaKnownCovers[key] = known.coverURL
+            items.append(
+                MediaCard.Item(
+                    id: row.catalogId,
+                    title: known.title,
+                    coverImageURL: known.coverURL,
+                    progress: Int(row.episodeNumber),
+                    catalog: catalog
+                )
+            )
+        }
+        cinemaContinueWatching = items
+
+        // The resume queue: where each title actually stopped, which the
+        // activity rows do not carry -- they say an episode was watched, not
+        // how far into it. One registry read per row, no network.
+        var queue: [UpNextQueueView.QueueEntry] = []
+        for item in items.prefix(12) {
+            let ffiCatalog: FfiCatalog = item.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+            let episode = Int64(item.progress ?? 1)
+            let progress = try? engine.getProgress(
+                catalog: ffiCatalog, catalogId: item.id, episodeNumber: episode
+            )
+            let percent: Double = {
+                guard let progress, progress.duration > 0 else { return 0 }
+                return Double(progress.stopTime) / Double(progress.duration) * 100
+            }()
+            // Past the watched threshold the queue should offer the *next*
+            // one, the same way the anime queue does, rather than replaying
+            // what was finished. A film has nothing after it.
+            let finished = percent >= 85
+            let isFilm = item.catalog == .tmdbMovie
+            if finished && isFilm { continue }
+            let next = finished ? episode + 1 : episode
+            queue.append(
+                UpNextQueueView.QueueEntry(
+                    id: item.id,
+                    title: item.title,
+                    thumbnailURL: item.coverImageURL,
+                    nextEpisodeOrChapter: Int(next),
+                    totalCount: item.totalEpisodesOrChapters ?? 0,
+                    progressPercent: finished ? 0 : percent,
+                    watchedTimeAgo: nil,
+                    hasNewEpisode: false,
+                    unit: isFilm ? "FILM" : "EP"
+                )
+            )
+        }
+        cinemaUpNext = queue
+        persistHomeCache()
+        // After the queue is built, so it has the list of what is followed.
+        Task { await checkForNewCinemaEpisodes() }
+    }
+
+    /// Names and illustrates a registry row from whichever map owns its
+    /// catalog. The History and Stats views used to be handed one dictionary
+    /// chosen by the mode showing, which meant a row of the other catalog was
+    /// looked up in the wrong map and drew a stranger's title.
+    public func registryTitle(catalog: FfiCatalog, id: Int64) -> String? {
+        switch catalog {
+        // `.mangaDex` identifies a provider's own record, not a catalog
+        // entry anything here has a name for; the row draws its bare id.
+        case .anilist, .mangaDex: return knownTitles[id]
+        case .tmdbMovie: return cinemaKnownTitles[CinemaTitleKey(catalog: .tmdbMovie, id: id)]
+        case .tmdbTv: return cinemaKnownTitles[CinemaTitleKey(catalog: .tmdbTv, id: id)]
+        }
+    }
+
+    public func registryCover(catalog: FfiCatalog, id: Int64) -> URL? {
+        switch catalog {
+        case .anilist, .mangaDex: return knownCovers[id]
+        case .tmdbMovie: return cinemaKnownCovers[CinemaTitleKey(catalog: .tmdbMovie, id: id)]
+        case .tmdbTv: return cinemaKnownCovers[CinemaTitleKey(catalog: .tmdbTv, id: id)]
+        }
+    }
+
+    /// What the newest aired episode of each followed series was, last time
+    /// this looked. Keyed by TMDB id.
+    static let lastSeenCinemaEpisodeKey = "anicat_last_seen_cinema_episode"
+
+    /// Announces series in the local list that have aired an episode since
+    /// the last check.
+    ///
+    /// TMDB has no airing feed, only `last_episode_to_air` on the series
+    /// detail -- which the page already fetches and the engine caches for a
+    /// day, so this costs nothing on top of opening the app. Only series
+    /// being watched or on the list are asked about: everything else would be
+    /// a request per title for news about something nobody is following.
+    @MainActor
+    public func checkForNewCinemaEpisodes() async {
+        guard let engine, cinemaAvailable,
+              SystemNotifications.areNewEpisodeNotificationsEnabled else { return }
+        var seen = (UserDefaults.standard.dictionary(forKey: Self.lastSeenCinemaEpisodeKey) as? [String: Int]) ?? [:]
+
+        let followed = (cinemaContinueWatching + cinemaWatchlist)
+            .filter { $0.catalog == .tmdbTv }
+        var asked = Set<Int64>()
+        for item in followed where asked.insert(item.id).inserted {
+            guard let extras = try? await engine.cinemaExtras(catalog: .tmdbTv, catalogId: item.id),
+                  let aired = extras.lastAiredEpisode else { continue }
+            let key = String(item.id)
+            let latest = Int(aired)
+            defer { seen[key] = latest }
+            // First look records only, like the anime check: everything
+            // already aired is new against an empty history.
+            guard let previous = seen[key], latest > previous else { continue }
+
+            let id = item.id
+            let title = item.title
+            let cover = item.coverImageURL
+            Task.detached(priority: .utility) {
+                await SystemNotifications.shared.notifyNewEpisode(
+                    catalogId: id,
+                    title: title,
+                    episode: latest,
+                    coverURL: cover,
+                    unit: .episode,
+                    catalog: .tmdbTv
+                )
+            }
+        }
+        UserDefaults.standard.set(seen, forKey: Self.lastSeenCinemaEpisodeKey)
+    }
+
+    /// A cinema title's name and poster: from the detail snapshot if this
+    /// device has one, otherwise from TMDB.
+    func cinemaTitle(
+        catalog: MediaCard.CardCatalog,
+        id: Int64
+    ) async -> (title: String, coverURL: URL?)? {
+        if let snapshot = DetailCache.load(id: id, isManga: false, catalog: catalog) {
+            return (snapshot.details.title, snapshot.details.coverURL)
+        }
+        let key = CinemaTitleKey(catalog: catalog, id: id)
+        if let cached = cinemaKnownTitles[key] {
+            return (cached, cinemaKnownCovers[key])
+        }
+        guard let engine else { return nil }
+        let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
+        guard let detail = try? await engine.cinemaDetail(catalog: ffiCatalog, catalogId: id) else {
+            return nil
+        }
+        return (detail.title, URL(string: detail.coverImage))
+    }
+}

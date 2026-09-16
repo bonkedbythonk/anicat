@@ -1,0 +1,4 @@
+module anicat_coreFFI {
+    header "anicat_coreFFI.h"
+    export *
+}

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/bonkedbythonk/anicat/security/advisories/new
+    about: Report privately. Do not open a public issue for security problems.
+  - name: Copyright or DMCA concerns
+    url: https://github.com/bonkedbythonk/anicat/blob/master/DISCLAIMER.md
+    about: Anicat hosts no content. Read the disclaimer before filing.

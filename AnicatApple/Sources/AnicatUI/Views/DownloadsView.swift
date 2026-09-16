@@ -1,0 +1,451 @@
+import SwiftUI
+import AnicatCoreKit
+#if os(macOS)
+import AppKit
+#endif
+
+/// Downloads: the offline queue.
+///
+/// Reads `AppModel.libraryDownloads`, populated by `AppModel.startDownload`
+/// whenever an episode row's download button is tapped anywhere in the app.
+/// The download itself runs on the Rust side and isn't tied to this view —
+/// this just renders whatever `libraryDownloads` currently says.
+public struct DownloadsView: View {
+    let downloads: [AppModel.LibraryDownload]
+    /// Opens the finished file (`AppModel.playDownloadedFile`). Optional
+    /// because the list is model state this view only reads: an unwired
+    /// caller shows no Play button rather than a dead one.
+    let onPlay: ((AppModel.LibraryDownload) -> Void)?
+    /// Drops the row from `libraryDownloads`. Optional for the same reason:
+    /// the list is model state this view only reads.
+    let onRemove: ((AppModel.LibraryDownload) -> Void)?
+    /// Chapters kept for offline reading. Episodes and chapters share this
+    /// page because they are one question -- what is on this disk -- and
+    /// separate pages would make the answer two places.
+    var chapters: [FfiOfflineChapter] = []
+    var chapterBytes: UInt64 = 0
+    /// What the library is held to, for the header. Zero means no cap.
+    var chapterCapBytes: UInt64 = 0
+    /// Names for the ids the registry stores, from whatever the app has
+    /// loaded. A chapter downloaded months ago may be on no shelf.
+    var titles: [Int64: String] = [:]
+    var onRemoveChapter: ((FfiOfflineChapter) -> Void)?
+    @State private var tab = "queue"
+
+    public init(
+        downloads: [AppModel.LibraryDownload],
+        onPlay: ((AppModel.LibraryDownload) -> Void)? = nil,
+        onRemove: ((AppModel.LibraryDownload) -> Void)? = nil,
+        chapters: [FfiOfflineChapter] = [],
+        chapterBytes: UInt64 = 0,
+        chapterCapBytes: UInt64 = 0,
+        titles: [Int64: String] = [:],
+        onRemoveChapter: ((FfiOfflineChapter) -> Void)? = nil
+    ) {
+        self.downloads = downloads
+        self.onPlay = onPlay
+        self.onRemove = onRemove
+        self.chapters = chapters
+        self.chapterBytes = chapterBytes
+        self.chapterCapBytes = chapterCapBytes
+        self.titles = titles
+        self.onRemoveChapter = onRemoveChapter
+    }
+
+    /// A row can be removed once its download has stopped moving. Removing a
+    /// `.downloading` row would put it straight back: `AppModel.startDownload`
+    /// polls every second and re-adds the row through `setLibraryDownload`
+    /// until the download reaches a terminal state, and there is no engine
+    /// call to cancel one in flight — so the button is not offered rather
+    /// than offered and silently undone.
+    ///
+    /// `nonisolated` because `View` is `@MainActor` and a static member
+    /// inherits that; the tests run off the main actor — see the note on
+    /// `MangaReaderView.prefetchIndices` for what that isolation did to the
+    /// test process.
+    nonisolated static func isRemovable(_ state: MediaDetailView.EpisodeDownloadState) -> Bool {
+        switch state {
+        case .downloading: return false
+        case .notStarted, .done, .failed: return true
+        }
+    }
+
+    /// Where a finished download landed, or nil while it is still coming
+    /// down. The only thing that distinguishes a row with a Play and a Reveal
+    /// from a row with neither.
+    nonisolated static func donePath(_ state: MediaDetailView.EpisodeDownloadState) -> String? {
+        if case .done(let path) = state { return path }
+        return nil
+    }
+
+    private var queued: [AppModel.LibraryDownload] {
+        downloads.filter {
+            switch $0.state {
+            case .notStarted, .downloading, .failed: return true
+            case .done: return false
+            }
+        }
+    }
+
+    private var offline: [AppModel.LibraryDownload] {
+        downloads.filter {
+            if case .done = $0.state { return true }
+            return false
+        }
+    }
+
+    /// Rows grouped under the title they belong to, titles in the order
+    /// their newest row appears.
+    ///
+    /// A flat list was fine with three downloads and unreadable with thirty:
+    /// four episodes of one show and two of another interleaved by whenever
+    /// each happened to finish. The files have always been grouped this way
+    /// on disk (`Downloads/Anicat/<title>/`); this is the page catching up.
+    private func grouped(_ rows: [AppModel.LibraryDownload]) -> [(String, [AppModel.LibraryDownload])] {
+        var order: [String] = []
+        var byTitle: [String: [AppModel.LibraryDownload]] = [:]
+        for row in rows {
+            // A row restored without a name is renamed in place once the
+            // lookup lands (`applyResolvedDownloadTitles`); the map is the
+            // shortcut for an AniList id a shelf has named since.
+            let title = row.catalog == .anilist && row.title == AppModel.placeholderTitle(row.catalogId)
+                ? (titles[row.catalogId] ?? row.title)
+                : row.title
+            if byTitle[title] == nil { order.append(title) }
+            byTitle[title, default: []].append(row)
+        }
+        return order.map { title in
+            // Episodes in their own order inside a show, whatever order they
+            // were fetched in.
+            (title, (byTitle[title] ?? []).sorted { $0.episode < $1.episode })
+        }
+    }
+
+    /// Chapters grouped the same way.
+    private var groupedChapters: [(String, [FfiOfflineChapter])] {
+        var order: [String] = []
+        var byTitle: [String: [FfiOfflineChapter]] = [:]
+        for row in chapters {
+            let title = titles[row.catalogId] ?? row.title ?? "Media \(row.catalogId)"
+            if byTitle[title] == nil { order.append(title) }
+            byTitle[title, default: []].append(row)
+        }
+        return order.map { title in
+            (title, byTitle[title] ?? [])
+        }
+    }
+
+    /// One group's heading: the title, and what it holds.
+    @ViewBuilder
+    private func groupHeader(_ title: String, count: Int, unit: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.sumiHeading(size: 13, weight: .semibold))
+                .foregroundColor(SumiTheme.foreground)
+                .lineLimit(1)
+            Spacer()
+            Text(Self.count(count, unit))
+                .sumiTabularMono(size: 10.5)
+                .foregroundColor(SumiTheme.muted)
+        }
+        .padding(.top, 4)
+    }
+
+    /// What the list's `.animation(value:)` watches. `LibraryDownload` is
+    /// not `Equatable` (see `AppModel.downloadSignature`), and a change that
+    /// keeps a row where it is (a percentage tick) must not re-run the row
+    /// transition, so this is ids plus done-ness: which rows exist and
+    /// which tab each belongs to.
+    private var membership: [String] {
+        downloads.map { "\($0.id):\(Self.donePath($0.state) != nil)" }
+    }
+
+    public var body: some View {
+        SumiPage {
+            SumiPageHeader(title: "Downloads", subtitle: summary)
+
+            SumiTabBar(
+                tabs: [("queue", "Queue"), ("offline", "Offline"), ("chapters", "Chapters")],
+                selection: $tab
+            )
+
+            Group {
+                if tab == "chapters" {
+                    chapterList
+                } else {
+                let shown = tab == "queue" ? queued : offline
+                if shown.isEmpty {
+                    SumiEmptyState(
+                        headline: tab == "queue" ? "Nothing queued" : "Nothing downloaded yet",
+                        detail: "Episodes queued from a show's episode list will appear here."
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(grouped(shown), id: \.0) { title, rows in
+                            VStack(spacing: 8) {
+                                groupHeader(title, count: rows.count, unit: "episode")
+                                ForEach(rows) { item in
+                                    DownloadRow(item: item, onPlay: onPlay, onRemove: onRemove)
+                                        .transition(.asymmetric(
+                                            insertion: .opacity,
+                                            removal: .scale(scale: 0.96).combined(with: .opacity)
+                                        ))
+                                }
+                            }
+                        }
+                    }
+                }
+                }
+            }
+            .animation(.smooth, value: tab)
+            // Without an animated value on the list a removed row vanished
+            // and the rows under it jumped up in the same frame. Keyed on
+            // membership rather than the array itself so a finished download
+            // leaving Queue for Offline animates out the same way.
+            .animation(.snappy, value: membership)
+        }
+    }
+
+    /// Chapters on disk, newest first, each removable.
+    @ViewBuilder
+    private var chapterList: some View {
+        if chapters.isEmpty {
+            SumiEmptyState(
+                headline: "Nothing kept for reading",
+                detail: "Download a chapter from a manga's chapter list, or a volume from a light novel's, to read it with no network."
+            )
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(groupedChapters, id: \.0) { title, rows in
+                VStack(spacing: 8) {
+                groupHeader(title, count: rows.count, unit: "item")
+                ForEach(rows, id: \.chapterId) { chapter in
+                    // Built before the view rather than inside the `Text`
+                    // initialisers. Two interpolations carrying a ternary
+                    // each put this body past the solver's budget in a
+                    // release build -- "unable to type-check this expression
+                    // in reasonable time" -- while the debug build compiled
+                    // it fine, so it only ever failed at packaging time.
+                    let isNovel = chapter.kind == .novel
+                    let heading = isNovel ? chapter.chapterNumber : "CH " + chapter.chapterNumber
+                    let unit = isNovel ? "chapters" : "pages"
+                    let detail = "\(chapter.pageCount) " + unit + " · " + Self.size(chapter.bytes)
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            // A novel row's "number" is the volume's name, so
+                            // prefixing it with CH would read "CH Volume 1".
+                            Text(heading)
+                                .font(.system(size: 13.5, weight: .medium))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            Text(detail)
+                                .sumiTabularMono(size: 11)
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                        Spacer()
+                        if let onRemoveChapter {
+                            Button {
+                                onRemoveChapter(chapter)
+                            } label: {
+                                Text("Remove")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(SumiTheme.muted)
+                            }
+                            .buttonStyle(.sumiPressable)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(SumiTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
+                }
+                }
+                }
+            }
+        }
+    }
+
+    /// What is here, named by what it actually is.
+    ///
+    /// It read "0 queued · 1 offline · 1 chapters" -- three counts, two of
+    /// them in units the page never says elsewhere, and one of them a plural
+    /// on a count of one. Empty parts are dropped rather than shown as zero:
+    /// a queue nobody is using is not news.
+    private var summary: String {
+        var parts: [String] = []
+        if !queued.isEmpty { parts.append("\(queued.count) queued") }
+        if !offline.isEmpty { parts.append(Self.count(offline.count, "episode")) }
+        if !chapters.isEmpty { parts.append("\(Self.count(chapters.count, "chapter")) · \(usage)") }
+        return parts.isEmpty ? "Nothing downloaded yet" : parts.joined(separator: " · ")
+    }
+
+    /// "1 episode", "2 episodes".
+    static func count(_ n: Int, _ noun: String) -> String {
+        "\(n) \(noun)\(n == 1 ? "" : "s")"
+    }
+
+    /// "14 MB of 2 GB", or just the size when there is no cap. The ceiling
+    /// is worth saying: chapters leave on their own once it is reached, and
+    /// a list that shrinks by itself needs to have said why in advance.
+    private var usage: String {
+        chapterCapBytes == 0
+            ? Self.size(chapterBytes)
+            : "\(Self.size(chapterBytes)) of \(Self.size(chapterCapBytes))"
+    }
+
+    /// Bytes as the page says them. Rounded: the exact figure is noise next
+    /// to "is this worth removing".
+    static func size(_ bytes: UInt64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        if mb >= 1024 { return String(format: "%.1f GB", mb / 1024) }
+        if mb >= 1 { return String(format: "%.0f MB", mb) }
+        return String(format: "%.0f KB", Double(bytes) / 1024)
+    }
+}
+
+private struct DownloadRow: View {
+    let item: AppModel.LibraryDownload
+    let onPlay: ((AppModel.LibraryDownload) -> Void)?
+    let onRemove: ((AppModel.LibraryDownload) -> Void)?
+
+    @State private var removeConfirming = false
+
+    private var donePath: String? { DownloadsView.donePath(item.state) }
+    private var isRemovable: Bool { DownloadsView.isRemovable(item.state) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            CachedAsyncImage(url: item.coverURL, maxPixelSize: 96) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                SumiTheme.muted.opacity(0.15)
+            }
+            .frame(width: 40, height: 56)
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.sumiHeading(size: 13, weight: .medium))
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(1)
+                Text("Episode \(item.episode)")
+                    .sumiTabularMono(size: 11)
+                    .foregroundColor(SumiTheme.muted)
+            }
+
+            Spacer(minLength: 12)
+
+            actions
+
+            statusView
+        }
+        .padding(10)
+        .background(SumiTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+        // Leaving the row and coming back should not still be one click away
+        // from deleting it.
+        .onHover { inside in if !inside { removeConfirming = false } }
+        // No hover on a phone, so the armed state timed out never: a
+        // Remove tapped once and forgotten was still one tap from deleting
+        // the file an hour later.
+        .task(id: removeConfirming) {
+            guard removeConfirming else { return }
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { removeConfirming = false }
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        HStack(spacing: 4) {
+            if let onPlay, donePath != nil {
+                iconButton("play.fill", help: "Play episode \(item.episode)") { onPlay(item) }
+            }
+
+            #if os(macOS)
+            if let path = donePath {
+                iconButton("folder", help: "Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                }
+            }
+            #endif
+
+            if let onRemove, isRemovable {
+                // Two-step confirm, same shape as Settings' maintenance
+                // buttons: the label becomes the question rather than a sheet
+                // interrupting a page that is otherwise all one-click rows.
+                Button {
+                    if removeConfirming {
+                        onRemove(item)
+                        removeConfirming = false
+                    } else {
+                        removeConfirming = true
+                    }
+                } label: {
+                    Group {
+                        if removeConfirming {
+                            Text("Remove?")
+                                .font(.system(size: 11, weight: .semibold))
+                        } else {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11.5))
+                        }
+                    }
+                    .foregroundColor(SumiTheme.dangerLight)
+                    .frame(height: 24)
+                    .padding(.horizontal, removeConfirming ? 8 : 6)
+                    .background(removeConfirming ? SumiTheme.danger.opacity(0.18) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .help(removeConfirming ? "Click again to remove this row" : "Remove from the list")
+            }
+        }
+        .animation(.snappy, value: removeConfirming)
+    }
+
+    private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11.5))
+                .foregroundColor(SumiTheme.muted)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .help(help)
+    }
+
+    @ViewBuilder
+    private var statusView: some View {
+        switch item.state {
+        case .notStarted:
+            Text("Queued").sumiTabularMono(size: 11).foregroundColor(SumiTheme.muted)
+        case .downloading(let percent):
+            HStack(spacing: 6) {
+                ProgressView(value: min(max(percent / 100, 0), 1))
+                    .frame(width: 80)
+                    // A linear `ProgressView` does not animate its value, and
+                    // `downloadStates` is a 1s poll, so the bar jumped a
+                    // second's worth of width at a time.
+                    .animation(.linear(duration: 1), value: percent)
+                Text("\(Int(percent))%")
+                    .sumiTabularMono(size: 11)
+                    .foregroundColor(SumiTheme.muted)
+                    .contentTransition(.numericText())
+            }
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(SumiTheme.successLight)
+        case .failed(let message):
+            Image(systemName: "exclamationmark.circle")
+                .foregroundColor(SumiTheme.dangerLight)
+                .help("Download failed: \(message)")
+        }
+    }
+}

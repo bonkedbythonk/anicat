@@ -1,0 +1,21 @@
+{
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "paw.svg",
+          "name" : "paw",
+          "fill-specializations" : [
+            { "value" : { "solid" : "srgb:0.20000,0.38039,0.49804,1.00000" } },
+            { "appearance" : "dark", "value" : { "solid" : "srgb:0.56078,0.72157,0.86275,1.00000" } }
+          ]
+        }
+      ],
+      "name" : "paw",
+      "shadow" : { "kind" : "neutral", "opacity" : 0.4 },
+      "specular" : false,
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    }
+  ],
+  "supported-platforms" : { "squares" : "shared" }
+}

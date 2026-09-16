@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The Anicat paw. Every icon and logo in the repo is rendered from this
+       file by scripts/build-brand-assets.sh; edit it there, not the PNGs.
+       Traced from the original raster icon (98% pixel overlap), with the
+       toes as true ellipses and the pad mirrored about x=512. -->
+  <g id="paw">
+    <ellipse cx="410" cy="331" rx="77" ry="117" transform="rotate(-9.5 410 331)"/>
+    <ellipse cx="614" cy="331" rx="77" ry="117" transform="rotate(9.5 614 331)"/>
+    <ellipse cx="273" cy="485" rx="73" ry="104" transform="rotate(-24.7 273 485)"/>
+    <ellipse cx="751" cy="485" rx="73" ry="104" transform="rotate(24.7 751 485)"/>
+    <path d="M512 470 C560 470 590 505 625 555 C660 605 730 640 730 712 C730 775 690 806 640 805 C590 804 550 785 512 785 C474 785 434 804 384 805 C334 806 294 775 294 712 C294 640 364 605 399 555 C434 505 464 470 512 470 Z"/>
+  </g>
+</svg>

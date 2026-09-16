@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest something Anicat should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Requests to add a specific piracy site, or to share where content can be found, will be closed.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What you would like
+      description: How you picture it working.
+    validations:
+      required: false
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Anime
+        - Manga
+        - Light novels
+        - Films and TV
+        - Not specific to one mode
+    validations:
+      required: false

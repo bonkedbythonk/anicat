@@ -1,0 +1,264 @@
+// AppModel, downloads domain: opening an episode that finished downloading
+// from the file the engine copied out, rather than from the swarm.
+
+import Foundation
+import SwiftUI
+import AnicatCoreKit
+
+extension AppModel {
+    /// The finished download of `episode`, if its row is still listed and
+    /// its file is still where the engine left it. A `.done` state records
+    /// where the copy landed, not that it is still there: the folder is the
+    /// user's own Downloads, and a file moved or deleted from it would
+    /// otherwise reach mpv as a path that opens nothing.
+    /// Restores what is already on disk, so the Downloads page and the
+    /// episode rows know about downloads made in earlier sessions.
+    ///
+    /// The engine's own download map is session-only and the files are not:
+    /// without this the app forgot every relaunch that it had an episode,
+    /// and pressing Play fetched a file already on the disk.
+    @MainActor
+    public func loadDownloadedEpisodes() {
+        guard let engine else { return }
+        // Files from before there was a table, and any a crash lost: the
+        // engine walks the Downloads folder and indexes what it can identify
+        // from the lists this side already has. Idempotent, so this runs at
+        // every launch and costs a directory walk.
+        let hints = Self.titleHints(
+            from: watchingItems + libraryItems + mangaReading,
+            knownTitles: knownTitles
+        )
+        if !hints.isEmpty {
+            _ = try? engine.scanDownloadsFolder(hints: hints)
+        }
+        let rows = (try? engine.downloadedEpisodes()) ?? []
+        // Rows for episodes the app is downloading right now win: they carry
+        // live progress, and the stored row only knows about finished ones.
+        var restored: [LibraryDownload] = []
+        var unnamedAniList: [Int64] = []
+        var unnamedCinema: [CinemaTitleKey] = []
+        for row in rows {
+            let catalog: MediaCard.CardCatalog = row.catalog == .tmdbMovie
+                ? .tmdbMovie
+                : (row.catalog == .tmdbTv ? .tmdbTv : .anilist)
+            // Matched on the catalog too: episode 1 of a film and episode 1
+            // of the anime sharing its number are two downloads, and without
+            // this the one already in flight suppressed the other's row.
+            let alreadyListed = libraryDownloads.contains {
+                $0.catalog == catalog
+                    && $0.catalogId == row.catalogId
+                    && $0.episode == Int(row.episodeNumber)
+            }
+            guard !alreadyListed else { continue }
+            // The engine's row has a title only when the download was
+            // started by this build; a file the folder scan adopted, or one
+            // from before the table, has none, and the page grouped it under
+            // its number until a shelf happened to name it.
+            let title = row.title ?? registryTitle(catalog: row.catalog, id: row.catalogId)
+            if title == nil {
+                switch catalog {
+                case .anilist: unnamedAniList.append(row.catalogId)
+                case .tmdbMovie, .tmdbTv: unnamedCinema.append(CinemaTitleKey(catalog: catalog, id: row.catalogId))
+                }
+            }
+            restored.append(
+                LibraryDownload(
+                    catalogId: row.catalogId,
+                    episode: Int(row.episodeNumber),
+                    title: title ?? Self.placeholderTitle(row.catalogId),
+                    // `knownCovers` is AniList's map alone; a film asked of it
+                    // by bare id answers with whatever anime shares the number.
+                    coverURL: registryCover(catalog: row.catalog, id: row.catalogId),
+                    state: .done(path: row.path),
+                    catalog: catalog
+                )
+            )
+        }
+        libraryDownloads.append(contentsOf: restored)
+        resolveMissingTitles(unnamedAniList)
+        if !unnamedCinema.isEmpty {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                for key in Set(unnamedCinema) {
+                    guard self.cinemaKnownTitles[key] == nil,
+                          let known = await self.cinemaTitle(catalog: key.catalog, id: key.id) else { continue }
+                    self.cinemaKnownTitles[key] = known.title
+                    if let cover = known.coverURL { self.cinemaKnownCovers[key] = cover }
+                }
+                self.applyResolvedDownloadTitles()
+            }
+        }
+    }
+
+    /// What a row draws until its title is known. One spelling, so the
+    /// rewrite below can tell a placeholder from a title.
+    nonisolated static func placeholderTitle(_ id: Int64) -> String { "Media \(id)" }
+
+    /// Renames the rows still carrying a placeholder once a lookup has
+    /// answered. Called from the title resolvers; a row's title is what the
+    /// Downloads page groups on, so the map alone changing would leave the
+    /// group heading on its number.
+    func applyResolvedDownloadTitles() {
+        var changed = false
+        var rows = libraryDownloads
+        for index in rows.indices where rows[index].title == Self.placeholderTitle(rows[index].catalogId) {
+            let row = rows[index]
+            let ffiCatalog: FfiCatalog = {
+                switch row.catalog {
+                case .tmdbMovie: return .tmdbMovie
+                case .tmdbTv: return .tmdbTv
+                case .anilist: return .anilist
+                }
+            }()
+            guard let title = registryTitle(catalog: ffiCatalog, id: row.catalogId) else { continue }
+            rows[index].title = title
+            changed = true
+        }
+        if changed { libraryDownloads = rows }
+    }
+
+    /// What the app can tell the engine about its own titles, for matching a
+    /// folder name back to a catalog id. Every name a title goes by, because
+    /// the folder was named after whichever one the download started with.
+    nonisolated static func titleHints(
+        from items: [MediaCard.Item],
+        knownTitles: [Int64: String]
+    ) -> [FfiTitleHint] {
+        var byId: [Int64: Set<String>] = [:]
+        for item in items where !item.title.isEmpty {
+            byId[item.id, default: []].insert(item.title)
+        }
+        for (id, title) in knownTitles where !title.isEmpty {
+            byId[id, default: []].insert(title)
+        }
+        return byId.map { id, titles in
+            FfiTitleHint(catalog: .anilist, catalogId: id, titles: Array(titles))
+        }
+    }
+
+    public func finishedDownload(
+        catalog: MediaCard.CardCatalog,
+        catalogId: Int64,
+        episode: Int
+    ) -> LibraryDownload? {
+        guard let download = libraryDownloads.first(where: {
+                  $0.catalog == catalog && $0.catalogId == catalogId && $0.episode == episode
+              }),
+              let path = DownloadsView.donePath(download.state),
+              FileManager.default.fileExists(atPath: path) else { return nil }
+        return download
+    }
+
+    /// Plays a finished download from its own file.
+    ///
+    /// The Downloads page's Play used to go through `resolveAndPlay`, which
+    /// searched the indexers again and streamed whichever release won: what
+    /// played had nothing to do with the file in the row, and offline it
+    /// failed outright. This is `resolveAndPlay` with the resolve taken out
+    /// -- the same player state, resume position, Now Playing tile, Handoff
+    /// and Discord presence -- so the episode is recorded and navigated like
+    /// any other. `debugPlayLocalFile` is the bare version of the same idea.
+    public func playDownloadedFile(_ download: LibraryDownload) async {
+        guard let path = DownloadsView.donePath(download.state) else { return }
+        guard FileManager.default.fileExists(atPath: path) else {
+            errorMessage = "Episode \(download.episode) of \(download.title) is no longer at \(path)"
+            errorRetryAction = nil
+            playFeedback(.error)
+            return
+        }
+        guard let engine else {
+            errorMessage = "Engine not initialized"
+            return
+        }
+
+        // A resolve still waiting for the swarm would land after this and
+        // replace the file with its stream.
+        cancelResolve()
+        // No row is flying into the player: the Downloads row has no
+        // thumbnail to morph from, and a key left over from the last play
+        // would name a stale episode still.
+        openingPlayerSourceKey = nil
+        openingPlayerThumbnailURL = nil
+
+        let fileURL = URL(fileURLWithPath: path)
+        let catalogId = download.catalogId
+        let episode = Int64(download.episode)
+        let title = download.title
+
+        playerController.title = title
+        playerController.episodeNumber = download.episode
+        playerController.isLiveAction = download.catalog != .anilist
+        playerController.isPlaying = true
+        // Same gate as `resolveAndPlay`: the outgoing file's last ticks are
+        // not this episode's. Except when this very file is already loaded
+        // -- `MpvSurface.loadFile` opens nothing for a URL it has, so no
+        // FILE_LOADED would ever lower the gate.
+        let replayingCurrent = activeStreamURL == fileURL
+        let catalog: FfiCatalog = {
+            switch download.catalog {
+            case .tmdbMovie: return .tmdbMovie
+            case .tmdbTv: return .tmdbTv
+            case .anilist: return .anilist
+            }
+        }()
+        currentPlaybackCatalog = catalog
+        currentPlaybackCatalogId = catalogId
+        currentPlaybackEpisode = episode
+        playerController.awaitingNewFile = !replayingCurrent
+        playerController.currentReleaseName = nil
+        ensurePlaybackEpisodes(for: catalogId, engine: engine, catalog: catalog)
+        currentPlaybackTitle = title
+        isPlayerMinimized = false
+        resetPerEpisodeDedupState(discordPaused: false)
+        // The N+1 preload is a torrent resolve. A play from disk is how the
+        // app is used offline, where it fails on every episode, and online it
+        // would pull an episode nobody asked for at full speed alongside a
+        // file that needs no bandwidth. Next prefers a finished download of
+        // its own (`playAdjacentEpisode`) and otherwise resolves cold.
+        hasPreloadedNextEpisode = true
+        playerController.setAniSkipTimes(nil)
+        playerController.aniSkipStatus = nil
+        aniSkipAwaitingDuration = false
+        playerController.videoDisplayWidth = nil
+        playerController.videoDisplayHeight = nil
+        playerController.decodedDisplayWidth = nil
+        playerController.decodedDisplayHeight = nil
+
+        var initialTime = 0.0
+        var initialDuration = 0.0
+        if let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
+            initialTime = Double(progress.stopTime)
+            initialDuration = Double(progress.duration)
+        }
+        if initialDuration <= 0,
+           let ep = playbackEpisodes.first(where: { $0.number == download.episode }),
+           let runtime = ep.runtimeMinutes, runtime > 0 {
+            initialDuration = Double(runtime * 60)
+        }
+        playerController.currentTime = initialTime
+        playerController.duration = initialDuration
+
+        // Above the assignment that hands mpv the URL -- see `loadTrackMemory`.
+        playerController.titleTrackMemory = await loadTrackMemory(catalog: catalog, catalogId: catalogId, engine: engine)
+        playerController.episodeTitle = playbackEpisodes.first(where: { $0.number == download.episode })?.title ?? ""
+
+        // The curve `resolveAndPlay` opens with, so the two entrances match.
+        withAnimation(.smooth(duration: 0.42)) {
+            activeStreamURL = fileURL
+        }
+        playFeedback(.playerOpen)
+        updateEpisodeNavigationState()
+        syncPlaybackSession()
+        requestAniSkipTimes(catalogId: catalogId, episode: episode)
+
+        ContinuityManager.shared.advertisePlayback(
+            catalogId: catalogId,
+            catalog: Self.handoffCatalog(catalog),
+            title: title,
+            episode: download.episode,
+            timePositionSeconds: playerController.currentTime
+        )
+
+        publishPlaybackPresence()
+    }
+}

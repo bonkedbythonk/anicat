@@ -19,6 +19,7 @@ extension AppModel {
         // the viewer had just dismissed.
         activeResolvePoller?.cancel()
         activeResolvePoller = nil
+        cancelOpeningWatchdog()
         resolveStartedAt = nil
         isLoading = false
         playerController.resolveStatus = nil
@@ -1149,6 +1150,8 @@ extension AppModel {
         // stop for a play that never resolved), and an unconditional
         // sound is a close blip from an idle app.
         let wasPlaying = activeStreamURL != nil
+        cancelOpeningWatchdog()
+        stalledReleaseNames = []
         #if os(iOS)
         // Hands the grant back before anything else: the Mac keeps the file
         // pinned out of its own cache eviction for as long as the token is
@@ -1315,6 +1318,13 @@ extension AppModel {
         // all.
         closeReader()
         closeSyosetuReader()
+        // A new file is coming; the last one's opening is no longer anyone's
+        // concern. A fresh episode also starts with a clean slate of
+        // releases the watchdog has given up on.
+        cancelOpeningWatchdog()
+        if currentPlaybackCatalogId != catalogId || currentPlaybackEpisode != episode {
+            stalledReleaseNames = []
+        }
 
         let effectiveTitle = title ?? self.selectedMediaDetails?.title
             ?? self.registryTitle(catalog: catalog, id: catalogId)
@@ -1614,6 +1624,12 @@ extension AppModel {
             self.activeStreamURL = streamURL
         }
         playFeedback(.playerOpen)
+        // The pre-buffer gate proved the swarm was delivering when the URL
+        // was minted; nothing above watches whether it still is once mpv
+        // starts reading. See `startOpeningWatchdog`.
+        if !replayingCurrent {
+            startOpeningWatchdog(catalog: catalog, catalogId: catalogId, episode: episode)
+        }
         // Replaying the episode already loaded produces the same stream URL,
         // so `MpvSurface` sees no change and never reopens the file — the
         // `--start` argument that normally carries `fromStart` is only read

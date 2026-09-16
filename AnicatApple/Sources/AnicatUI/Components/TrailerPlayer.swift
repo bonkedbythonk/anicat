@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(WebKit)
 import WebKit
+#endif
 
 /// The AniList trailer, embedded in place of the detail page's banner.
 ///
@@ -24,6 +26,24 @@ struct TrailerPlayer: View {
     @State private var status: TrailerEmbedStatus = .loading
 
     var body: some View {
+        #if !canImport(WebKit)
+        // tvOS has no WebKit, and YouTube serves nothing an `AVPlayer` can
+        // open, so the TV shows the trailer's thumbnail where the embed
+        // would play. `MediaDetailView` is not mounted on the TV today; this
+        // keeps the type compiling for the day it is.
+        CachedAsyncImage(url: thumbnail ?? Self.thumbnailURL(site: site, videoId: videoId), maxPixelSize: 1280) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+            Color.black
+        }
+        #else
+        embedBody
+        #endif
+    }
+
+    #if canImport(WebKit)
+    @ViewBuilder
+    private var embedBody: some View {
         if let url = Self.embedURL(site: site, videoId: videoId) {
             ZStack {
                 TrailerWebView(url: url) { status = $0 }
@@ -47,6 +67,7 @@ struct TrailerPlayer: View {
             Color.black
         }
     }
+    #endif
 
     /// `nil` for a site nothing here can embed, which is how the caller
     /// decides not to offer the trailer at all.
@@ -182,6 +203,7 @@ private struct TrailerBlockedView: View {
     }
 }
 
+#if canImport(WebKit)
 #if os(macOS)
 private struct TrailerWebView: NSViewRepresentable {
     let url: URL
@@ -397,3 +419,4 @@ enum TrailerEmbedPage {
         view.loadHTMLString(html, baseURL: baseURL)
     }
 }
+#endif // canImport(WebKit)

@@ -47,7 +47,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
+          targets: aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-tvos,aarch64-apple-tvos-sim
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -68,6 +68,16 @@ jobs:
         working-directory: AnicatApple
         run: swift build --product AnicatUI --triple arm64-apple-ios18.0-simulator --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" --scratch-path .build-ios
 
+      # Same check for Apple TV. The TV root is its own set of views behind
+      # `#if os(tvOS)`, but everything under it -- the model, the player
+      # controller, the caches, the design system -- is shared, and the
+      # tvOS SDK is missing things the iOS one has (no WebKit, no
+      # `DragGesture`, no `Slider`, no haptics, no pasteboard). A shared
+      # file reaching for one of those only shows up here.
+      - name: swift build (tvOS Simulator)
+        working-directory: AnicatApple
+        run: swift build --product AnicatUI --triple arm64-apple-tvos18.0-simulator --sdk "$(xcrun --sdk appletvsimulator --show-sdk-path)" --scratch-path .build-tvos
+
       # The compile check above builds a library and stops there: it never
       # links an executable, never reads Info.plist and never produces a
       # bundle, so a missing product dependency, a malformed plist key or a
@@ -84,6 +94,18 @@ jobs:
           xcodegen generate
           xcodebuild -project Anicat.xcodeproj -scheme AnicatiOS \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build-xcode \
+            ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
+
+      # And the Apple TV app, from the same generated project. This is the
+      # step that reads Info-tvOS.plist and compiles the brand assets
+      # (layered icon plus Top Shelf image), neither of which the library
+      # build above touches.
+      - name: Build the tvOS app
+        working-directory: AnicatApple
+        run: |
+          xcodebuild -project Anicat.xcodeproj -scheme AnicatTV \
+            -destination 'generic/platform=tvOS Simulator' \
             -derivedDataPath .build-xcode \
             ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
 

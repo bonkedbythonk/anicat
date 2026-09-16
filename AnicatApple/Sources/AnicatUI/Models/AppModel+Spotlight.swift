@@ -1,3 +1,6 @@
+// CoreSpotlight imports on tvOS but every type in it is marked
+// unavailable there; the TV has no system search to index into.
+#if !os(tvOS)
 import CoreSpotlight
 import Foundation
 #if canImport(UIKit)
@@ -53,3 +56,11 @@ extension AppModel {
         _ = handleOpenURL(url)
     }
 }
+#else
+import Foundation
+
+extension AppModel {
+    func refreshSpotlightIndex() {}
+    public func handleSpotlightActivity(_ activity: NSUserActivity) {}
+}
+#endif

@@ -314,13 +314,10 @@ public struct MediaCard: View, Equatable {
         // `simultaneousGesture` rather than replacing the tap: the ripple
         // needs the press location, but this must never be the gesture
         // that decides whether `onSelect` fires — that stays the Button's.
-        .simultaneousGesture(
-            SpatialTapGesture()
-                .onEnded { value in
-                    ripplePressLocation = value.location
-                    ripplePressCount += 1
-                }
-        )
+        .sumiSpatialTap { location in
+            ripplePressLocation = location
+            ripplePressCount += 1
+        }
         .stableHover { hovering in
             isHovered = hovering
             if hovering {

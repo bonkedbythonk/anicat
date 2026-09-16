@@ -394,6 +394,12 @@ public final class AppModel {
     /// The status-line poller `resolveAndPlay` runs beside its resolve; see
     /// `cancelResolve` for why Cancel stops it directly.
     var activeResolvePoller: Task<Void, Never>?
+    /// Watches a stream that has just been handed to mpv; see
+    /// `AppModel+OpeningWatchdog.swift`.
+    var openingWatchdogTask: Task<Void, Never>?
+    /// Releases the watchdog already gave up on for the episode playing,
+    /// so it never bounces between two dead ones. Cleared with the episode.
+    var stalledReleaseNames: Set<String> = []
     /// From a cinema page opening until its deferred extras fetch has
     /// answered either way. `cinemaExtras == nil` alone cannot tell "not
     /// yet" from "failed", and a series page waiting on it drew a spinner in
@@ -894,6 +900,35 @@ public final class AppModel {
     public internal(set) var playbackEpisodes: [MediaDetailView.EpisodeItem] = []
     var playbackEpisodesCatalogId: Int64?
 
+    /// Where the engine keeps the registry and the stream cache.
+    ///
+    /// Application Support on the Mac and in the iPhone container. On Apple
+    /// TV the sandbox is the same shape, but the platform reserves the right
+    /// to purge a suspended app's writable storage under pressure, and older
+    /// tvOS releases refused writes anywhere but Caches outright -- so the
+    /// TV falls through to Caches when Application Support cannot be
+    /// created. Nothing kept there is the only copy: list state lives on
+    /// AniList and resume positions are also mirrored there through progress.
+    static func makeEngineDataDirectory() throws -> URL {
+        let fm = FileManager.default
+        var candidates = [FileManager.SearchPathDirectory.applicationSupportDirectory]
+        #if os(tvOS)
+        candidates.append(.cachesDirectory)
+        #endif
+        var lastError: Error?
+        for directory in candidates {
+            guard let base = fm.urls(for: directory, in: .userDomainMask).first else { continue }
+            let dataDir = base.appendingPathComponent("Anicat", isDirectory: true)
+            do {
+                try fm.createDirectory(at: dataDir, withIntermediateDirectories: true)
+                return dataDir
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? CocoaError(.fileWriteUnknown)
+    }
+
     /// Initializes the headless Rust engine and opens the SQLite registry.
     public func initialize(anilistToken: String? = nil, tmdbKey: String? = nil) async {
         guard engine == nil else { return }
@@ -908,9 +943,7 @@ public final class AppModel {
         defer { isLoading = false }
 
         do {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let dataDir = appSupport.appendingPathComponent("Anicat", isDirectory: true)
-            try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+            let dataDir = try Self.makeEngineDataDirectory()
 
             // config.json first, then the Tauri build's config.toml, then the
             // Keychain -- see `iCloudSyncService.getAniListToken` for why

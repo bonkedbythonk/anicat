@@ -245,7 +245,13 @@ public struct AniListMarkdownText: View {
     }
 
     public var body: some View {
+        #if os(tvOS)
+        // Nothing to select with on a remote, and the modifier does not
+        // exist in the tvOS SDK.
+        content
+        #else
         content.textSelection(.enabled)
+        #endif
     }
 
     private var content: some View {

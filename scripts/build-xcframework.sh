@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Builds core/ for every Apple target, generates the Swift bindings from the
-# freshly built library, and packages the three static libs into
-# AnicatCore.xcframework.
+# Builds core/ for every Apple target (macOS, iOS, iOS Simulator, tvOS and
+# tvOS Simulator), generates the Swift bindings from the freshly built
+# library, and packages the five static libs into AnicatCore.xcframework.
 #
 # Bindings are generated in *library mode* (`--library <the .dylib>`), not from
 # a .udl: the interface is declared with `#[uniffi::export]` proc-macros, so the
@@ -18,7 +18,20 @@ FRAMEWORKS="$OUT/Frameworks"
 # SwiftPM cannot import a modulemap out of a binaryTarget directly, so the
 # generated C header is also exposed as its own tiny target.
 SHIM="$OUT/Sources/anicat_coreFFI"
-TARGETS=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)
+# The two tvOS targets ship a prebuilt `rust-std` on stable (`rustup target
+# add aarch64-apple-tvos aarch64-apple-tvos-sim`), so no nightly and no
+# `-Zbuild-std`. The `cc` crate finds the AppleTVOS SDK through `xcrun`,
+# which needs a full Xcode selected: with only the Command Line Tools
+# active, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` in the
+# environment is enough.
+TARGETS=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-tvos aarch64-apple-tvos-sim)
+
+# The `cc` crate builds SQLite and the jitterentropy sources against the
+# SDK's own version unless told the floor, and ld then warns on every
+# object that it was "built for newer tvOS (26.x) than being linked
+# (18.0)". The iOS floor comes from rustc's target spec; tvOS reads it from
+# here.
+export TVOS_DEPLOYMENT_TARGET="${TVOS_DEPLOYMENT_TARGET:-18.0}"
 
 cd "$CORE"
 for t in "${TARGETS[@]}"; do
@@ -50,6 +63,8 @@ prelink() {
 prelink aarch64-apple-darwin  macos          15.0
 prelink aarch64-apple-ios     ios            18.0
 prelink aarch64-apple-ios-sim ios-simulator  18.0
+prelink aarch64-apple-tvos     tvos           18.0
+prelink aarch64-apple-tvos-sim tvos-simulator 18.0
 
 # The generator reads a cdylib, which only the host target can produce here.
 HOST_DYLIB="$CORE/target/aarch64-apple-darwin/release/libanicat_core.dylib"
@@ -73,6 +88,8 @@ xcodebuild -create-xcframework \
   -library "$CORE/target/aarch64-apple-darwin/release/libanicat_core_sealed.a"  -headers "$HEADERS" \
   -library "$CORE/target/aarch64-apple-ios/release/libanicat_core_sealed.a"     -headers "$HEADERS" \
   -library "$CORE/target/aarch64-apple-ios-sim/release/libanicat_core_sealed.a" -headers "$HEADERS" \
+  -library "$CORE/target/aarch64-apple-tvos/release/libanicat_core_sealed.a"     -headers "$HEADERS" \
+  -library "$CORE/target/aarch64-apple-tvos-sim/release/libanicat_core_sealed.a" -headers "$HEADERS" \
   -output "$FRAMEWORKS/AnicatCore.xcframework"
 
 mkdir -p "$OUT/Sources/AnicatCoreKit" "$SHIM/include"

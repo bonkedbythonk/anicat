@@ -177,7 +177,7 @@ targets:
       path: Generated/Info-tvOS.plist
       properties:
         CFBundleDisplayName: Anicat
-        CFBundleShortVersionString: 6.0.1
+        CFBundleShortVersionString: 1.0.0
         CFBundleVersion: "1"
         # Playback keeps going while another app has the screen? No: a TV
         # has no pocket. What the audio background mode buys here is that

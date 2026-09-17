@@ -103,7 +103,7 @@ extension AppModel {
         if let current { stalledReleaseNames.insert(current) }
 
         var next: String? = nil
-        if stalledReleaseNames.count <= Self.openingWatchdogMaxSwitches {
+        if openingSwitchCount < Self.openingWatchdogMaxSwitches {
             // Cached by the engine for a minute after the resolve that just
             // ran, so this is the list that resolve chose from, not a new
             // search wave.
@@ -114,7 +114,7 @@ extension AppModel {
         }
 
         guard let next else {
-            PlayerLog.write("[watchdog] no release left to try after \(stalledReleaseNames.count) stalled")
+            PlayerLog.write("[watchdog] no release left to try after \(openingSwitchCount) switches")
             stopPlayback()
             errorMessage = "The stream stalled while opening and no other release came through. Try again later, or pick a release by hand."
             errorRetryAction = { [weak self] in
@@ -129,6 +129,11 @@ extension AppModel {
             return
         }
 
+        // Recorded before it has proved anything: a stall this watchdog
+        // cannot name (see `stalledReleaseNames`) would otherwise leave the
+        // next round free to pick this same release again.
+        stalledReleaseNames.insert(next)
+        openingSwitchCount += 1
         PlayerLog.write("[watchdog] switching from '\(current ?? "?")' to '\(next)'")
         playerController.flashHUD("Stream stalled, trying another release", symbol: "arrow.triangle.2.circlepath")
         activeResolveTask?.cancel()

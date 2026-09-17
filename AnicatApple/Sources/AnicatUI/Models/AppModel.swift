@@ -397,9 +397,17 @@ public final class AppModel {
     /// Watches a stream that has just been handed to mpv; see
     /// `AppModel+OpeningWatchdog.swift`.
     var openingWatchdogTask: Task<Void, Never>?
-    /// Releases the watchdog already gave up on for the episode playing,
-    /// so it never bounces between two dead ones. Cleared with the episode.
+    /// Releases the watchdog has already tried for the episode playing,
+    /// so it never bounces between two dead ones. Holds the one it gave up
+    /// on *and* the one it switched to. Cleared with the episode.
     var stalledReleaseNames: Set<String> = []
+    /// How many times the watchdog has switched release for the episode
+    /// playing. Counted apart from `stalledReleaseNames`, which an ordinary
+    /// play cannot always name: `currentReleaseName` is set only for a
+    /// release asked for by name, and the remembered-release lookup can
+    /// miss, so a nameless stall used to add nothing to the set and buy a
+    /// switch the cap was supposed to have spent. Cleared with the episode.
+    var openingSwitchCount = 0
     /// From a cinema page opening until its deferred extras fetch has
     /// answered either way. `cinemaExtras == nil` alone cannot tell "not
     /// yet" from "failed", and a series page waiting on it drew a spinner in

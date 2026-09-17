@@ -1152,6 +1152,7 @@ extension AppModel {
         let wasPlaying = activeStreamURL != nil
         cancelOpeningWatchdog()
         stalledReleaseNames = []
+        openingSwitchCount = 0
         #if os(iOS)
         // Hands the grant back before anything else: the Mac keeps the file
         // pinned out of its own cache eviction for as long as the token is
@@ -1324,6 +1325,7 @@ extension AppModel {
         cancelOpeningWatchdog()
         if currentPlaybackCatalogId != catalogId || currentPlaybackEpisode != episode {
             stalledReleaseNames = []
+            openingSwitchCount = 0
         }
 
         let effectiveTitle = title ?? self.selectedMediaDetails?.title

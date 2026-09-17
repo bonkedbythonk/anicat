@@ -231,7 +231,17 @@ public final class AppModel {
     var activePersonPageTask: Task<Void, Never>?
     var activeThreadCommentsTask: Task<Void, Never>?
 
-    public var activeStreamURL: URL?
+    /// Also the player's mount condition in `RootView`, which is why every
+    /// change is logged: clearing it unmounts `PlayerView`, and the remount
+    /// reopens the stream at the stored resume point. A mid-episode
+    /// re-attach was seen with nothing in the log to say what had cleared
+    /// this.
+    public var activeStreamURL: URL? {
+        didSet {
+            guard oldValue != activeStreamURL else { return }
+            PlayerLog.write("[stream] active URL \(activeStreamURL == nil ? "cleared" : "set")")
+        }
+    }
     /// Backgrounds the full-screen `PlayerView` without touching playback —
     /// mpv keeps running (audio, position tracking, everything) exactly as
     /// `pause()`/`stopPlayback()` don't. Real system Picture-in-Picture

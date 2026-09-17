@@ -1995,6 +1995,13 @@ extension MpvSurface: NSViewRepresentable {
     }
 
     public static func dismantleNSView(_ nsView: MpvHostView, coordinator: Coordinator) {
+        // The other half of "surface attached". A remount stops mpv and
+        // reopens the stream at the stored resume point, and a log with the
+        // attach but not the teardown cannot say whether the player was
+        // rebuilt or merely restarted: an owner report of the picture drawn
+        // at the old size in the corner had one attach mid-episode and no
+        // way to tell what had unmounted the view.
+        PlayerLog.write("[libmpv] surface dismantled")
         coordinator.stop()
     }
 }

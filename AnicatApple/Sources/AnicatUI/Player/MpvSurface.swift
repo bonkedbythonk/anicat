@@ -715,6 +715,32 @@ public struct MpvSurface {
             // mid-episode switch goes through `selectAudioLanguage` instead.
             mpv_set_option_string(handle, "alang", Self.audioLanguages(preferDub: Self.preferDubSetting()))
             mpv_set_option_string(handle, "subs-fallback", "yes")
+            #if os(macOS)
+            // macOS 27 answers mpv 0.41's kAudioOutputUnitProperty_ChannelMap
+            // with -50 when the unit was given a planar format, and FFmpeg
+            // decodes AAC to planar float, so ao_coreaudio's init failed on
+            // nearly every file ("requested format: ... floatp", then "unable
+            // to set the input channel layout"). mpv fell back to
+            // avfoundation, and the failed init left its CoreAudio hotplug
+            // listener registered on the ao it had just freed: the next
+            // device change ran hotplug_cb on freed memory, SIGSEGV in
+            // mp_msg_va off a HAL listener queue, four reports 2026-09-16.
+            // Interleaved float makes the init succeed, so there is no
+            // fallback and no dangling listener. Forcing `ao=avfoundation`
+            // was tried first and stopped the crash, but that output takes
+            // seconds to follow AirPods going in or out (it froze outright
+            // without an `ao-reload` of our own); coreaudio follows the
+            // default device within ~40ms, measured in the same session.
+            // Stereo is forced because mono was recorded drawing the same -50
+            // (2026-09-16 notes; not re-measured), and one mono file falling
+            // back is the crash again. Upstream:
+            // mpv#18384 (the -50) and mpv#18382 (the listener); drop this
+            // once MPVKit ships an mpv with both.
+            if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 {
+                mpv_set_option_string(handle, "audio-format", "float")
+                mpv_set_option_string(handle, "audio-channels", "stereo")
+            }
+            #endif
 
             let initStatus = mpv_initialize(handle)
             if initStatus < 0 {
@@ -726,6 +752,11 @@ public struct MpvSurface {
 
             self.mpv = handle
             self.isRunning = true
+            // Verbose, filtered to the `ao` prefixes in the event loop. At
+            // `all=warn` the log showed that coreaudio's init failed and
+            // nothing about why: the "requested format: ... floatp" line that
+            // named the cause is a verbose one.
+            mpv_request_log_messages(handle, "v")
 
             controller.onSeek = { [weak self] seconds in
                 self?.seek(to: seconds)
@@ -1719,6 +1750,17 @@ public struct MpvSurface {
                         break
                     }
 
+                    if ev.event_id == MPV_EVENT_LOG_MESSAGE, let data = ev.data {
+                        let msg = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
+                        if let prefix = msg.prefix.map({ String(cString: $0) }), prefix.hasPrefix("ao"),
+                           let text = msg.text.map({ String(cString: $0) }) {
+                            PlayerLog.write("[mpv/\(prefix)] \(text.trimmingCharacters(in: .newlines))")
+                        }
+                        continue
+                    }
+                    if ev.event_id == MPV_EVENT_AUDIO_RECONFIG {
+                        PlayerLog.write("[libmpv] audio reconfig: ao \(self.stringProperty("current-ao") ?? "-") device \(self.stringProperty("audio-device") ?? "-") time-pos \(self.stringProperty("time-pos") ?? "-")")
+                    }
                     if ev.event_id == MPV_EVENT_VIDEO_RECONFIG {
                         PlayerLog.write(String(format: "[libmpv] video reconfig: out %@x%@ osd %@x%@ time-pos %@", self.stringProperty("video-out-params/dw") ?? "-", self.stringProperty("video-out-params/dh") ?? "-", self.stringProperty("osd-dimensions/w") ?? "-", self.stringProperty("osd-dimensions/h") ?? "-", self.stringProperty("time-pos") ?? "-"))
                         // Read here as well as from the property observer.

@@ -12,7 +12,12 @@ cd "$(dirname "$0")"
 swift build --product Anicat -c debug
 
 pkill -f "dist/Anicat.app/Contents/MacOS/Anicat" 2>/dev/null || true
-cp .build/arm64-apple-macosx/debug/Anicat dist/Anicat.app/Contents/MacOS/Anicat
+# Ask SwiftPM where it put the binary. Xcode 27's build system writes to
+# .build/out/Products/Debug, and the old hardcoded arm64-apple-macosx/debug
+# path kept a Sep 15 binary that two "deployments" of a crash fix shipped
+# before anyone noticed the fix was not in it.
+BIN="$(swift build --product Anicat -c debug --show-bin-path)/Anicat"
+cp "$BIN" dist/Anicat.app/Contents/MacOS/Anicat
 # The bundle's Info.plist was written once by a packaging run and never
 # touched again, so Settings > Maintenance kept reporting whatever version
 # that run had (1.0.0, for months). Stamp it from version.txt every run.

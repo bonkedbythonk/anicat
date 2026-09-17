@@ -648,6 +648,7 @@ public struct MpvSurface {
                        let device = layer.device ?? MTLCreateSystemDefaultDevice(),
                        let sampler = AmbientMetalSampler(device: device) {
                         sampler.videoAspect = { [weak self] in self?.controller.videoAspectRatio }
+                        sampler.playbackPosition = { [weak self] in self?.controller.currentTime ?? -1 }
                         sampler.onThumbnail = { [weak self] image, inset in
                             guard let self else { return }
                             // Sideways for the same reason the view drops the
@@ -663,6 +664,15 @@ public struct MpvSurface {
                         }
                         layer.ambientSampler = sampler
                         self.usesMetalAmbientSampler = true
+                        // Which of the two sampling paths this machine ended
+                        // up on, in the log rather than behind a debug env
+                        // var: the fallback's own symptom (a glow that lags
+                        // or freezes) is the same shape as several other
+                        // reports, and nothing in a sent-in log said which
+                        // path was running.
+                        PlayerLog.write("[glow] sampling the presented drawable")
+                    } else {
+                        PlayerLog.write("[glow] no Metal sampler; falling back to screenshot-raw")
                     }
                 }
                 mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
@@ -1630,7 +1640,7 @@ public struct MpvSurface {
                 // "video" is refused by a build without the screenshot code,
                 // and by an audio-only file. Neither is worth retrying every
                 // second for the rest of the episode.
-                NSLog("[ambient] screenshot-raw unavailable (%d); falling back to the episode still", status)
+                PlayerLog.write("[glow] screenshot-raw unavailable (\(status)); falling back to the episode still")
                 ambientGate.giveUp()
                 return nil
             }
@@ -1641,17 +1651,17 @@ public struct MpvSurface {
             let elapsed = finished - now
             if ambientSamplesLogged < Self.ambientSamplesToLog {
                 ambientSamplesLogged += 1
-                NSLog("[ambient] screenshot-raw %.1fms + downscale %.1fms = %.1fms",
-                      (captured - now) * 1000, (finished - captured) * 1000, elapsed * 1000)
+                PlayerLog.write(String(format: "[glow] screenshot-raw %.1fms + downscale %.1fms = %.1fms",
+                                       (captured - now) * 1000, (finished - captured) * 1000, elapsed * 1000))
             }
             if elapsed > AmbientSampleGate.budget {
-                NSLog("[ambient] sample took %.1fms (over budget %d/%d in a row)",
-                      elapsed * 1000, ambientGate.slowStreak + 1, AmbientSampleGate.slowSampleLimit)
+                PlayerLog.write(String(format: "[glow] sample took %.1fms (over budget %d/%d in a row)",
+                                       elapsed * 1000, ambientGate.slowStreak + 1, AmbientSampleGate.slowSampleLimit))
             }
             let before = ambientGate.currentInterval
             ambientGate.record(elapsed: elapsed)
             if ambientGate.currentInterval != before {
-                NSLog("[ambient] sampling every %.0fms now", ambientGate.currentInterval * 1000)
+                PlayerLog.write(String(format: "[glow] sampling every %.0fms now", ambientGate.currentInterval * 1000))
             }
             return frame
         }

@@ -438,7 +438,16 @@ extension AmbientGlow {
     /// Never take more than this off one side. A fade to black is every
     /// side at once, and without the cap the glow rect collapsed to nothing
     /// mid-fade and snapped back open on the next shot.
-    static let maxInsetFraction = 0.4
+    ///
+    /// 0.2, not the 0.4 this started at, because the cap is also what the
+    /// fade guard below tests against: at 0.4 a fade could settle one sample
+    /// on 0.391/0.398 -- both ends under the cap, and symmetric, so the
+    /// guard and `centredBars` both waved it through and the glow painted
+    /// over two fifths of the picture. Measured on Apothecary Diaries S2E9
+    /// at 996.9s, the fade before the black frame at 997s. Nothing real
+    /// needs more: 2.35:1 inside 16:9 is 0.122 a side, 2.39:1 is 0.128, and
+    /// the widest ratio ever released, 2.76:1, is 0.178.
+    static let maxInsetFraction = 0.2
     /// How much brighter than a bar the picture past the boundary row has
     /// to be before that row's level is read as a blend. Under this the
     /// two are too close to tell apart and the whole row is kept as
@@ -553,6 +562,24 @@ extension AmbientGlow {
         )
     }
 
+    /// Whether two insets differ by enough to be worth acting on: 1% of an
+    /// axis, about 10 rows of a 1080p picture, under the height of one row
+    /// of the 64x36 thumbnail the sides are read from.
+    public static func edgeMoved(_ a: AmbientContentInset, _ b: AmbientContentInset) -> Bool {
+        let threshold = 0.01
+        return abs(a.top - b.top) > threshold || abs(a.bottom - b.bottom) > threshold
+            || abs(a.left - b.left) > threshold || abs(a.right - b.right) > threshold
+    }
+
+    /// Whether `candidate` claims more bar than `previous` on any edge, by
+    /// enough to matter. Growth is what the gate holds back on; a bar that
+    /// has gone is applied at once.
+    public static func grows(_ previous: AmbientContentInset, _ candidate: AmbientContentInset) -> Bool {
+        let threshold = 0.01
+        return candidate.top - previous.top > threshold || candidate.bottom - previous.bottom > threshold
+            || candidate.left - previous.left > threshold || candidate.right - previous.right > threshold
+    }
+
     /// `lines` whole bar lines plus however much of the next one was bar
     /// too, `level` reading the i-th line in from that edge.
     ///
@@ -585,5 +612,63 @@ extension AmbientGlow {
         let stride = strip.bytesPerRow
         let bytes = [UInt8](UnsafeBufferPointer(start: base, count: stride * strip.height))
         return contentInset(bytes: bytes, width: strip.width, height: strip.height, stride: stride)
+    }
+}
+
+/// What the bands are actually laid out against: the detected inset after a
+/// new, larger bar has held still long enough to be one.
+///
+/// A fade does not step from picture to black; it sweeps, and every value on
+/// the way is a plausible letterbox for a frame or two. Measured on
+/// Apothecary Diaries S2E9 at 995.5s, one frame every 24th of a second:
+/// three frames at 0.047/0.062, three at 0.160/0.164, then nothing but
+/// "too dark to tell" for the rest of the shot. Applied as they came, that
+/// is a band a sixth of the way up the picture -- and because a frame too
+/// dark to tell holds the last inset rather than clearing it, the band then
+/// stayed for the whole black stretch. A real letterbox holds the same
+/// value for as long as the scene does, so ten agreeing samples (a third of
+/// a second at the drawable sampler's rate) cost it nothing and cost the
+/// sweep everything.
+public struct AmbientInsetGate: Sendable, Equatable {
+    /// Agreeing samples before a grown inset is applied.
+    public static let confirmations = 10
+
+    public private(set) var applied: AmbientContentInset = .zero
+    private var pending: AmbientContentInset?
+    private var agreed = 0
+
+    public init() {}
+
+    /// Offers one sample's inset, `nil` when the frame was too dark to tell,
+    /// and answers what the bands should use.
+    @discardableResult
+    public mutating func offer(_ candidate: AmbientContentInset?) -> AmbientContentInset {
+        guard let candidate else {
+            // A run of agreement cannot span the frames that could not be
+            // read: that is exactly the fade this gate exists for.
+            pending = nil
+            agreed = 0
+            return applied
+        }
+        guard AmbientGlow.grows(applied, candidate) else {
+            // Shrinking is never held back -- a bar that has gone must not
+            // be lit for another sample.
+            applied = candidate
+            pending = nil
+            agreed = 0
+            return applied
+        }
+        if let pending, !AmbientGlow.edgeMoved(pending, candidate) {
+            agreed += 1
+            if agreed >= Self.confirmations {
+                applied = candidate
+                self.pending = nil
+                agreed = 0
+            }
+        } else {
+            pending = candidate
+            agreed = 1
+        }
+        return applied
     }
 }

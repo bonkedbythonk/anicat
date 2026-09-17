@@ -327,6 +327,83 @@ struct AmbientGlowTests {
         #expect(inset.top == 4.0 / 36.0)
     }
 
+    /// Apothecary Diaries S2E9 at 996.9s, the fade into the black frame at
+    /// 997s: the scan reported 0.391 top and 0.398 bottom, both just under
+    /// the old 0.4 cap and symmetric enough for `centredBars`, and the glow
+    /// painted over two fifths of the picture.
+    @Test("A fade is not a pair of enormous bars")
+    func fadeIsNotBars() {
+        // Bar rows from both edges to well past any real letterbox, with a
+        // bright strip left in the middle -- a fade caught partway.
+        let (bytes, stride) = frame(width: 64, height: 36) { _, y in
+            (14...21).contains(y) ? (200, 200, 200) : (0, 0, 0)
+        }
+        #expect(AmbientGlow.contentInset(bytes: bytes, width: 64, height: 36, stride: stride) == nil)
+    }
+
+    /// A real 2.35:1 scene inside a 16:9 file is 0.122 a side, and it still
+    /// has to survive the cap that rejects the fade above.
+    @Test("A real cinematic letterbox still reads")
+    func cinemascopeStillReads() throws {
+        let bars = Int((36.0 * 0.122).rounded())
+        let (bytes, stride) = frame(width: 64, height: 36) { _, y in
+            y < bars || y >= 36 - bars ? (0, 0, 0) : (200, 200, 200)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: 64, height: 36, stride: stride))
+        #expect(inset.top >= 0.10 && inset.top <= 0.16)
+        #expect(inset.bottom >= 0.10 && inset.bottom <= 0.16)
+    }
+
+    /// The gate on the real sweep: three samples at 0.047/0.062, three at
+    /// 0.160/0.164, then frames too dark to read -- the measured shape of
+    /// the fade at 995.5s. None of it may reach the bands.
+    @Test("A fade never confirms a bar, and the dark frames after it hold nothing")
+    func fadeNeverConfirms() {
+        var gate = AmbientInsetGate()
+        for _ in 0..<3 { gate.offer(AmbientContentInset(top: 0.047, bottom: 0.062, left: 0, right: 0)) }
+        for _ in 0..<3 { gate.offer(AmbientContentInset(top: 0.160, bottom: 0.164, left: 0, right: 0)) }
+        for _ in 0..<30 { gate.offer(nil) }
+        #expect(gate.applied == .zero)
+    }
+
+    /// A letterboxed scene holds its bars for as long as it lasts, so the
+    /// confirmations cost it a third of a second and nothing else.
+    @Test("A bar that holds still is applied, and a bar that goes is dropped at once")
+    func steadyBarsAreApplied() {
+        var gate = AmbientInsetGate()
+        let bars = AmbientContentInset(top: 0.122, bottom: 0.122, left: 0, right: 0)
+        for _ in 0..<(AmbientInsetGate.confirmations - 1) { gate.offer(bars) }
+        #expect(gate.applied == .zero)
+        gate.offer(bars)
+        #expect(gate.applied == bars)
+        gate.offer(.zero)
+        #expect(gate.applied == .zero)
+    }
+
+    /// Growth waits for a second agreeing sample; a bar that has gone does
+    /// not wait at all.
+    @Test("Only a repeated bar grows the inset")
+    func growthNeedsTwoSamples() {
+        let none = AmbientContentInset.zero
+        let bars = AmbientContentInset(top: 0.12, bottom: 0.12, left: 0, right: 0)
+        #expect(AmbientGlow.grows(none, bars))
+        #expect(AmbientGlow.grows(bars, none) == false)
+        #expect(AmbientGlow.grows(bars, bars) == false)
+    }
+
+    /// The `[glow]` line is the only glow diagnostic in `anicat.log`, and
+    /// it is written from a 30-samples-a-second path: a threshold that fired
+    /// on dither would bury the log it exists to make readable.
+    @Test("Only a moved bar edge is worth a log line")
+    func onlyMovedEdgesAreLogged() {
+        let bars = AmbientContentInset(top: 0.12, bottom: 0.12, left: 0, right: 0)
+        let dither = AmbientContentInset(top: 0.1249, bottom: 0.1151, left: 0, right: 0)
+        let moved = AmbientContentInset(top: 0.12, bottom: 0.12, left: 0.13, right: 0.13)
+        #expect(AmbientGlow.edgeMoved(bars, dither) == false)
+        #expect(AmbientGlow.edgeMoved(bars, moved))
+        #expect(AmbientGlow.edgeMoved(bars, .zero))
+    }
+
     /// Refining off a picture barely brighter than a bar is guesswork, and
     /// guessing long draws glow over the frame.
     @Test("A picture too close to black to tell is left as whole rows")

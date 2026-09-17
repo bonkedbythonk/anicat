@@ -28,6 +28,10 @@ final class AmbientMetalSampler {
     /// bars themselves, and the glow lit the bars with their own black.
     /// The scale kernel is pointed at the aspect-fit rect inside instead.
     var videoAspect: (() -> Double?)?
+    /// Playback position, for the `[glow]` lines only: a bar edge that moved
+    /// at 14:32 can be looked at on the same file, and an intermittent
+    /// report otherwise names no moment at all.
+    var playbackPosition: (() -> Double)?
     /// Minimum spacing between samples. 33 ms: every other frame at 60,
     /// every frame at 24, and about a fifth of the presents on a 120 Hz
     /// panel; the fade in the view is 80 ms, so anything tighter is unseen.
@@ -66,11 +70,14 @@ final class AmbientMetalSampler {
     private var failures = 0
     private var delivered = 0
     private var smoothed: [UInt8] = []
-    /// The bars found in the last sample that could tell, held across the
-    /// ones that could not: a fade to black reads as bar on every side, and
-    /// recomputing from it collapsed the rect and snapped it open again on
-    /// the next shot.
-    private var contentInset: AmbientContentInset = .zero
+    /// The bars the bands are laid out against. Held across the samples that
+    /// could not tell, and grown only once a larger bar has held still --
+    /// see `AmbientInsetGate`.
+    private var insetGate = AmbientInsetGate()
+    private var contentInset: AmbientContentInset { insetGate.applied }
+    /// The inset the last `[glow]` line reported, and when it was written.
+    private var loggedInset: AmbientContentInset = .zero
+    private var lastInsetLogAt: CFTimeInterval = 0
     /// 0.45 of the new sample per step. Heavier smoothing lived here while
     /// the view hard-cut between images; now that `AmbientGlowView` eases
     /// every colour stop over 100 ms on the render server, this only has
@@ -214,9 +221,33 @@ final class AmbientMetalSampler {
         // the smoothed thumbnail pixels, so the inset it does contribute
         // and the picture handed over describe the same frame.
         let sides = AmbientGlow.contentInset(bytes: bytes, width: width, height: height, stride: stride)
-        if let rows = probeContentInset(), let sides {
-            contentInset = AmbientGlow.centredBars(AmbientContentInset(
+        let rows = probeContentInset()
+        // `nil` -- either probe too dark to read -- is offered as nil rather
+        // than skipped, because that is what breaks a run of agreement: the
+        // fade this gate exists for is a sweep of plausible insets followed
+        // by frames nobody can read.
+        if let rows, let sides {
+            insetGate.offer(AmbientGlow.centredBars(AmbientContentInset(
                 top: rows.top, bottom: rows.bottom, left: sides.left, right: sides.right
+            )))
+        } else {
+            insetGate.offer(nil)
+        }
+        // Always on, and only when an edge moves. Every other glow
+        // diagnostic in this app is an `NSLog` behind ANICAT_PLAYER_DEBUG,
+        // which goes to the unified log and not to the `anicat.log` a report
+        // arrives with: an intermittent "the glow does something odd" from
+        // another machine had nothing in the file its owner could send. The
+        // 0.01 threshold and the half-second spacing are what keep thirty
+        // samples a second from filling the log with dither.
+        let now = CACurrentMediaTime()
+        if AmbientGlow.edgeMoved(loggedInset, contentInset), now - lastInsetLogAt > 0.5 {
+            lastInsetLogAt = now
+            loggedInset = contentInset
+            PlayerLog.write(String(
+                format: "[glow] bars t=%.1f top=%.3f bottom=%.3f left=%.3f right=%.3f",
+                playbackPosition?() ?? -1,
+                contentInset.top, contentInset.bottom, contentInset.left, contentInset.right
             ))
         }
         // BGRA8 in memory is an ARGB word read little-endian, the same

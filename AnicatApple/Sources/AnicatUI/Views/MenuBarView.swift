@@ -1,3 +1,4 @@
+#if !os(tvOS)
 import SwiftUI
 import AnicatCoreKit
 
@@ -453,3 +454,4 @@ private struct TransportRow: View {
         .padding(.top, 2)
     }
 }
+#endif

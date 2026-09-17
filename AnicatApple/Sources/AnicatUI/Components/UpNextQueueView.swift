@@ -341,12 +341,10 @@ public struct UpNextQueueView: View {
                 .rippleOnPress(at: ripplePressLocation, trigger: ripplePressCount)
             }
             .buttonStyle(.sumiPressable)
-            .simultaneousGesture(
-                SpatialTapGesture().onEnded { value in
-                    ripplePressLocation = value.location
-                    ripplePressCount += 1
-                }
-            )
+            .sumiSpatialTap { location in
+            ripplePressLocation = location
+            ripplePressCount += 1
+        }
             .animation(.snappy, value: isPlayHovered)
             .stableHover { isPlayHovered = $0 }
         }
@@ -487,13 +485,10 @@ public struct UpNextQueueView: View {
                 }
                 .buttonStyle(.sumiPressable)
                 .contentShape(Rectangle())
-                .simultaneousGesture(
-                    SpatialTapGesture()
-                        .onEnded { value in
-                            ripplePressLocation = value.location
-                            ripplePressCount += 1
-                        }
-                )
+                .sumiSpatialTap { location in
+            ripplePressLocation = location
+            ripplePressCount += 1
+        }
                 .animation(.snappy, value: isPlayHovered)
                 .stableHover { isPlayHovered = $0 }
             }

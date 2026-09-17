@@ -348,7 +348,7 @@ private struct DownloadRow: View {
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
         // Leaving the row and coming back should not still be one click away
         // from deleting it.
-        .onHover { inside in if !inside { removeConfirming = false } }
+        .sumiOnHover { inside in if !inside { removeConfirming = false } }
         // No hover on a phone, so the armed state timed out never: a
         // Remove tapped once and forgotten was still one tap from deleting
         // the file an hour later.

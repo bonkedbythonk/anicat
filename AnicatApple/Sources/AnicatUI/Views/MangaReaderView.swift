@@ -439,6 +439,8 @@ public struct MangaReaderView: View {
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
                 .scaleEffect(currentZoom * finalZoom)
+                // The reader is not on the TV, and the pinch is not in its SDK.
+                #if !os(tvOS)
                 .gesture(
                     MagnificationGesture()
                         .onChanged { value in
@@ -449,6 +451,7 @@ public struct MangaReaderView: View {
                             currentZoom = 1.0
                         }
                 )
+                #endif
                 // Tap zones only apply for paged modes: webtoon already turns pages
                 // by scrolling, and a left/right split there would fight the scroll gesture.
                 // Middle third toggles controls (matches the old whole-page tap);
@@ -945,6 +948,9 @@ public struct MangaReaderView: View {
             .frame(height: 3)
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
+            // `DragGesture` is not in the tvOS SDK; the bar is read-only
+            // there and the remote turns pages.
+            #if !os(tvOS)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -954,6 +960,7 @@ public struct MangaReaderView: View {
                         jump(to: page)
                     }
             )
+            #endif
         }
         .frame(height: 16)
     }

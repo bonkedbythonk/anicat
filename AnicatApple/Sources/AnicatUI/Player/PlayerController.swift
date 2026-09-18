@@ -966,24 +966,23 @@ public final class PlayerController {
               !isMiniPlayerActive,
               !awaitingNewFile,
               duration > 0 else { return }
-        // The outro window from either source, or the last thirty seconds
-        // when neither exists. Auto-skip, when it is on, has already jumped
-        // past the ending by the time this runs, so the card arms at the
-        // window's end rather than at its start — and where that end is the
-        // end of the file, `advance`'s end-of-file condition is what expires
-        // it, since no position-seconds remain to count.
+        // The card arms exactly `NextEpisodeCountdown.seconds` before the end
+        // of the file, because that is where the countdown expires:
+        // `advance` fires at `armedAt + seconds`, so wherever this arms is
+        // where the next episode starts eight seconds later. Nothing in the
+        // countdown was anchored to the end of the file, and every earlier
+        // anchor therefore cut the episode short. Armed at the plain tail
+        // (`duration - countdownTailSeconds`) it played the next episode 22
+        // seconds early -- measured at 1400s of 1422s, in the middle of the
+        // post-credits scene. Armed at the outro window under auto-skip it
+        // was worse: the ending jump has already moved the position to the
+        // window's end, so it armed there and cut everything after the
+        // credits (46s in the same episode).
         //
-        // With auto-skip off, the ending is something the viewer chose to
-        // watch: armed at its start, the card played the next episode eight
-        // seconds in, which read as auto-skip ignoring its own setting. Then
-        // the card waits for the ending to finish, and never comes earlier
-        // than the plain tail would.
-        let tail = duration - Self.countdownTailSeconds
-        let endingEnd = skipWindows.first(where: { $0.kind == .ending })?.end
-        let trigger = autoSkipEnabled
-            ? (outroStartTime ?? tail)
-            : max(endingEnd ?? tail, tail)
-        guard currentTime >= trigger else { return }
+        // A window that runs to the end of the file leaves no
+        // position-seconds to count; `advance`'s end-of-file condition is
+        // what expires the card there.
+        guard currentTime >= duration - NextEpisodeCountdown.seconds else { return }
         nextEpisodeCountdown.arm(at: currentTime)
         print("[autonext] countdown armed at \(Int(currentTime))s of \(Int(duration))s (outro start \(outroStartTime.map { String(Int($0)) } ?? "none"))")
     }

@@ -155,50 +155,68 @@ struct CountdownArmingTests {
         return controller
     }
 
-    @Test("With no outro window it arms in the last thirty seconds")
-    func armsOnTail() {
+    @Test("It arms one countdown's length before the end of the file")
+    func armsBeforeTheEnd() {
         let controller = makeController(nextEpisode: true)
-        controller.currentTime = 1400
+        controller.currentTime = 1411
         controller.checkIntroStatus()
         #expect(controller.nextEpisodeCountdown.phase == .idle)
-        controller.currentTime = 1411
+        controller.currentTime = 1433
         controller.checkIntroStatus()
         #expect(controller.nextEpisodeCountdown.isVisible)
     }
 
-    /// With auto-skip off the ending is being watched; a card at its start
-    /// played the next episode eight seconds into it.
-    @Test("With auto-skip off an outro window arms it after the ending")
+    /// The card expires `NextEpisodeCountdown.seconds` after it arms, so an
+    /// anchor earlier than that cuts the episode off: armed on the old
+    /// thirty-second tail it played the next episode 22 seconds early.
+    @Test("With auto-skip off an outro window does not arm it any earlier")
     func armsAfterOutroWhenWatching() {
         let controller = makeController(nextEpisode: true)
         controller.setAniSkipTimes(AniSkipClient.SkipTimes(
             introStart: nil, introEnd: nil, outroStart: 1300, outroEnd: 1400
         ))
-        controller.currentTime = 1301
-        controller.checkIntroStatus()
-        #expect(controller.nextEpisodeCountdown.phase == .idle)
-        controller.currentTime = 1405
-        controller.checkIntroStatus()
-        #expect(controller.nextEpisodeCountdown.phase == .idle)
-        controller.currentTime = 1411
+        for position in [1301.0, 1405.0, 1411.0] {
+            controller.currentTime = position
+            controller.checkIntroStatus()
+            #expect(controller.nextEpisodeCountdown.phase == .idle)
+        }
+        controller.currentTime = 1433
         controller.checkIntroStatus()
         #expect(controller.nextEpisodeCountdown.isVisible)
     }
 
-    @Test("With auto-skip on an outro window arms it at the window's start")
+    /// Auto-skip has already jumped past the ending by the time the card
+    /// would arm, so arming on the window cut every second of what the jump
+    /// landed in front of -- the post-credits scene.
+    @Test("With auto-skip on an outro window does not arm it at the window")
     func armsOnOutro() {
         let controller = makeController(nextEpisode: true)
         controller.autoSkipEnabled = true
         controller.setAniSkipTimes(AniSkipClient.SkipTimes(
             introStart: nil, introEnd: nil, outroStart: 1300, outroEnd: 1390
         ))
-        controller.currentTime = 1299
+        controller.currentTime = 1301
         controller.checkIntroStatus()
         #expect(controller.nextEpisodeCountdown.phase == .idle)
-        controller.currentTime = 1301
+        controller.currentTime = 1433
         controller.checkIntroStatus()
         #expect(controller.nextEpisodeCountdown.isVisible)
     }
+
+    @Test("The countdown expires no earlier than the end of the file")
+    func expiresAtTheEnd() {
+        let controller = makeController(nextEpisode: true)
+        controller.currentTime = 1433
+        controller.checkIntroStatus()
+        #expect(controller.nextEpisodeCountdown.isVisible)
+        controller.currentTime = 1439
+        controller.checkIntroStatus()
+        #expect(controller.nextEpisodeCountdown.isVisible)
+        controller.currentTime = 1440
+        controller.checkIntroStatus()
+        #expect(controller.nextEpisodeCountdown.phase == .fired)
+    }
+
 
     /// The default configuration on a chaptered release: auto-skip jumps the
     /// ending to the end of the file, and the countdown has to resolve in

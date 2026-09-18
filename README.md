@@ -385,6 +385,12 @@ Dated commit by commit in [HISTORY.md](HISTORY.md).
 
 ---
 
+## Support
+
+Anicat is free and always will be. Nothing here is sold, and no part of the
+app is held back behind a payment. If it is useful to you, you can buy the
+developer a coffee at [ko-fi.com/bonkedbythonk](https://ko-fi.com/bonkedbythonk).
+
 ## Legal
 
 Anicat is for educational and personal use only. See [DISCLAIMER.md](DISCLAIMER.md) and [SECURITY.md](SECURITY.md).

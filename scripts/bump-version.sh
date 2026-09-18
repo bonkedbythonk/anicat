@@ -50,8 +50,21 @@ echo "[3/3] AnicatApple/project.yml  -> $NEW_VERSION"
 # Cargo records the crate version in the lock file too -- in the server's lock
 # as well, which depends on core by path. A stale one there fails the notices
 # generator's `cargo metadata --locked` and so refuses the release.
-(cd core && cargo update -p anicat-core --offline >/dev/null 2>&1 || cargo update -p anicat-core >/dev/null)
-(cd server && cargo update -p anicat-core --offline >/dev/null 2>&1 || cargo update -p anicat-core >/dev/null)
+#
+# Rewritten in place rather than with `cargo update -p anicat-core`: on a Mac
+# that has never fetched the Windows-only crates, the offline resolve cannot
+# see the versions the lock names and quietly re-resolves the whole graph. The
+# 1.0.1 bump moved windows-sys 0.61.2 -> 0.59.0 and four others that way, which
+# is a different Windows build than the one that was tested.
+for lock in core/Cargo.lock server/Cargo.lock; do
+    [ -f "$lock" ] || continue
+    awk -v v="$NEW_VERSION" '
+        /^name = "anicat-core"$/ { print; getline; sub(/".*"/, "\"" v "\""); print; next }
+        { print }
+    ' "$lock" > "$lock.tmp" && mv "$lock.tmp" "$lock"
+    grep -A1 '^name = "anicat-core"$' "$lock" | grep -q "version = \"$NEW_VERSION\"" \
+        || { echo "$lock was not updated" >&2; exit 1; }
+done
 
 echo ""
 echo "All files bumped to $NEW_VERSION."

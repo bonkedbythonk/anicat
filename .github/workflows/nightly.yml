@@ -73,7 +73,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: steps.changed.outputs.build == 'true'
         with:
-          targets: aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
+          # Every target in build-xcframework.sh's TARGETS, or the build dies
+          # on "can't find crate for `core`" in the first dependency it
+          # reaches. The tvOS pair was added to the script and to ci.yml with
+          # the TV app and missed here, and the nightly failed that night.
+          targets: aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-tvos,aarch64-apple-tvos-sim
 
       - uses: swatinem/rust-cache@v2
         if: steps.changed.outputs.build == 'true'

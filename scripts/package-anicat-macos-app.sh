@@ -33,7 +33,11 @@ ICON_CAR="$ROOT/assets/branding/Assets.car"
 echo "=== Building ($CONFIG) ==="
 (cd "$SRC" && swift build -c "$CONFIG")
 
-BUILD_DIR="$SRC/.build/arm64-apple-macosx/$CONFIG"
+# Asked of SwiftPM, never spelled out: Xcode 27's SwiftPM builds into
+# .build/out/Products/Release and leaves .build/arm64-apple-macosx empty, so
+# the hardcoded triple path packaged nothing ("no executable at ...") while
+# `swift build` reported success.
+BUILD_DIR="$(cd "$SRC" && swift build -c "$CONFIG" --show-bin-path)"
 EXE_PATH="$BUILD_DIR/$EXE_NAME"
 RESOURCE_BUNDLE="$BUILD_DIR/AnicatApple_AnicatUI.bundle"
 

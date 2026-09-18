@@ -1909,7 +1909,12 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // view still receives the gesture; on a detail page nothing scrolls
         // sideways, so that costs nothing.
         scrollMonitor = ScrollEventTap.shared.subscribe { [self, tracker] event in
-            guard model.activeStreamURL == nil,
+            // The player only disqualifies the gesture while it covers the
+            // screen -- `handleKeyDown`'s `playerCoversScreen` test. Gated
+            // on the stream alone, back and forward were dead for as long
+            // as anything was playing, mini-player included, where the
+            // detail page underneath is exactly what the viewer is using.
+            guard !(model.activeStreamURL != nil && !model.isPlayerMinimized),
                   model.activeReadingSession == nil,
                   !model.paletteOpen,
                   !model.shortcutsOpen else {
@@ -2170,10 +2175,10 @@ private struct GlobalKeyboardShortcutsModifier: ViewModifier {
 
         // 5. Navigation shortcuts (only when no modifier keys are held)
         if !isCmd && !isCtrl && !isAlt {
-            // '/': Open Command Palette / focus search
+            // '/': Go to Search tab
             if chars == "/" {
-                withAnimation(.snappy) {
-                    model.paletteOpen = true
+                withAnimation(.smooth) {
+                    model.navigate(to: .search)
                 }
                 return nil
             }

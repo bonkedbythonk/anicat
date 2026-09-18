@@ -788,7 +788,11 @@ public struct PlayerView: View {
                 .transition(Self.chromeTransition)
             }
         }
-        .background(Color.black.opacity(isMinimized ? 0 : 1))
+        // The second full-window `Color` in this view, and it needs the same
+        // `allowsHitTesting` guard as the backdrop above for the same reason:
+        // transparent or not, it took every click and scroll in the window, so
+        // nothing in the app behind the mini-player could be used at all.
+        .background(Color.black.opacity(isMinimized ? 0 : 1).allowsHitTesting(!isMinimized))
         // Drives the branch swap above: without an animated transaction on
         // this value SwiftUI runs no transition at all and the two chrome
         // sets hard-cut, however staged `chromeTransition` is. The surface
@@ -800,8 +804,19 @@ public struct PlayerView: View {
         .ignoresSafeArea(isMinimized ? [] : .all)
         #if os(macOS)
         .toolbar(.hidden, for: .windowToolbar)
-        .onContinuousHover { _ in
-            controller.showControlsBriefly()
+        // A tracking area, never `.onContinuousHover`: see
+        // `PointerMotionProbe`. The hover modifier made the player's root --
+        // the whole window, mini or not -- hit-testable, so a minimized
+        // player swallowed every click and scroll in the app behind it.
+        // Only while the player is actually up: while minimized the pointer
+        // is being used on the app, and waking the chrome of a 320x180 box
+        // for it is noise.
+        .overlay {
+            PointerMotionProbe {
+                guard !isMinimized else { return }
+                controller.showControlsBriefly()
+            }
+            .allowsHitTesting(false)
         }
         #endif
         // Not inside the guard above: the autohide timer and the menu-open

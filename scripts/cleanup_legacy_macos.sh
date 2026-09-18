@@ -35,6 +35,10 @@ CANDIDATES=(
     "$APP_SUPPORT/home-cache.json"
     "$APP_SUPPORT/detail-cache"
     # The web view the 5.x app rendered its whole UI in. 6.x has no web view.
+    # Recreated by the current app's trailer player (a WKWebView under the
+    # same bundle id), so their presence proves nothing on its own -- see
+    # install_macos.sh. Trashing them here is still right: everything else on
+    # this list says 5.x ran, and WebKit rebuilds what it needs.
     # Only the WebKit subfolder: Cache.db beside it is the URL cache, and the
     # new app shares the bundle id, so it is live.
     "$HOME/Library/Caches/com.anicat.app/WebKit"

@@ -181,17 +181,35 @@ echo "Connect your AniList account from Settings to sync your library."
 # behind, and on a machine that ran 5.x for a while the dead web view cache
 # alone is around 90 MB. Say so here rather than in the README, where nobody
 # who ran a one-line installer will look.
-LEGACY_TOTAL="$(du -sck \
-    "$HOME/Library/Application Support/Anicat/registry.db" \
-    "$HOME/Library/Application Support/Anicat/registry.json" \
-    "$HOME/Library/Application Support/Anicat/covers" \
-    "$HOME/Library/Caches/com.anicat.app/WebKit" \
-    "$HOME/Library/WebKit/com.anicat.app" \
-    2>/dev/null | tail -1 | cut -f1)"
-if [ -n "$LEGACY_TOTAL" ] && [ "$LEGACY_TOTAL" -gt 1024 ]; then
-    echo ""
-    echo "The old version left about $((LEGACY_TOTAL / 1024)) MB of data behind."
-    echo "Nothing needs it. To list it and move it to the Trash, run:"
-    echo "  curl -fsSLO https://raw.githubusercontent.com/$REPO/master/scripts/cleanup_legacy_macos.sh"
-    echo "  bash cleanup_legacy_macos.sh"
+#
+# Only these three decide whether a 5.x install was ever here. The WebKit
+# folders are not evidence: the trailer player is a WKWebView under the same
+# bundle id, so the current app recreates them the first time anyone watches a
+# trailer. Counting them told an owner who had already run the cleanup that
+# "the old version left about 6 MB behind", every install, forever.
+LEGACY_MARKERS=(
+    "$HOME/Library/Application Support/Anicat/registry.db"
+    "$HOME/Library/Application Support/Anicat/registry.json"
+    "$HOME/Library/Application Support/Anicat/covers"
+)
+LEGACY_PRESENT=""
+for path in "${LEGACY_MARKERS[@]}"; do
+    [ -e "$path" ] && LEGACY_PRESENT=1
+done
+
+if [ -n "$LEGACY_PRESENT" ]; then
+    # The web view caches are counted once something above proves 5.x ran here,
+    # because then they really are its leftovers and they are most of the size.
+    LEGACY_TOTAL="$(du -sck \
+        "${LEGACY_MARKERS[@]}" \
+        "$HOME/Library/Caches/com.anicat.app/WebKit" \
+        "$HOME/Library/WebKit/com.anicat.app" \
+        2>/dev/null | tail -1 | cut -f1)"
+    if [ -n "$LEGACY_TOTAL" ] && [ "$LEGACY_TOTAL" -gt 1024 ]; then
+        echo ""
+        echo "The old version left about $((LEGACY_TOTAL / 1024)) MB of data behind."
+        echo "Nothing needs it. To list it and move it to the Trash, run:"
+        echo "  curl -fsSLO https://raw.githubusercontent.com/$REPO/master/scripts/cleanup_legacy_macos.sh"
+        echo "  bash cleanup_legacy_macos.sh"
+    fi
 fi

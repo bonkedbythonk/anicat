@@ -837,7 +837,7 @@ public struct MpvSurface {
             // and against 1407 the last tick sits 27s short of every mark,
             // so neither the card nor auto-next ever fired. With keep-open
             // this goes true on the last frame. It never fires on a torrent
-            // whose tail is not downloaded (CLAUDE.md), so it is a backstop
+            // whose tail is not downloaded, so it is a backstop
             // for the position rules, not a replacement.
             mpv_observe_property(handle, 11, "eof-reached", MPV_FORMAT_FLAG)
             // Displayed size — what the overlay chrome needs to know where

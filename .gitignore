@@ -76,8 +76,6 @@ Thumbs.db
 *.iws
 *.sublime-workspace
 
-.playwright-mcp/
-
 # Development artifacts
 .anicat.iconset/
 applet.icns
@@ -104,8 +102,6 @@ htmlcov/
 *.swp
 *~
 
-**/*SKILL.md
-
 # Static build artifacts
 anicat_media/api/static/
 # Tauri and build artifacts
@@ -127,7 +123,6 @@ docs/*
 mpv-shot*.jpg
 
 # Editor/tooling artifacts
-skills-lock.json
 
 # Local impeccable config and hook cache
 .impeccable/

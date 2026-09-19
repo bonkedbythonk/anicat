@@ -462,14 +462,15 @@ extension AppModel {
     /// there are no skip times: the audio search runs after it and answers
     /// for most shows. Saying "no skip times" there was wrong every time
     /// detection then found the opening, which on a title AniSkip has never
-    /// covered is the usual case. `noteAudioSearchFailed` is the real end of
-    /// the line.
+    /// covered is the usual case. Nothing is shown while that search runs --
+    /// a banner for work in progress is noise -- and
+    /// `noteAudioSearchFailed` is the real end of the line.
     func noteNoSkipTimes(_ text: String) {
         guard playerController.autoSkipEnabled, playerController.skipWindows.isEmpty else { return }
-        guard !willSearchAudioForSkips else {
-            playerController.flashHUD("Looking for the opening in the audio", symbol: "waveform")
-            return
-        }
+        // Silent while the audio search still has a chance: the owner does
+        // not want a banner for work in progress, and the old line claimed
+        // an answer AniSkip was no longer entitled to give.
+        guard !willSearchAudioForSkips else { return }
         playerController.flashHUD(text, symbol: "forward.circle")
     }
 

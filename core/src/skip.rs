@@ -373,6 +373,26 @@ mod tests {
         );
     }
 
+    /// A stored reference (the `prints` blob out of `skip_references`)
+    /// against one episode's PCM: `SKIP_REF`, `SKIP_TARGET`, and
+    /// `SKIP_OFFSET` as the seconds the target starts at in the file.
+    #[test]
+    #[ignore]
+    fn real_reference_search() {
+        let (Ok(reference), Ok(target)) = (std::env::var("SKIP_REF"), std::env::var("SKIP_TARGET")) else { return };
+        let offset: f64 = std::env::var("SKIP_OFFSET").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let reference = prints_from_bytes(&std::fs::read(reference).unwrap());
+        let target = fingerprint(&read_pcm(std::path::Path::new(&target)).unwrap());
+        let started = std::time::Instant::now();
+        eprintln!(
+            "reference {} frames, target {} frames, {:?} in {:?}",
+            reference.len(),
+            target.len(),
+            find_reference(&reference, &target, offset),
+            started.elapsed()
+        );
+    }
+
     #[test]
     fn prints_round_trip_through_bytes() {
         let prints = vec![0, 1, u32::MAX, 0xdead_beef];

@@ -42,6 +42,8 @@ extension AppModel {
         hasAutoAdvancedEpisode = false
         hasLoggedAutoNextGates = false
         hasPreloadedNextEpisode = false
+        hasSearchedStoredEnding = false
+        hasBootstrappedOpening = false
         playbackSessionStartedAt = Date()
         // Fifth flag, same rule: the countdown card's "cancelled" is scoped
         // to one episode, and a cancel that survived into the next one would
@@ -959,6 +961,31 @@ extension AppModel {
         // took. The result is not read here; the real play hits the reuse
         // path in `TorrentManager::resolve`. `preload: true` keeps it from
         // taking the playing-file pin off the episode mpv is reading.
+        // Learn the opening from the next episode as soon as the stream is
+        // running, rather than at the 75% preload: a show's first episode
+        // spent its whole opening waiting for a comparison that only started
+        // 20 minutes later.
+        if currentPlaybackCatalog == .anilist, !hasBootstrappedOpening,
+           !playerController.awaitingNewFile,
+           Double(stopTime) >= Self.skipBootstrapAfterSeconds {
+            // The flag is set inside, not here: the swarm may not be far
+            // enough ahead yet, and then the next tick is a fresh chance.
+            bootstrapOpeningDetection()
+        }
+
+        // The ending search runs off the playhead, not off that preload. It
+        // used to hang from `nextEpisodePreloaded`, so the newest aired
+        // episode of a weekly show — no next episode, no preload — kept its
+        // ending even with the fingerprint already stored: measured on
+        // Watari-kun 03, whose tail the stored reference finds at
+        // 1328-1418s in 0.9s the moment anything asks it.
+        if currentPlaybackCatalog == .anilist, !hasSearchedStoredEnding, completionRulesApply,
+           !playerController.awaitingNewFile,
+           Double(stopTime) / Double(dur) * 100 >= Self.nextEpisodePreloadPct {
+            hasSearchedStoredEnding = true
+            startStoredEndingDetection()
+        }
+
         if currentPlaybackCatalog != .tmdbMovie, !hasPreloadedNextEpisode, completionRulesApply,
            playerController.hasNextEpisode,
            Double(stopTime) / Double(dur) * 100 >= Self.nextEpisodePreloadPct {

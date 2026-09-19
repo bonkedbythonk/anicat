@@ -456,6 +456,11 @@ public final class AppModel {
     // One speculative resolve of the next episode per episode session, see
     // `nextEpisodePreloadPct`.
     var hasPreloadedNextEpisode = false
+    /// One tail search per episode session, see `startStoredEndingDetection`.
+    var hasSearchedStoredEnding = false
+    /// One early pair comparison per episode session, see
+    /// `bootstrapOpeningDetection`.
+    var hasBootstrappedOpening = false
     /// Once per launch: see `preresolveUpNextIfIdle`.
     var hasPreresolvedUpNext = false
     /// That preresolve while it runs, so a play of the same episode can wait

@@ -54,14 +54,44 @@ final class HoverActivityMonitor {
         return true
     }
 
+    private var settle: DispatchWorkItem?
+
     private init() {
         // The tap, not a local monitor: responsive scrolling keeps trackpad
         // events off the main thread's monitors, so hover was firing all
         // through a scroll again.
         monitor = ScrollEventTap.shared.subscribe { [weak self] _ in
-            self?.lastScrollTime = CACurrentMediaTime()
+            guard let self else { return }
+            lastScrollTime = CACurrentMediaTime()
+            if !ScrollActivity.shared.isScrolling { ScrollActivity.shared.isScrolling = true }
+            settle?.cancel()
+            let item = DispatchWorkItem { ScrollActivity.shared.isScrolling = false }
+            settle = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: item)
         }
     }
+}
+
+/// Whether a scroll gesture is in progress, as one observable flag every
+/// hover site reads.
+///
+/// SwiftUI re-runs hover hit-testing for every registered hover responder
+/// on every frame that moves content under the pointer, and a shelf page
+/// registers one per card. Time Profiler on a driven scroll of the home
+/// page (release, 2026-09-19): 17% of main-thread time was that dispatch,
+/// `HoverResponder.containsGlobalPoints` and `NSScrollView hitTest`, for
+/// hover states `StableHoverModifier` was going to ignore anyway. Taking
+/// the cards out of hit-testing for the length of the gesture removes the
+/// responders from the walk. A flag rather than the monitor's timestamp so
+/// the sites re-evaluate twice per gesture, not once per frame.
+@MainActor @Observable
+final class ScrollActivity {
+    static let shared = ScrollActivity()
+    /// `ANICAT_NO_HOVER_GATE=1` keeps every card hit-testable through a
+    /// scroll, for same-binary A/B profiles.
+    static let gateDisabled = ProcessInfo.processInfo.environment["ANICAT_NO_HOVER_GATE"] != nil
+    var isScrolling = false
+    private init() {}
 }
 
 private struct StableHoverModifier: ViewModifier {
@@ -85,6 +115,9 @@ private struct StableHoverModifier: ViewModifier {
         // a scroll is retried by the next one the pointer's own movement
         // produces — no queue, no timer, and a pointer that never moves
         // again correctly stays un-hovered.
+        // Out of hit-testing while a gesture runs (see `ScrollActivity`).
+        // A click cannot land on a moving card anyway; the 120 ms tail is
+        // the gap between the last event of a stopped finger and a click.
         content.onContinuousHover { phase in
             switch phase {
             case .active:
@@ -99,6 +132,10 @@ private struct StableHoverModifier: ViewModifier {
                 perform(false)
             }
         }
+        // Outermost, so the hover responder itself is what leaves the
+        // hit-test walk: under the responder it excluded only the content
+        // and the walk still visited every card (17% -> 13%, measured).
+        .allowsHitTesting(ScrollActivity.gateDisabled || !ScrollActivity.shared.isScrolling)
     }
 }
 

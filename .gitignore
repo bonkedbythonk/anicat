@@ -76,10 +76,6 @@ Thumbs.db
 *.iws
 *.sublime-workspace
 
-# AI assistant working dirs & captures
-.claude/
-.copilot/
-.kilo/
 .playwright-mcp/
 
 # Development artifacts
@@ -87,10 +83,7 @@ Thumbs.db
 applet.icns
 .anicat_path
 QUICKSTART.md
-AGENTS.md
-agents.md
 docs/DEV_VS_PUBLIC.md
-HANDOFF.md
 scripts/start-dev.sh
 scripts/dev_backend.sh
 scripts/dev_frontend.sh
@@ -111,15 +104,6 @@ htmlcov/
 *.swp
 *~
 
-# AI agent / skill / instruction files (never push to GitHub)
-.github/skills/
-.github/hooks/
-.github/agents/
-**/CLAUDE.md
-**/copilot-instructions.md
-**/*.agent.md
-**/*.instructions.md
-**/*.prompt.md
 **/*SKILL.md
 
 # Static build artifacts
@@ -134,15 +118,15 @@ build_sidecar/dist/
 
 # Old Next.js source remnants
 
-.copilot/
-docs/
+docs/*
+# The screenshot gallery the README links to; the rest of docs/ stays local.
+!docs/SCREENSHOTS.md
 
 # Compiled JS from .tsx/.ts (not build output)
 
 mpv-shot*.jpg
 
 # Editor/tooling artifacts
-.kilocode/
 skills-lock.json
 
 # Local impeccable config and hook cache
@@ -176,11 +160,6 @@ AnicatApple/.build-xcode/
 AnicatApple/.build-device/
 # xcodebuild DerivedData for simulator app builds
 AnicatApple/.build-sim/
-
-# Editor/agent rule directories from other tools
-.clinerules/
-.cursor/
-.windsurf/
 
 # Windows server crate (server/), its own target like core/
 server/target/

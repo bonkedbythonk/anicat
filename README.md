@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
   </p>
 
-  <img src="assets/branding/dashboard.png" alt="Anicat home screen" width="720">
+  <img src="assets/screenshots/home.webp" alt="Anicat home screen: Up Next, this week, Watching" width="720">
 </div>
 
 ---
@@ -263,15 +263,19 @@ is never sent anywhere except AniList itself.
 
 ## Screenshots
 
-<div align="center">
-  <img src="assets/branding/dashboard.png" alt="Home screen" width="720">
-  <br><br>
-  <img src="assets/branding/detail.png" alt="Anime detail page" width="720">
-  <br><br>
-  <img src="assets/branding/manga.png" alt="Manga shelves" width="720">
-  <br><br>
-  <img src="assets/branding/stats.png" alt="Watch statistics" width="720">
-</div>
+<table>
+  <tr>
+    <td><img src="assets/screenshots/detail.webp" alt="Anime detail page: episodes, cast, related, audio choice" width="440"></td>
+    <td><img src="assets/screenshots/player.webp" alt="The player mid-episode, with skip, chapters and subtitle controls" width="440"></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/manga.webp" alt="Manga: what you are part-way through, and the reading shelf" width="440"></td>
+    <td><img src="assets/screenshots/cinema.webp" alt="Films and TV: trending, popular and top rated from TMDB" width="440"></td>
+  </tr>
+</table>
+
+Schedule, library, the manga and novel readers, search, stats, settings and
+the shortcuts sheet are in [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
 The screenshots come from a build run with `ANICAT_SCREENSHOT_MODE=1`, which
 swaps the personal data (lists, history, profile, statistics) for fixtures built

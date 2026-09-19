@@ -80,6 +80,12 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
             let settings = await UNUserNotificationCenter.current().notificationSettings()
             AppLog.write("[notify] authorization \(Self.describe(settings.authorizationStatus)) alerts \(settings.alertSetting == .enabled ? "on" : "off")")
             if ProcessInfo.processInfo.environment["ANICAT_NOTIFY_TEST"] != nil {
+                // Three seconds in, not at launch: a post 20 ms after the
+                // process started landed in Notification Center without a
+                // banner, and a banner-less delivery to the frontmost app is
+                // also what a skipped `willPresent` looks like. The delay
+                // separates "too early" from "never asked".
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
                 await post(
                     identifier: "test-\(UUID().uuidString)",
                     title: "Anicat",
@@ -302,6 +308,7 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        AppLog.write("[notify] willPresent \(notification.request.identifier) while frontmost")
         #if os(tvOS)
         completionHandler([.badge])
         #else
@@ -320,6 +327,7 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
     ) {
         let raw = response.notification.request.content.userInfo[linkKey] as? String
         let link = raw.flatMap(URL.init(string:)).flatMap(DeepLink.init(url:))
+        AppLog.write("[notify] tapped \(response.notification.request.identifier) -> \(raw ?? "no link")")
         if let link {
             Task { @MainActor in
                 AppModel.shared?.handleDeepLink(link)

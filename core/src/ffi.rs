@@ -100,6 +100,16 @@ pub struct MediaSummary {
     /// Unix seconds at which the next episode airs, when one is scheduled.
     pub next_airing_at: Option<i64>,
     pub next_episode: Option<i32>,
+    /// How many episodes have aired, or `None` when that is not knowable.
+    /// `next_episode - 1` while a show airs; the full count once the last
+    /// episode has aired and AniList still says RELEASING -- at that moment
+    /// `nextAiringEpisode` is already null, and reading that null as "nothing
+    /// released" kept every finale off Up Next and out of the notifications
+    /// (Rich Girl Caretaker ep 12, 2026-09-19). FINISHED stays `None`: a
+    /// backlogged CURRENT entry on a show finished years ago showed "Ep N
+    /// out" forever when the count was trusted there.
+    #[uniffi(default = None)]
+    pub released_episodes: Option<i32>,
     /// The AniList list entry's own id, when the row came from the user's
     /// list. `DeleteMediaListEntry` is keyed on it, and a shelf card is the
     /// only place to remove a title whose media page AniList no longer
@@ -4956,6 +4966,18 @@ fn summarize(m: &anilist::types::MediaItem) -> MediaSummary {
         list_entry_id: entry.and_then(|e| e.id),
         next_airing_at: m.next_airing_episode.as_ref().and_then(|n| n.airing_at),
         next_episode: m.next_airing_episode.as_ref().and_then(|n| n.episode),
+        released_episodes: released_episodes(m),
+    }
+}
+
+/// See `MediaSummary::released_episodes`.
+fn released_episodes(m: &anilist::types::MediaItem) -> Option<i32> {
+    if let Some(next) = m.next_airing_episode.as_ref().and_then(|n| n.episode) {
+        return Some(next - 1);
+    }
+    match m.status.as_deref() {
+        Some("RELEASING") => m.episodes,
+        _ => None,
     }
 }
 

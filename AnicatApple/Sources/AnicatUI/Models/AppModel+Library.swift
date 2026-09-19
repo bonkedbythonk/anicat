@@ -299,13 +299,11 @@ extension AppModel {
     nonisolated static func card(_ s: MediaSummary) -> MediaCard.Item {
         let total = s.episodes ?? s.chapters
         let progress = s.progress.map { Int($0) }
-        // s.nextEpisode is nil once a show stops airing, whether finished or
-        // between seasons on hiatus. MediaSummary carries no separate airing
-        // status, so falling back to `total` there can't distinguish "an
-        // episode just aired" from "this finished ages ago" — it made a
-        // backlogged CURRENT entry on a finished show show "Ep N out"
-        // forever. Only trust nextEpisode itself for the "new" signal.
-        let released = s.nextEpisode.map { Int($0) - 1 }
+        // The engine decides what counts as released (see
+        // `MediaSummary::released_episodes`): `nextEpisode - 1` alone read
+        // a finale as "nothing released", since AniList nulls the next
+        // episode the moment the last one airs.
+        let released = s.releasedEpisodes.map { Int($0) }
         let isManga = isMangaFormat(s.format) || (s.episodes == nil && s.chapters != nil)
         return MediaCard.Item(
             id: s.catalogId,
@@ -897,11 +895,9 @@ extension AppModel {
         let entries = sortedWatching.map { s in
             let progress = Int(s.progress ?? 0)
             let total = Int(s.episodes ?? 0)
-            // Same fallback caveat as Self.card: nextEpisode is nil once a
-            // show stops airing, and MediaSummary has no separate airing
-            // status to tell finished apart from mid-season, so only trust
-            // nextEpisode itself as the "new episode" signal.
-            let released = s.nextEpisode.map { Int($0) - 1 } ?? -1
+            // Same source as Self.card: the engine's released count, which
+            // still knows about a finale after AniList nulls nextEpisode.
+            let released = s.releasedEpisodes.map { Int($0) } ?? -1
             // Caught up with an airing show: the episode after the viewer's
             // progress is the one AniList has not aired. The row said
             // "EP 12 / 12" with Resume a day before episode 12 aired.

@@ -23,9 +23,139 @@ public enum AppWindow {
     /// Hides or shows the close, minimize and zoom buttons. Hidden while a
     /// stream is up: see the player mount in `RootView`.
     public static func setTrafficLightsHidden(_ hidden: Bool) {
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            main?.standardWindowButton(kind)?.isHidden = hidden
+        trafficLightsHidden = hidden
+        watchFullScreenForChrome()
+        applyChrome()
+    }
+
+    private static var trafficLightsHidden = false
+    private static var chromeObserver: NSObjectProtocol?
+
+    /// The hide is re-applied after every fullscreen transition. Playback
+    /// hides the lights on the `activeStreamURL` edge and the fullscreen
+    /// enter happens *after* it (from `PlayerView.onFirstFrame`), and AppKit
+    /// rebuilds the titlebar for the fullscreen strip: the hide landed on
+    /// views that were then replaced, so the lights came back over the
+    /// picture the moment the pointer touched the top of the screen.
+    private static func watchFullScreenForChrome() {
+        guard chromeObserver == nil else { return }
+        // `@Sendable` with `assumeIsolated` inside, same as FullScreenGuard's
+        // observers: a bare main-actor closure compiles here and is rejected
+        // by CI's older toolchain.
+        let reapply: @Sendable (Notification) -> Void = { _ in
+            MainActor.assumeIsolated { applyChrome() }
         }
+        chromeObserver = NotificationCenter.default.addObserver(
+            forName: FullScreenGuard.transitionEndedNotification, object: nil, queue: .main, using: reapply
+        )
+    }
+
+    private static func applyChrome() {
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            main?.standardWindowButton(kind)?.isHidden = trafficLightsHidden
+        }
+        // In fullscreen the buttons live in AppKit's own auto-hiding strip,
+        // which draws a band across the top of the picture. Hiding the
+        // buttons leaves the band: an empty bar over the video that also
+        // sits exactly where the player's top bar takes its hover.
+        //
+        // Hiding the titlebar container takes the buttons and the title with
+        // it, and still leaves a seam: measured on a 1512pt-wide screen with
+        // the menu bar revealed, everything 28.7pt below the menu bar's
+        // bottom edge was darkened to 0.81 of its brightness, with a hard
+        // edge at the strip's bottom. That is the host window AppKit builds
+        // the strip in, not the container inside it, so the whole window goes
+        // to alpha 0. The cost is the reveal-to-exit affordance during
+        // playback; Escape, F and the player's own chrome all still leave
+        // fullscreen.
+        applyStripHide()
+        let windows = NSApp.windows
+            .filter { $0 !== main && $0.isVisible }
+            .map { "\(type(of: $0)) alpha \(String(format: "%.2f", $0.alphaValue)) \(Int($0.frame.origin.y))+\(Int($0.frame.height))" }
+        PlayerLog.write("[chrome] traffic lights \(trafficLightsHidden ? "hidden" : "shown"), other windows: \(windows.isEmpty ? "none" : windows.joined(separator: ", "))")
+    }
+
+    /// Whether the strip should currently be out of the way at all.
+    private static var stripShouldHide: Bool {
+        trafficLightsHidden && (main?.styleMask.contains(.fullScreen) ?? false)
+    }
+
+    private static func applyStripHide() {
+        let hide = stripShouldHide
+        titlebarContainer()?.isHidden = hide
+        // The content view, not the window's alpha: AppKit animates that
+        // alpha back to 1 itself on every reveal, so a window set to 0 came
+        // back for the length of the slide-down and the poll below only
+        // caught it up to half a second later ("it still appears for a second
+        // before it disappears"). Nothing re-shows the content view, so the
+        // strip slides down empty.
+        //
+        // Restored through a reference kept from the hide, not through
+        // another lookup: once the window is out of fullscreen the buttons
+        // belong to it again and the host is unreachable, so a lookup-based
+        // restore silently missed and the next fullscreen with no stream in
+        // it got the empty strip.
+        if hide {
+            let host = fullScreenStripHost()
+            host?.contentView?.isHidden = true
+            hiddenStripHost = host
+        } else {
+            hiddenStripHost?.contentView?.isHidden = false
+            hiddenStripHost = nil
+        }
+        if hide { startStripWatch() } else { stopStripWatch() }
+    }
+
+    private static weak var hiddenStripHost: NSWindow?
+    private static var stripWatch: Timer?
+
+    /// AppKit builds and orders in the strip's host window when the pointer
+    /// reaches the top of the screen, which is long after the fullscreen
+    /// transition this class listens to -- and it posts nothing when it does,
+    /// so a hide applied at the transition is applied to a window that does
+    /// not exist yet. Polled rather than swizzled: one comparison every half
+    /// second against a window that is usually nil, only while a stream is
+    /// up in fullscreen.
+    private static func startStripWatch() {
+        guard stripWatch == nil else { return }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                guard stripShouldHide else { return stopStripWatch() }
+                titlebarContainer()?.isHidden = true
+                guard let host = fullScreenStripHost() else { return }
+                hiddenStripHost = host
+                guard let content = host.contentView, !content.isHidden else { return }
+                content.isHidden = true
+                PlayerLog.write("[chrome] strip content view was back; hidden again")
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        stripWatch = timer
+    }
+
+    private static func stopStripWatch() {
+        stripWatch?.invalidate()
+        stripWatch = nil
+    }
+
+    /// The window AppKit builds the fullscreen titlebar strip in. Nil in a
+    /// windowed player, where the buttons belong to the window itself and
+    /// there is no strip to take out.
+    private static func fullScreenStripHost() -> NSWindow? {
+        guard let host = main?.standardWindowButton(.closeButton)?.window, host !== main else { return nil }
+        return host
+    }
+
+    /// The view AppKit draws the titlebar band in, found by class name
+    /// because nothing public vends it. Walked up from the close button
+    /// rather than down from the content view: in fullscreen the strip is
+    /// hosted outside the window's own view tree.
+    private static func titlebarContainer() -> NSView? {
+        guard var view = main?.standardWindowButton(.closeButton)?.superview else { return nil }
+        while !String(describing: type(of: view)).contains("TitlebarContainer"), let parent = view.superview {
+            view = parent
+        }
+        return String(describing: type(of: view)).contains("TitlebarContainer") ? view : nil
     }
 }
 #endif

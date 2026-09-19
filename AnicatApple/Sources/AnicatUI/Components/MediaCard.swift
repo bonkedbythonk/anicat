@@ -92,6 +92,15 @@ public struct MediaCard: View, Equatable {
     public var onPrefetch: (() -> Void)?
 
     @State private var isHovered = false
+
+    /// AniList formats arrive as `TV_SHORT`, `MOVIE`, `OVA`. Sentence-casing
+    /// the whole string gave "Tv short" and "Ova"; the three-letter ones are
+    /// initialisms and stay as they came, the longer words get a capital.
+    static func displayFormat(_ raw: String) -> String {
+        raw.split(separator: "_")
+            .map { $0.count <= 3 ? String($0) : $0.capitalized }
+            .joined(separator: " ")
+    }
     /// Where the press that opened this card landed, and a counter that
     /// bumps on every such press — `rippleOnPress` reads both to centre and
     /// re-fire the Metal ripple. A `SpatialTapGesture` alongside the card's
@@ -169,15 +178,19 @@ public struct MediaCard: View, Equatable {
                     // the two lines they are; a third row of badges on every
                     // card made a shelf read as a table.
                     if isHovered {
+                        // `caps: false` and sentence case throughout: these
+                        // sit a poster's height above the card's own
+                        // "83% Ep 8 out" row and must read as the same line
+                        // of type, not a second register.
                         HStack(spacing: 4) {
                             if let format = item.format {
-                                StatusBadge(.format(format.replacingOccurrences(of: "_", with: " ")))
+                                StatusBadge(.format(Self.displayFormat(format)), caps: false)
                             }
                             if let total = item.totalEpisodesOrChapters, total > 0 {
-                                StatusBadge(.neutral("\(total) \(item.isManga ? "ch" : "ep")"))
+                                StatusBadge(.neutral("\(total) \(item.isManga ? "ch" : "ep")"), caps: false)
                             }
                             if item.isAiring {
-                                StatusBadge(.status(item.isManga ? "publishing" : "airing"))
+                                StatusBadge(.status(item.isManga ? "Publishing" : "Airing"), caps: false)
                             }
                         }
                         .padding(6)

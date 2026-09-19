@@ -264,6 +264,32 @@ extension AppModel {
         playerController.skipWindows.contains { $0.kind == kind }
     }
 
+    /// Whether the stretch a search needs can plausibly be read at all.
+    /// A torrent with no peers serves nothing, and the extractor would spend
+    /// its whole 180s timeout retrying reads the player is also waiting on:
+    /// Chuunibyou Ren ep 1 sat paused at 3.27% with zero peers ever seen
+    /// while mpv logged `Will reconnect at 8388608 ... Operation timed out`,
+    /// and the only thing the viewer ever saw was an AniSkip miss.
+    private func streamCanServe(start: Double, length: Double) async -> Bool {
+        guard let engine else { return false }
+        let duration = playerController.duration
+        guard duration > 0 else { return true }
+        let buffered = playerController.torrentBufferedFractions
+        // Empty means the file is not pinned by the torrent session at all,
+        // i.e. it is on disk: the one case this cannot be wrong about.
+        guard !buffered.isEmpty else { return true }
+        let from = max(start / duration, 0)
+        let to = min((start + length) / duration, 1)
+        if buffered.contains(where: { $0.start <= from && $0.end >= to }) { return true }
+        // The verdict is computed inside the detached task, not the stats:
+        // uniffi's types are not `Sendable` and cannot cross back out.
+        return await Task.detached(priority: .utility) { () -> Bool in
+            guard let stats = engine.playingTorrentStats() else { return true }
+            if stats.finished { return true }
+            return stats.state == "live" && (stats.peersLive > 0 || stats.peersConnecting > 0)
+        }.value
+    }
+
     private func comparePair(kind: String, catalogId: Int64, episode: Int64, url: String, otherURL: String,
                              start: Double, length: Double, preferDub: Bool) async {
         guard let engine else { return }
@@ -274,6 +300,12 @@ extension AppModel {
             try? FileManager.default.removeItem(at: mine)
             try? FileManager.default.removeItem(at: other)
         }
+        guard await streamCanServe(start: start, length: length) else {
+            print("[skipdetect] \(kind) pair for \(catalogId) ep \(episode) skipped: the stream is not being served")
+            playerController.skipDetectionStatus = "The stream has no peers; nothing to compare"
+            noteAudioSearchFailed("No skip times: this release has no seeders")
+            return
+        }
         let began = Date()
         // One after the other: both read through the torrent session, and the
         // playing episode's stream is the one that must not starve.
@@ -282,6 +314,8 @@ extension AppModel {
               await AudioExtractor.extract(url: otherURL, start: start, length: length, preferDub: preferDub, to: other),
               !Task.isCancelled else {
             print("[skipdetect] \(kind) audio for \(catalogId) ep \(episode) not extracted")
+            playerController.skipDetectionStatus = "Could not read enough audio to compare"
+            noteAudioSearchFailed("No skip times: could not read the audio")
             return
         }
         let mainPath = mine.path
@@ -300,11 +334,20 @@ extension AppModel {
         guard let engine else { return }
         let file = Self.skipScratchDirectory().appendingPathComponent("\(catalogId)-\(episode)-\(kind).raw")
         defer { try? FileManager.default.removeItem(at: file) }
-        playerController.skipDetectionStatus = "Searching this episode's audio for the stored \(kind == "op" ? "opening" : "ending")"
+        let name = kind == "op" ? "opening" : "ending"
+        guard await streamCanServe(start: start, length: length) else {
+            print("[skipdetect] \(kind) audio for \(catalogId) ep \(episode) unreadable: the stream is not being served")
+            playerController.skipDetectionStatus = "The stream has no peers; nothing to read the \(name) from"
+            noteAudioSearchFailed("No skip times: this release has no seeders")
+            return
+        }
+        playerController.skipDetectionStatus = "Searching this episode's audio for the stored \(name)"
         let began = Date()
         guard await AudioExtractor.extract(url: url, start: start, length: length, preferDub: preferDub, to: file),
               !Task.isCancelled else {
             print("[skipdetect] \(kind) audio for \(catalogId) ep \(episode) not extracted")
+            playerController.skipDetectionStatus = "Could not read enough of this episode's audio"
+            noteAudioSearchFailed("No skip times: could not read the audio")
             return
         }
         let path = file.path
@@ -322,6 +365,7 @@ extension AppModel {
         let name = kind == "op" ? "Opening" : "Ending"
         guard let span else {
             playerController.skipDetectionStatus = "\(name): not found in the audio"
+            noteAudioSearchFailed("No \(name.lowercased()) found in the audio")
             return
         }
         playerController.skipDetectionStatus = "\(name) \(PlayerController.formatTimestamp(span.start))-\(PlayerController.formatTimestamp(span.end)), \(source)"

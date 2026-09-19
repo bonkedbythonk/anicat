@@ -457,7 +457,36 @@ extension AppModel {
     /// skip with: no chapters and no AniSkip answer. Before it, a show with
     /// no community timestamps just played its opening, and the only way to
     /// learn why was the log.
+    ///
+    /// AniSkip is no longer the last word, so its miss no longer gets to say
+    /// there are no skip times: the audio search runs after it and answers
+    /// for most shows. Saying "no skip times" there was wrong every time
+    /// detection then found the opening, which on a title AniSkip has never
+    /// covered is the usual case. `noteAudioSearchFailed` is the real end of
+    /// the line.
     func noteNoSkipTimes(_ text: String) {
+        guard playerController.autoSkipEnabled, playerController.skipWindows.isEmpty else { return }
+        guard !willSearchAudioForSkips else {
+            playerController.flashHUD("Looking for the opening in the audio", symbol: "waveform")
+            return
+        }
+        playerController.flashHUD(text, symbol: "forward.circle")
+    }
+
+    /// Whether `startSkipDetection` has anything to try for this episode.
+    /// Mirrors its own guards: anything it would refuse must fall through to
+    /// the plain "no skip times" line rather than promise a search.
+    var willSearchAudioForSkips: Bool {
+        currentPlaybackCatalog == .anilist
+            && currentPlaybackCatalogId != nil
+            && currentPlaybackEpisode != nil
+            && activeStreamURL != nil
+            && playerController.duration > Self.skipHeadSeconds
+    }
+
+    /// The audio search came back empty, or could not read the file. This is
+    /// the point at which the episode really has nothing to skip with.
+    func noteAudioSearchFailed(_ text: String) {
         guard playerController.autoSkipEnabled, playerController.skipWindows.isEmpty else { return }
         playerController.flashHUD(text, symbol: "forward.circle")
     }

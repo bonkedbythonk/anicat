@@ -47,6 +47,18 @@ extension AppModel {
             playerController.skipDetectionStatus = "Waiting for the file's duration (\(Int(duration))s so far)"
             return
         }
+        // A resume past the head window has nothing to gain from this search:
+        // the opening it would find has already played, and the reference it
+        // reads from is stored, so nothing is learned either. What it costs
+        // is real -- 8 minutes of audio pulled from *behind* the playhead,
+        // through the same swarm the player is reading forward from. The
+        // owner's Chuunibyou Ren ep 1 resumed at 591s and did exactly that
+        // against a release with no peers.
+        guard playerController.currentTime < Self.skipHeadSeconds else {
+            print("[skipdetect] op search for \(catalogId) ep \(episode) skipped: the playhead is at \(Int(playerController.currentTime))s, past the \(Int(Self.skipHeadSeconds))s head window")
+            playerController.skipDetectionStatus = "Resumed past the opening; not searching for it"
+            return
+        }
         guard !hasSkipWindow(.opening) else {
             playerController.skipDetectionStatus = "Opening already known from chapters or AniSkip"
             return

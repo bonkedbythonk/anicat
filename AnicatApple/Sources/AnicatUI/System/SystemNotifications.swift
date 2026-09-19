@@ -67,8 +67,39 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
     /// lazily, because `willPresent` has to be in place before the first
     /// notification is delivered, not before the first one is scheduled.
     public func activate() {
-        guard Self.isAvailable else { return }
+        guard Self.isAvailable else {
+            AppLog.write("[notify] unavailable: \(Bundle.main.bundleURL.lastPathComponent) is not an .app")
+            return
+        }
         UNUserNotificationCenter.current().delegate = self
+        // The status line is the one thing that tells a log reader whether
+        // a silent evening was "nothing aired" or "the Mac was never asked":
+        // 20+ episodes sat in the once-only list with no banner ever seen,
+        // and nothing in the log said which.
+        Task.detached(priority: .utility) { [self] in
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            AppLog.write("[notify] authorization \(Self.describe(settings.authorizationStatus)) alerts \(settings.alertSetting == .enabled ? "on" : "off")")
+            if ProcessInfo.processInfo.environment["ANICAT_NOTIFY_TEST"] != nil {
+                await post(
+                    identifier: "test-\(UUID().uuidString)",
+                    title: "Anicat",
+                    body: "Test notification.",
+                    coverURL: nil,
+                    link: .section(.settings)
+                )
+            }
+        }
+    }
+
+    private static func describe(_ status: UNAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined: return "not determined"
+        case .denied: return "denied"
+        case .authorized: return "authorized"
+        case .provisional: return "provisional"
+        case .ephemeral: return "ephemeral"
+        @unknown default: return "unknown(\(status.rawValue))"
+        }
     }
 
     /// Asks for permission the first time a notification would actually be
@@ -82,8 +113,17 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         #else
         let options: UNAuthorizationOptions = [.alert, .sound, .badge]
         #endif
-        let granted = (try? await UNUserNotificationCenter.current()
-            .requestAuthorization(options: options)) ?? false
+        let granted: Bool
+        do {
+            granted = try await UNUserNotificationCenter.current().requestAuthorization(options: options)
+            AppLog.write("[notify] authorization request \(granted ? "granted" : "refused")")
+        } catch {
+            // Thrown, not refused: the centre has no bundle to attribute the
+            // app to, which is what a copy launched from a path LaunchServices
+            // never registered looks like.
+            granted = false
+            AppLog.write("[notify] authorization request failed: \(error.localizedDescription)")
+        }
         storeAuthorization(granted)
         return granted
     }
@@ -132,6 +172,11 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         catalog: MediaCard.CardCatalog = .anilist
     ) async {
         guard Self.isAvailable, Self.areNewEpisodeNotificationsEnabled else { return }
+        // Authorization before the once-only record: the record used to be
+        // written first, so a refused or never-answered permission burned
+        // the episode and it was never offered again once the Mac allowed
+        // notifications.
+        guard await ensureAuthorized() else { return }
         // The key carries the unit and the catalog: chapter 5, episode 5 of
         // an anime and episode 5 of the film catalogue's series 5 are three
         // pieces of news, and a shared key would let whichever arrived first
@@ -160,7 +205,7 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         episode: Int,
         coverURL: URL?
     ) async {
-        guard Self.isAvailable else { return }
+        guard Self.isAvailable, await ensureAuthorized() else { return }
         let key = "\(catalog.rawValue):\(catalogId):\(episode)"
         guard markOnce(key: Self.notifiedDownloadsKey, entry: key) else { return }
         await post(
@@ -195,7 +240,12 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         // `UNTimeIntervalNotificationTrigger` with a tiny interval — is
         // rejected below one second, so there is nothing to gain from it.
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+            AppLog.write("[notify] posted \(identifier): \(title) - \(body)")
+        } catch {
+            AppLog.write("[notify] post \(identifier) failed: \(error.localizedDescription)")
+        }
         #endif
     }
 

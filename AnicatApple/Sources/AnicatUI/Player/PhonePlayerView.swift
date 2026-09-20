@@ -35,6 +35,9 @@ struct PhonePlayerView: View {
     @State private var releaseFailure: String?
     @State private var isLoadingReleases = false
     @State private var showReleases = false
+    /// When `isBuffering` last went true; nil while playing. Drives the
+    /// stall line under the spinner.
+    @State private var bufferingSince: Date?
     @State private var flash: (symbol: String, trailing: Bool)?
     /// A swipe HUD: brightness, volume, the scrub target or the held 2x.
     @State private var hud: Hud?
@@ -124,6 +127,9 @@ struct PhonePlayerView: View {
         // clock in the same strip as the title.
         .statusBarHidden(!isMinimized)
         .sheet(isPresented: $showReleases) { releaseSheet }
+        .onChange(of: controller.isBuffering, initial: true) { _, buffering in
+            bufferingSince = buffering ? Date() : nil
+        }
         .task {
             controller.showControlsBriefly()
             fetchTracks()
@@ -960,8 +966,43 @@ struct PhonePlayerView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.8))
             }
+            // A spinner that has sat for a quarter of a minute with mpv's
+            // percentage not moving is a swarm that dried up, and on a
+            // phone the only way out was closing the player and finding
+            // the release sheet by hand. Not during a resolve: that is
+            // already a switch in progress with its own line above.
+            if controller.resolveStatus == nil, let since = bufferingSince {
+                TimelineView(.periodic(from: since, by: 1)) { context in
+                    let stalled = Int(context.date.timeIntervalSince(since))
+                    if stalled >= Self.stallNudgeSeconds {
+                        VStack(spacing: 8) {
+                            Text("Stalled for \(stalled)s")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.8))
+                            Button {
+                                showReleases = true
+                            } label: {
+                                Label("Switch release", systemImage: "square.stack.3d.up")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(.white.opacity(0.16), in: Capsule())
+                                    .foregroundStyle(.white)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 4)
+                        .transition(.opacity)
+                    }
+                }
+            }
         }
     }
+
+    /// Longer than one unchoke round (10s) and the opening watchdog's 20s
+    /// window, so a slow swarm that is still alive is not nagged, and the
+    /// watchdog's own switch gets to happen first while opening.
+    static let stallNudgeSeconds = 25
 
     static func timestamp(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }

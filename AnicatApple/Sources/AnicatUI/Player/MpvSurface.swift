@@ -1793,6 +1793,34 @@ public struct MpvSurface {
                         continue
                     }
 
+                    if ev.event_id == MPV_EVENT_END_FILE, let data = ev.data {
+                        let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
+                        PlayerLog.write("[libmpv] end-file reason \(end.reason.rawValue) error \(end.error) time-pos \(self.stringProperty("time-pos") ?? "-")")
+                        // Never observed before: a URL mpv could not open
+                        // (a range server that answered 404, an
+                        // undecodable container) ended in no file-loaded
+                        // and no error, so `awaitingNewFile` held the
+                        // spinner until the opening watchdog's 20s window
+                        // or the viewer closed the player.
+                        if end.reason == MPV_END_FILE_REASON_ERROR {
+                            let text = String(cString: mpv_error_string(end.error))
+                            await MainActor.run {
+                                self.controller.awaitingNewFile = false
+                                self.controller.reportPlaybackFailure("Could not play this stream: \(text).")
+                            }
+                        } else if end.reason == MPV_END_FILE_REASON_EOF {
+                            // `keep-open` makes `eof-reached` the usual
+                            // path; this is the fallback for a file mpv
+                            // dropped instead of holding, and the report
+                            // gate keeps the two from doubling up.
+                            await MainActor.run {
+                                guard !self.controller.awaitingNewFile else { return }
+                                self.controller.handleEndOfFile()
+                            }
+                        }
+                        continue
+                    }
+
                     if ev.event_id == MPV_EVENT_FILE_LOADED {
                         self.reconfigAttemptsForSize = 0
                         self.verifyVideoSizeIfDue(force: true)
@@ -1805,6 +1833,7 @@ public struct MpvSurface {
                         let duration = self.stringProperty("duration").flatMap(Double.init)
                         let memory = await MainActor.run {
                             self.controller.awaitingNewFile = false
+                            self.controller.playbackFailureReported = false
                             // Unconditional, empty list included: a release
                             // without chapters must not inherit the previous
                             // episode's windows.

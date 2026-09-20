@@ -539,6 +539,33 @@ public final class PlayerController {
     /// updates are dropped while this is set.
     public var awaitingNewFile: Bool = false
     public var onPlaybackStopped: (@MainActor () -> Void)?
+    /// mpv gave up on the file: a load error, or an end-of-file far short
+    /// of the duration, which is what a stream whose source died mid-episode
+    /// looks like from here (the range server or a Mac relay stops
+    /// answering, the demuxer reads EOF, mpv reports a normal end). Before
+    /// this the dead stream was recorded as a finished episode: the position
+    /// jumped to the duration, AniList was marked, auto-next armed.
+    public var onPlaybackFailed: (@MainActor (_ message: String) -> Void)?
+    /// One report per file: `eof-reached` and `MPV_EVENT_END_FILE` both
+    /// arrive for one dead stream. Reset by the surface on file-loaded.
+    public var playbackFailureReported = false
+
+    public func reportPlaybackFailure(_ message: String) {
+        guard !playbackFailureReported else { return }
+        playbackFailureReported = true
+        onPlaybackFailed?(message)
+    }
+
+    /// An end this far before the duration is a dead stream, not a finale.
+    /// 120s plus 5%: a container can overstate its duration by tens of
+    /// seconds (one release reported 1407s for 1380s of video), and the
+    /// slack has to clear that without also clearing a stream that died
+    /// two minutes in.
+    nonisolated static func isEarlyEnd(position: Double, duration: Double) -> Bool {
+        guard duration > 0 else { return false }
+        let remaining = duration - position
+        return remaining > 120 && remaining > duration * 0.05
+    }
     public var onSeek: (@Sendable (_ seconds: Double) -> Void)?
     public var onSetPause: (@Sendable (_ paused: Bool) -> Void)?
     public var isScrubbing: Bool = false
@@ -1124,11 +1151,22 @@ public final class PlayerController {
     /// on changes nothing.
     public func handleEndOfFile() {
         guard duration > 0, !isScrubbing else { return }
+        if Self.isEarlyEnd(position: currentTime, duration: duration) {
+            print("[autonext] eof-reached at \(Int(currentTime))s of \(Int(duration))s: treated as a dead stream, not an end")
+            reportPlaybackFailure("The stream stopped at \(Self.clock(currentTime)) of \(Self.clock(duration)).")
+            return
+        }
         let end = max(duration, currentTime)
         print("[autonext] eof-reached at \(Int(currentTime))s of \(Int(duration))s, countdown \(nextEpisodeCountdown.phase)")
         currentTime = end
         checkIntroStatus()
         onPositionChange?(end, duration)
+    }
+
+    nonisolated static func clock(_ seconds: Double) -> String {
+        let total = Int(max(0, seconds))
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
     /// Dismisses the card for this episode. Any key, a click outside it, or

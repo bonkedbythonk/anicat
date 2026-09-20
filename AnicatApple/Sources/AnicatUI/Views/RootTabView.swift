@@ -164,6 +164,24 @@ public struct RootTabView: View {
                     .transition(.opacity)
             }
 
+            // The Mac has drawn `errorMessage` as a toast since its play path
+            // was written; the phone read it only inside a detail page that
+            // had failed to load. A resolve that found no seeders, the
+            // opening watchdog running out of releases, a stream dying
+            // mid-episode: each set the message, closed whatever it closed,
+            // and showed nothing, so a tap "did nothing" and a player
+            // "closed itself". Above the player (30) and the resolve card
+            // (40), under onboarding (80), same as the Mac's 60.
+            if let error = model.errorMessage {
+                PhoneErrorToast(message: error, retry: model.errorRetryAction) {
+                    withAnimation(.snappy) {
+                        model.errorMessage = nil
+                        model.errorRetryAction = nil
+                    }
+                }
+                .zIndex(60)
+            }
+
             if model.resolveStartedAt != nil {
                 VStack(spacing: 10) {
                     if let startedAt = model.resolveStartedAt {
@@ -184,6 +202,7 @@ public struct RootTabView: View {
             }
         }
         .animation(.snappy, value: model.resolveStartedAt)
+        .animation(.snappy, value: model.errorMessage != nil)
         .animation(.smooth, value: model.onboardingOpen)
         // The lock is applied from `syncPlaybackSession`, which does not
         // run on a minimise; this is the one other edge it has to follow.
@@ -1521,6 +1540,69 @@ struct EmptyHint: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 32)
         .padding(.top, 64)
+    }
+}
+
+/// The Mac toast's phone twin: top of the screen under the status bar,
+/// two lines, Retry when the failure is one a retry can fix.
+private struct PhoneErrorToast: View {
+    let message: String
+    let retry: (() -> Void)?
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(SumiTheme.warning)
+                    .font(.system(size: 14))
+
+                Text(message)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(SumiTheme.foreground)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let retry {
+                    Button(action: retry) {
+                        Text("Retry")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(SumiTheme.indigo)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(SumiTheme.indigo.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    }
+                    .buttonStyle(.sumiPressable)
+                }
+
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(SumiTheme.muted)
+                        // 44pt target: the Mac's 4pt padding is a click
+                        // size, not a thumb size.
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 6)
+            .padding(.vertical, 10)
+            .background(SumiTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .overlay(
+                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                    .stroke(SumiTheme.warning.opacity(0.5), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.4), radius: 12, y: 4)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            Spacer()
+        }
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
 #endif

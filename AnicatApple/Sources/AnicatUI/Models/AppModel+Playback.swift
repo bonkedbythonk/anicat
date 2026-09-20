@@ -115,6 +115,9 @@ extension AppModel {
         playerController.onPlaybackStopped = { [weak self] in
             self?.stopPlayback()
         }
+        playerController.onPlaybackFailed = { [weak self] message in
+            self?.handlePlaybackFailure(message)
+        }
         playerController.onNextEpisode = { [weak self] in
             Task { await self?.playAdjacentEpisode(offset: 1) }
         }
@@ -1201,6 +1204,38 @@ extension AppModel {
     }
 
     /// Stops playback, records final progress into SQLite, and clears the Apple Handoff broadcast.
+    /// mpv gave up on the playing file (see `PlayerController.onPlaybackFailed`).
+    /// Closes the player and says so, with Retry re-resolving the same
+    /// episode past the reuse cache: the stream that died is the one that
+    /// cache would hand back.
+    func handlePlaybackFailure(_ message: String) {
+        let catalog = currentPlaybackCatalog
+        let catalogId = currentPlaybackCatalogId
+        let episode = currentPlaybackEpisode
+        PlayerLog.write("[playback] failed: \(message)")
+        // `handleEndOfFile` returned before moving `currentTime` to the
+        // duration, so the resume point `stopPlayback` records is where the
+        // stream died, not the end of an episode nobody saw.
+        stopPlayback()
+        // A local file (a download, the debug hook) has no episode to
+        // search for again: the message alone.
+        guard let catalogId, let episode else {
+            errorMessage = message
+            playFeedback(.error)
+            return
+        }
+        errorMessage = message + " Retry searches for the episode again."
+        errorRetryAction = { [weak self] in
+            guard let self else { return }
+            self.errorMessage = nil
+            self.errorRetryAction = nil
+            self.activeResolveTask = Task { [weak self] in
+                _ = try? await self?.resolveAndPlay(catalog: catalog, catalogId: catalogId, episode: episode, forceNewFile: true)
+            }
+        }
+        playFeedback(.error)
+    }
+
     public func stopPlayback() {
         // Read before the clear below, and gated on it: this method also
         // runs on paths where no player was open (engine teardown, a

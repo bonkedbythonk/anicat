@@ -68,8 +68,26 @@ extension AppModel {
                 }
 
                 let now = Date()
+                // A paused player is not a stalled one. Owner, 2026-09-20,
+                // on an episode opened and paused at once: "its randomly
+                // trying to connect to a new stream after i open it tho and
+                // it continues to play even though i paused it". The playhead
+                // sat still, no byte had to arrive, and the switch below
+                // reloaded the file unpaused.
+                if !controller.isPlaying {
+                    lastProgressAt = now
+                    continue
+                }
                 if let stats = engine.playingTorrentStats() {
                     let bytes = stats.fileDownloadedBytes
+                    // Complete on disk: the swarm has nothing left to send,
+                    // so "no bytes" is the normal state, not a stall. The
+                    // same evening's ep 11 was preloaded to 100% in three
+                    // minutes and then judged dead for exactly that.
+                    if stats.fileBytes > 0, bytes >= stats.fileBytes {
+                        self.openingWatchdogTask = nil
+                        return
+                    }
                     if lastBytes == nil || bytes > lastBytes! {
                         lastBytes = bytes
                         lastProgressAt = now

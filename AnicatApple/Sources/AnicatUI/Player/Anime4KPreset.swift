@@ -36,6 +36,12 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
     /// Resolves the shader files into absolute path string format expected by mpv (`path1:path2:...`)
     public func resolveMpvShaderString(bundle: Bundle? = nil) -> String {
         guard self != .off else { return "" }
+        // Test hook: a chain of absolute paths replaces the bundled one, so
+        // a candidate network can be A/B measured in the same harness as
+        // the shipped chain without a rebuild per variant.
+        if let override = ProcessInfo.processInfo.environment["ANICAT_DEBUG_SHADERS"], !override.isEmpty {
+            return override
+        }
         let activeBundle = bundle ?? Bundle.anicatResources
         let paths = shaderFileNames.compactMap { name -> String? in
             let baseName = (name as NSString).deletingPathExtension

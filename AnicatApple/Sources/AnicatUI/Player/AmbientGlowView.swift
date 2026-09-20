@@ -40,7 +40,9 @@ struct AmbientGlowView {
     /// continuous drift; 100 ms is the lag the eye reads as "with the
     /// picture" while a scene cut still lands well inside a beat.
     static let easeDuration: CFTimeInterval = 0.10
-    /// The layer's opacity; the same 0.6 the blurred version used.
+    /// The glow's strength against the picture, the same 0.6 the blurred
+    /// version used; applied through the falloff overlay, see
+    /// `AmbientGlowBandLayer.init`, not as layer opacity.
     static let opacity: Float = 0.6
 
     /// Where each band stops, in points from the window's top-left: the
@@ -213,16 +215,11 @@ final class AmbientGlowHostView: AmbientGlowPlatformView {
         let duration = animated && lastFrameID != nil ? AmbientGlowView.easeDuration : 0
         lastFrameID = frame.id
         CATransaction.begin()
-        if duration > 0 {
-            CATransaction.setAnimationDuration(duration)
-            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
-        } else {
-            CATransaction.setDisableActions(true)
-        }
-        top.colors = frame.topColors
-        bottom.colors = frame.bottomColors
-        left.colors = frame.leftColors
-        right.colors = frame.rightColors
+        CATransaction.setDisableActions(true)
+        top.setColors(frame.topColors, duration: duration)
+        bottom.setColors(frame.bottomColors, duration: duration)
+        left.setColors(frame.leftColors, duration: duration)
+        right.setColors(frame.rightColors, duration: duration)
         CATransaction.commit()
     }
 }
@@ -246,10 +243,19 @@ final class AmbientGlowBandLayer: CAGradientLayer {
             startPoint = CGPoint(x: 0.5, y: 0)
             endPoint = CGPoint(x: 0.5, y: 1)
         }
-        opacity = AmbientGlowView.opacity
-        // The 0.2 floor is what keeps the far edge of a deep bar from
-        // reading as unlit black next to a lit one.
-        fade.colors = [CGColor(gray: 0, alpha: 1), CGColor(gray: 0, alpha: 0.2)]
+        // The falloff is a black-to-blacker gradient laid over the band,
+        // not a mask on it. A masked layer, and a layer with opacity under
+        // 1 over sublayers, is rendered to an offscreen surface and
+        // composited from there on every window frame -- every mpv present,
+        // whatever the ease rate -- for each of the four bands. Over the
+        // stage's black the two are the same picture: masking the band by
+        // m at opacity o is c*o*m, and black at alpha a over the opaque band
+        // is c*(1-a), so a = 1 - o*m. o is the 0.6 the blurred version
+        // used; m runs from 1 at the picture to the 0.2 floor that keeps
+        // the far edge of a deep bar from reading as unlit black.
+        opacity = 1
+        let o = CGFloat(AmbientGlowView.opacity)
+        fade.colors = [CGColor(gray: 0, alpha: 1 - o), CGColor(gray: 0, alpha: 1 - o * 0.2)]
         switch brightEdge {
         case .top:
             fade.startPoint = CGPoint(x: 0.5, y: 0); fade.endPoint = CGPoint(x: 0.5, y: 1)
@@ -260,7 +266,7 @@ final class AmbientGlowBandLayer: CAGradientLayer {
         case .right:
             fade.startPoint = CGPoint(x: 1, y: 0.5); fade.endPoint = CGPoint(x: 0, y: 0.5)
         }
-        mask = fade
+        addSublayer(fade)
     }
 
     override init(layer: Any) {
@@ -271,5 +277,28 @@ final class AmbientGlowBandLayer: CAGradientLayer {
 
     func layoutMask() {
         fade.frame = bounds
+    }
+
+    /// Explicit rather than the implicit `colors` action, for the frame
+    /// rate: an implicit ease runs at the panel's rate, 120 Hz on a
+    /// ProMotion MacBook, and every one of those frames re-composites four
+    /// masked gradient layers over the bars. A 100 ms ease of a colour
+    /// through 60 steps instead of 120 is not visible; the GPU cost of the
+    /// glow was (26% against 19% without it, 2026-09-20).
+    func setColors(_ colors: [CGColor], duration: CFTimeInterval) {
+        if duration > 0 {
+            let ease = CABasicAnimation(keyPath: "colors")
+            // From wherever the previous ease has got to, not from its end:
+            // samples arrive faster than an ease finishes.
+            ease.fromValue = presentation()?.colors ?? self.colors
+            ease.toValue = colors
+            ease.duration = duration
+            ease.timingFunction = CAMediaTimingFunction(name: .linear)
+            ease.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            add(ease, forKey: "colors")
+        } else {
+            removeAnimation(forKey: "colors")
+        }
+        self.colors = colors
     }
 }

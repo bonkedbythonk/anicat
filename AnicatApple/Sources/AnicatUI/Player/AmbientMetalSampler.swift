@@ -32,10 +32,13 @@ final class AmbientMetalSampler {
     /// at 14:32 can be looked at on the same file, and an intermittent
     /// report otherwise names no moment at all.
     var playbackPosition: (() -> Double)?
-    /// Minimum spacing between samples. 33 ms: every other frame at 60,
-    /// every frame at 24, and about a fifth of the presents on a 120 Hz
-    /// panel; the fade in the view is 80 ms, so anything tighter is unseen.
-    var interval: CFTimeInterval = 0.033
+    /// Minimum spacing between samples. 66 ms: it was 33, and the glow on
+    /// its own measured 26% GPU against 19% for plain playback on the M4
+    /// Pro (ioreg Device Utilization, 25 s means, 2026-09-20). Each sample
+    /// is a readback on the main thread plus a colour-stop ease on four
+    /// layers; the view eases every stop over 100 ms, so consecutive
+    /// samples still overlap into one drift and nothing tighter is seen.
+    var interval: CFTimeInterval = 0.066
     /// Spacing while nothing is lit — no window letterbox and no bars found
     /// burned into the last sample. This used to be an outright `return`,
     /// which is why baked-in bars were never noticed at all: a 16:9 file on

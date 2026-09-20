@@ -40,6 +40,8 @@ lists, progress and scores stay right without you touching them.
 
 > **Disclaimer:** Anicat hosts zero content — it scrapes publicly accessible third-party sites and streams from public torrent swarms. It is for educational and personal use only, and use is at your own risk under your local laws. The developer has no affiliation with any content provider and is not responsible for how the app is used. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
 
+> **Personal project.** Anicat is built and maintained by one person for their own use. Issues and pull requests are welcome, but there is no support promised, no release schedule, and no guarantee a report gets answered.
+
 ---
 
 ## Table of Contents

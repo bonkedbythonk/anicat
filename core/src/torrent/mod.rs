@@ -1322,73 +1322,94 @@ impl TorrentManager {
         const EXTENDED_FALLBACK_SIZE: usize = 6;
         let tried_total = candidates.len().min(search::SHORTLIST_SIZE + EXTENDED_FALLBACK_SIZE);
 
-        // Race the top two candidates instead of trying them one at a time.
-        // A dead-but-not-quite candidate (peers connect, then nothing —
-        // "no seeders (pre-buffer timed out)") burns most of PREBUFFER_TIMEOUT
-        // before the sequential loop even starts the next one; observed live,
-        // that alone was 35-40s of a 65s resolve. Racing means the wait is
-        // bounded by whichever candidate actually works, not by however long
-        // the first pick takes to fail.
-        if let ([cand_a, cand_b, ..], true) = (&shortlist[..], raced) {
-            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), franchise: franchise.as_ref(), others_remain: tried_total > 2 };
-            let added_a = std::sync::Mutex::new(None);
-            let added_b = std::sync::Mutex::new(None);
-            let fut_a = self.try_candidate(client, &session, cand_a, &ctx, &added_a);
-            let fut_b = self.try_candidate(client, &session, cand_b, &ctx, &added_b);
-            tokio::pin!(fut_a);
-            tokio::pin!(fut_b);
-
-            let (result, winner, loser_fut, loser, loser_added) = tokio::select! {
-                r = &mut fut_a => (r, cand_a, fut_b, cand_b, &added_b),
-                r = &mut fut_b => (r, cand_b, fut_a, cand_a, &added_a),
+        // Keep two candidates in flight until one succeeds, instead of trying
+        // them one at a time. A dead-but-not-quite candidate (peers connect,
+        // then nothing -- "no seeders (pre-buffer timed out)") burns most of
+        // PREBUFFER_TIMEOUT before a sequential loop even starts the next one;
+        // observed live, that alone was 35-40s of a 65s resolve.
+        //
+        // Racing only the first pair was not enough: when one racer failed the
+        // code waited on the surviving racer's full budget before starting any
+        // fallback. Measured 2026-09-19 (anilist:169420 ep=6): the single-file
+        // magnet failed at 5.2s, the batch magnet then sat 26s on DHT metadata
+        // before failing, and the .torrent fallback that finally won needed
+        // 3.6s -- a ~9s job the viewer waited ~30s for. Now a failure starts
+        // the next untried candidate at once, so the wait is bounded by
+        // whichever candidate actually works, never by however long the
+        // slowest one takes to fail.
+        //
+        // Every candidate owns an `added` slot: the torrent it put into the
+        // session, or None for one the session already had (`AlreadyManaged`
+        // may be the episode mpv is reading). When a winner lands, every other
+        // slot is torn down. Not just the in-flight ones: several of
+        // `try_candidate`'s error exits (metadata timeout, file selection)
+        // return without deleting, and a cancelled future never reaches its
+        // own cleanup -- observed as a release that lost the race still
+        // writing chunks to disk at session teardown.
+        {
+            use futures_util::StreamExt;
+            let in_flight_cap = if raced { 2 } else { 1 };
+            let ctxs: Vec<CandidateContext> = (0..shortlist.len())
+                .map(|index| CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), franchise: franchise.as_ref(), others_remain: index + 1 < tried_total })
+                .collect();
+            let added: Vec<std::sync::Mutex<Option<usize>>> =
+                (0..shortlist.len()).map(|_| std::sync::Mutex::new(None)).collect();
+            let launch = |index: usize| {
+                let cand = shortlist[index];
+                let ctx = &ctxs[index];
+                let slot = &added[index];
+                let session = &session;
+                async move { (index, self.try_candidate(client, session, cand, ctx, slot).await) }
             };
-
-            let result = match result {
-                Ok(r) => Ok((r, winner)),
-                Err(e) => {
-                    log::warn!("torrent: candidate '{}' failed: {}", winner.name, e);
-                    last_err = e;
-                    // The loser was still mid-flight, not dead — worth
-                    // waiting on rather than falling all the way through to
-                    // the sequential candidates below.
-                    match loser_fut.await {
-                        Ok(r) => Ok((r, loser)),
-                        Err(e) => {
-                            log::warn!("torrent: candidate '{}' failed: {}", loser.name, e);
-                            last_err = e;
-                            Err(())
+            let mut in_flight = futures_util::stream::FuturesUnordered::new();
+            let mut next = 0;
+            while next < shortlist.len() && in_flight.len() < in_flight_cap {
+                in_flight.push(launch(next));
+                next += 1;
+            }
+            let mut won: Option<(Resolved, usize)> = None;
+            while let Some((index, result)) = in_flight.next().await {
+                match result {
+                    Ok(r) => {
+                        won = Some((r, index));
+                        break;
+                    }
+                    Err(e) => {
+                        log::warn!("torrent: candidate '{}' failed: {}", shortlist[index].name, e);
+                        last_err = e;
+                        if next < shortlist.len() {
+                            in_flight.push(launch(next));
+                            next += 1;
                         }
                     }
                 }
-            };
+            }
+            // Dropping the set stops the survivors being polled; their
+            // torrents are still in the session until the loop below.
+            drop(in_flight);
 
-            if let Ok((r, cand)) = result {
-                // Stop the losing racer before anything else. Winning the
-                // select only stops the loser's *future* being polled -- the
-                // torrent it already added stays in the session and keeps
-                // pulling its selected file at full speed, competing for
-                // bandwidth with the stream mpv is about to read. Nothing tore
-                // it down, because a cancelled future never reaches its own
-                // error-path cleanup: observed as a release that lost the race
-                // still writing chunks to disk at session teardown.
-                //
-                // The id comparison is the safety net for the case where the
-                // winner *is* the erstwhile loser (the raced pick failed and
-                // the loser was awaited into the winner's place), and for two
-                // candidates that resolved to the same torrent.
-                let loser_id = *loser_added.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(id) = loser_id.filter(|id| *id != r.torrent_id) {
-                    log::info!(
-                        "torrent: dropping losing candidate '{}' (torrent {})",
-                        loser.name, id
-                    );
-                    // librqbit logs any chunk that lands after this as
-                    // "FATAL: error writing chunk to disk ... file is None".
-                    // Benign -- writes already queued for a torrent that is
-                    // going away -- and not worth avoiding: pausing first was
-                    // measured and produced exactly the same lines.
-                    let _ = session.delete(id.into(), true).await;
-                    self.selected_files.lock().await.remove(&id);
+            if let Some((r, winner)) = won {
+                let cand = shortlist[winner];
+                for (index, slot) in added.iter().enumerate() {
+                    if index == winner {
+                        continue;
+                    }
+                    // The id comparison covers two candidates that resolved
+                    // to the same torrent.
+                    let id = *slot.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(id) = id.filter(|id| *id != r.torrent_id) {
+                        log::info!(
+                            "torrent: dropping losing candidate '{}' (torrent {})",
+                            shortlist[index].name, id
+                        );
+                        // librqbit logs any chunk that lands after this as
+                        // "FATAL: error writing chunk to disk ... file is None".
+                        // Benign -- writes already queued for a torrent that is
+                        // going away -- and not worth avoiding: pausing first was
+                        // measured and produced exactly the same lines.
+                        let _ = session.delete(id.into(), true).await;
+                        self.selected_files.lock().await.remove(&id);
+                    }
                 }
 
                 self.commit_resolution(media, episode, r, cand).await;
@@ -1401,39 +1422,6 @@ impl TorrentManager {
                     cand.name, r.torrent_id, r.file_id
                 );
                 return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
-            }
-        }
-
-        for (index, cand) in shortlist.iter().copied().enumerate().skip(if raced { 2 } else { 0 }) {
-            match self
-                .try_candidate(
-                    client,
-                    &session,
-                    cand,
-                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), franchise: franchise.as_ref(), others_remain: index + 1 < tried_total },
-                    // Sequential: each attempt is awaited to completion, so its
-                    // own error path cleans up after it and nothing is left for
-                    // the caller to tear down.
-                    &std::sync::Mutex::new(None),
-                )
-                .await
-            {
-                Ok(r) => {
-                    self.commit_resolution(media, episode, r, cand).await;
-                    let dir = self.cache_dir.clone();
-                    let session_for_cleanup = session.clone();
-                    let protected = self.cleanup_protected(Some(r.torrent_id));
-                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected).await });
-                    log::info!(
-                        "torrent: streaming '{}' (torrent {}, file {})",
-                        cand.name, r.torrent_id, r.file_id
-                    );
-                    return Ok(stream_url(proxy_port, r.torrent_id, r.file_id));
-                }
-                Err(e) => {
-                    log::warn!("torrent: candidate '{}' failed: {}", cand.name, e);
-                    last_err = e;
-                }
             }
         }
 

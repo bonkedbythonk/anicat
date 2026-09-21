@@ -146,6 +146,7 @@ query ($userName: String, $type: MediaType, $status: MediaListStatus, $sort: [Me
           title { romaji english native }
           coverImage { large medium }
           bannerImage episodes chapters duration format status season seasonYear genres tags { name rank } averageScore meanScore
+          endDate { year month day }
           nextAiringEpisode { airingAt episode timeUntilAiring }
         }
       }

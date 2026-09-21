@@ -108,6 +108,11 @@ extension AppModel {
         newlyReleasingItems = snapshot.newlyReleasing
         seasonalItems = snapshot.seasonal
         becauseYouWatched = snapshot.becauseYouWatched ?? []
+        // A launch on a fresh snapshot skips `refreshAll`, and that was the
+        // only place the air-time refresh was armed: a relaunch 35 s after
+        // the previous one sat through a 16:30 finale without refreshing
+        // and announced nothing (2026-09-21).
+        armScheduleRollover()
     }
 
     /// Empties the local watch log, and only that.

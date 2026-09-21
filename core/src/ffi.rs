@@ -102,12 +102,15 @@ pub struct MediaSummary {
     pub next_episode: Option<i32>,
     /// How many episodes have aired, or `None` when that is not knowable.
     /// `next_episode - 1` while a show airs; the full count once the last
-    /// episode has aired and AniList still says RELEASING -- at that moment
-    /// `nextAiringEpisode` is already null, and reading that null as "nothing
-    /// released" kept every finale off Up Next and out of the notifications
-    /// (Rich Girl Caretaker ep 12, 2026-09-19). FINISHED stays `None`: a
-    /// backlogged CURRENT entry on a show finished years ago showed "Ep N
-    /// out" forever when the count was trusted there.
+    /// episode has aired -- at that moment `nextAiringEpisode` is already
+    /// null, and reading that null as "nothing released" kept every finale
+    /// off Up Next and out of the notifications (Rich Girl Caretaker ep 12,
+    /// 2026-09-19). The count is trusted while AniList still says RELEASING
+    /// and for two weeks past a FINISHED show's end date: AniList flipped
+    /// "Oh Boy, Was I Wrong About Her" to FINISHED within 40 minutes of its
+    /// finale (2026-09-21), and RELEASING alone missed it. Older finishes
+    /// stay `None`: a backlogged CURRENT entry on a show finished years ago
+    /// showed "Ep N out" forever when the count was trusted there.
     #[uniffi(default = None)]
     pub released_episodes: Option<i32>,
     /// The AniList list entry's own id, when the row came from the user's
@@ -4977,8 +4980,26 @@ fn released_episodes(m: &anilist::types::MediaItem) -> Option<i32> {
     }
     match m.status.as_deref() {
         Some("RELEASING") => m.episodes,
+        Some("FINISHED") if finished_recently(m.end_date.as_ref()) => m.episodes,
         _ => None,
     }
+}
+
+/// Whether a fuzzy end date falls within the last two weeks. A partial
+/// date (year only, or year and month) is read as its first day, which
+/// errs towards "old" and therefore towards not flagging.
+fn finished_recently(end: Option<&anilist::types::FuzzyDate>) -> bool {
+    let Some(end) = end else { return false };
+    let Some(year) = end.year else { return false };
+    let Some(date) = chrono::NaiveDate::from_ymd_opt(
+        year,
+        end.month.unwrap_or(1) as u32,
+        end.day.unwrap_or(1) as u32,
+    ) else {
+        return false;
+    };
+    let age = chrono::Utc::now().date_naive().signed_duration_since(date);
+    (0..=14).contains(&age.num_days())
 }
 
 /// Everything a cinema resolve needs that the catalog has to answer first.

@@ -33,10 +33,10 @@ extension AppModel {
             print("[skipdetect] not started: catalog \(currentPlaybackCatalog) is not AniList")
             return
         }
-        guard let engine,
+        guard engine != nil,
               let catalogId = currentPlaybackCatalogId,
               let episode = currentPlaybackEpisode,
-              let url = activeStreamURL?.absoluteString else {
+              activeStreamURL != nil else {
             print("[skipdetect] not started: engine/id/episode/stream URL missing (id=\(currentPlaybackCatalogId ?? -1) ep=\(currentPlaybackEpisode ?? -1) url=\(activeStreamURL?.absoluteString ?? "nil"))")
             playerController.skipDetectionStatus = "Waiting for the stream"
             return
@@ -63,36 +63,24 @@ extension AppModel {
             playerController.skipDetectionStatus = "Opening already known from chapters or AniSkip"
             return
         }
-        let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
-        // Chained, not cancelled: this is called again from every AniSkip
-        // answer, and cancelling here tore down a bootstrap comparison that
-        // was already resolving the next episode. A new episode's task is
-        // cancelled where it should be, in `resolveAndPlay`.
-        let previous = skipDetectionTask
-        skipDetectionTask = Task { [weak self] in
-            await previous?.value
-            // A SQLite read: off the main actor like every other registry call.
-            let hasReference = await Task.detached(priority: .utility) {
-                engine.hasSkipReference(catalog: .anilist, catalogId: catalogId, kind: "op")
-            }.value
-            guard let self, !Task.isCancelled, !self.hasSkipWindow(.opening) else { return }
-            guard hasReference else {
-                print("[skipdetect] no op reference for \(catalogId) yet; waiting for the next episode's preload")
-                self.playerController.skipDetectionStatus = "No reference yet; comparing with the next episode once it preloads"
-                return
-            }
-            await self.findStored(kind: "op", catalogId: catalogId, episode: episode, url: url,
-                                  start: 0, length: Self.skipHeadSeconds, preferDub: preferDub)
-        }
+        // The search itself belongs to the position tick
+        // (`bootstrapOpeningDetection`), which waits until the playing file is
+        // on disk ahead of the playhead. Run from here it started the moment
+        // AniSkip answered: Watari-kun ep 15 decoded its head for 118s while
+        // the torrent was 1-10% down and the player was reading the same
+        // pieces, then the tick ran the identical search again in 1s.
+        // A late AniSkip answer must not overwrite a search already under way.
+        guard !hasBootstrappedOpening else { return }
+        playerController.skipDetectionStatus = "Waiting for the stream to get ahead before searching the audio"
     }
 
-    /// The first episode of a show watched has no stored opening to search
-    /// for, and the pair comparison used to wait for the 75% preload — by
-    /// which point its own opening had played 20 minutes ago. This resolves
-    /// the next episode early, purely to learn the opening from, and skips
-    /// this episode's too when the swarm is quick enough to answer before it
-    /// ends. Whatever it learns is stored either way, so episode two onward
-    /// never waits again.
+    /// The opening search, driven by the position tick. With a stored
+    /// opening it searches this episode's head for it. Without one, or when
+    /// the stored one is not in this episode, it resolves the next episode
+    /// early, purely to learn the opening from, and skips this episode's too
+    /// when the swarm is quick enough to answer before it ends. The first
+    /// episode of a show used to wait for the 75% preload, by which point its
+    /// own opening had played 20 minutes ago.
     func bootstrapOpeningDetection() {
         guard currentPlaybackCatalog == .anilist,
               let engine,
@@ -101,25 +89,12 @@ extension AppModel {
               let url = activeStreamURL?.absoluteString,
               !hasSkipWindow(.opening) else { return }
         guard playerController.duration > Self.skipHeadSeconds else { return }
-        // The same pick as the 75% preload: the next episode that has aired.
-        let sorted = playbackEpisodes
-        guard let index = sorted.firstIndex(where: { $0.number == Int(episode) }),
-              sorted.indices.contains(index + 1),
-              sorted[index + 1].isAired else {
-            // An empty list is one `ensurePlaybackEpisodes` is still filling,
-            // so the next tick tries again; anything else is a settled "there
-            // is no later episode" and must not print once a second for the
-            // rest of the episode.
-            if !sorted.isEmpty {
-                hasBootstrappedOpening = true
-                print("[skipdetect] nothing later than ep \(episode) to learn \(catalogId)'s opening from")
-            }
-            return
-        }
         // Not while the swarm is only just keeping the playing episode fed:
         // a pair comparison over a live torrent measured 180s + 121s of
-        // decode competing with the episode being watched. An empty list is
-        // a file already on disk, the one case this cannot slow down.
+        // decode competing with the episode being watched, and a stored
+        // search 118s. An empty list is a file already on disk, the one case
+        // this cannot slow down. Returning here is safe only because the
+        // tick calls again; `startSkipDetection` has no such retry.
         let buffered = playerController.torrentBufferedFractions
         if !buffered.isEmpty {
             let duration = playerController.duration
@@ -127,8 +102,16 @@ extension AppModel {
             let ahead = min((playerController.currentTime + Self.skipBootstrapLookaheadSeconds) / duration, 1)
             guard buffered.contains(where: { $0.start <= here && $0.end >= ahead }) else { return }
         }
+        // The same pick as the 75% preload: the next episode that has aired.
+        // An empty list is one `ensurePlaybackEpisodes` is still filling, and
+        // the next tick tries again; a stored opening needs no next episode
+        // unless it misses, so only a settled list is waited on.
+        let sorted = playbackEpisodes
+        guard !sorted.isEmpty else { return }
         hasBootstrappedOpening = true
-        let next = Int64(sorted[index + 1].number)
+        let next: Int64? = sorted.firstIndex(where: { $0.number == Int(episode) })
+            .flatMap { sorted.indices.contains($0 + 1) && sorted[$0 + 1].isAired ? Int64(sorted[$0 + 1].number) : nil }
+        let resumedPastHead = playerController.currentTime >= Self.skipHeadSeconds
         let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
         let title = currentPlaybackTitle
         let previous = skipDetectionTask
@@ -137,14 +120,41 @@ extension AppModel {
             let hasOpening = await Task.detached(priority: .utility) {
                 engine.hasSkipReference(catalog: .anilist, catalogId: catalogId, kind: "op")
             }.value
-            // A reference can have landed while this waited — the preload
-            // path runs the same comparison — and then the cheap search of
-            // this episode alone is the right one.
             guard let self, !Task.isCancelled, !self.hasSkipWindow(.opening) else { return }
-            guard !hasOpening else {
-                await self.findStored(kind: "op", catalogId: catalogId, episode: episode, url: url,
-                                      start: 0, length: Self.skipHeadSeconds, preferDub: preferDub)
+            var storedMissed = false
+            if hasOpening {
+                // A resume past the head window has nothing to gain from
+                // this search: the opening it would find has already played
+                // and nothing is learned. What it costs is 8 minutes of audio
+                // pulled from *behind* the playhead: Chuunibyou Ren ep 1
+                // resumed at 591s and did exactly that against a release
+                // with no peers.
+                guard !resumedPastHead else {
+                    print("[skipdetect] op search for \(catalogId) ep \(episode) skipped: resumed past the \(Int(Self.skipHeadSeconds))s head window")
+                    self.playerController.skipDetectionStatus = "Resumed past the opening; not searching for it"
+                    return
+                }
+                switch await self.findStored(kind: "op", catalogId: catalogId, episode: episode, url: url,
+                                             start: 0, length: Self.skipHeadSeconds, preferDub: preferDub,
+                                             announceMiss: next == nil) {
+                case .found, .failed: return
+                case .missed: storedMissed = true
+                }
+            }
+            guard let next else {
+                if !hasOpening {
+                    print("[skipdetect] nothing later than ep \(episode) to learn \(catalogId)'s opening from")
+                }
                 return
+            }
+            // A show whose opening changes (a second cour: Watari-kun's
+            // stored cour-1 opening was "not found" in ep 15) never matched
+            // again, because a stored reference was the only thing searched
+            // for. The comparison below overwrites it (`set_skip_reference`
+            // is an upsert), so a rewatch of cour 1 misses once and learns it
+            // back: one extra comparison per switch, not a lost opening.
+            if storedMissed {
+                print("[skipdetect] stored op for \(catalogId) not in ep \(episode); learning it again from ep \(next)")
             }
             self.playerController.skipDetectionStatus = "Fetching episode \(next) to learn the opening from"
             let req = StreamRequest(
@@ -341,9 +351,15 @@ extension AppModel {
         apply(span, kind: kind, catalogId: catalogId, episode: episode, source: "compared with the next episode")
     }
 
+    enum StoredSearch { case found, missed, failed }
+
+    /// `announceMiss: false` when a caller falls back on a miss: "not found"
+    /// followed minutes later by a skip window reads as a wrong answer.
+    @discardableResult
     private func findStored(kind: String, catalogId: Int64, episode: Int64, url: String,
-                            start: Double, length: Double, preferDub: Bool) async {
-        guard let engine else { return }
+                            start: Double, length: Double, preferDub: Bool,
+                            announceMiss: Bool = true) async -> StoredSearch {
+        guard let engine else { return .failed }
         let file = Self.skipScratchDirectory().appendingPathComponent("\(catalogId)-\(episode)-\(kind).raw")
         defer { try? FileManager.default.removeItem(at: file) }
         let name = kind == "op" ? "opening" : "ending"
@@ -351,7 +367,7 @@ extension AppModel {
             print("[skipdetect] \(kind) audio for \(catalogId) ep \(episode) unreadable: the stream is not being served")
             playerController.skipDetectionStatus = "The stream has no peers; nothing to read the \(name) from"
             noteAudioSearchFailed("No skip times: this release has no seeders")
-            return
+            return .failed
         }
         playerController.skipDetectionStatus = "Searching this episode's audio for the stored \(name)"
         let began = Date()
@@ -360,7 +376,7 @@ extension AppModel {
             print("[skipdetect] \(kind) audio for \(catalogId) ep \(episode) not extracted")
             playerController.skipDetectionStatus = "Could not read enough of this episode's audio"
             noteAudioSearchFailed("No skip times: could not read the audio")
-            return
+            return .failed
         }
         let path = file.path
         let span = await Task.detached(priority: .utility) {
@@ -368,7 +384,9 @@ extension AppModel {
                 .map { (start: $0.start, end: $0.end) }
         }.value
         print("[skipdetect] \(kind) reference in \(catalogId) ep \(episode): \(span.map { "\(Int($0.start))-\(Int($0.end))s" } ?? "not found") in \(Int(Date().timeIntervalSince(began)))s")
+        guard span != nil || announceMiss else { return .missed }
         apply(span, kind: kind, catalogId: catalogId, episode: episode, source: "matched the stored fingerprint")
+        return span == nil ? .missed : .found
     }
 
     private func apply(_ span: (start: Double, end: Double)?, kind: String, catalogId: Int64, episode: Int64, source: String) {

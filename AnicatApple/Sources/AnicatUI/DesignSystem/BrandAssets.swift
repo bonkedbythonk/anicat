@@ -10,6 +10,16 @@ public enum BrandAssets {
     /// The authentic Anicat mark for the macOS status bar.
     public static let menuBarIcon: Image? = {
         #if os(macOS)
+        return menuBarNSImage.map { Image(nsImage: $0) }
+        #else
+        return menuBarUIImage
+        #endif
+    }()
+
+    #if os(macOS)
+    /// The same mark as an `NSImage`, for the `NSStatusItem` button, which
+    /// takes no SwiftUI `Image`.
+    public static let menuBarNSImage: NSImage? = {
         let targetSize = NSSize(width: 16, height: 15)
 
         // 1. Try pre-bundled multi-resolution TIFF containing both 1x and 2x Retina representations
@@ -21,7 +31,7 @@ public enum BrandAssets {
             if let img = NSImage(contentsOf: url) {
                 img.isTemplate = true
                 img.size = targetSize
-                return Image(nsImage: img)
+                return img
             }
         }
 
@@ -48,7 +58,7 @@ public enum BrandAssets {
 
         if addedRep {
             image.isTemplate = true
-            return Image(nsImage: image)
+            return image
         }
 
         // 3. Fallback to tray_icon or anicat_logo
@@ -62,11 +72,13 @@ public enum BrandAssets {
             if let img = NSImage(contentsOf: url) {
                 img.isTemplate = true
                 img.size = targetSize
-                return Image(nsImage: img)
+                return img
             }
         }
         return nil
-        #else
+    }()
+    #else
+    private static let menuBarUIImage: Image? = {
         let candidates = [
             Bundle.anicatResources.url(forResource: "anicat_menu_icon", withExtension: "png"),
             Bundle.anicatResources.url(forResource: "anicat_menu_icon", withExtension: "png", subdirectory: "Images"),
@@ -79,6 +91,6 @@ public enum BrandAssets {
             }
         }
         return nil
-        #endif
     }()
+    #endif
 }

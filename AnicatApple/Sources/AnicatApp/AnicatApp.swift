@@ -16,6 +16,14 @@ final class AppearanceLock: NSObject, NSApplicationDelegate {
     /// A Dock click with no visible window (the main window hidden behind a
     /// fullscreen space that was left, or closed) brings the window back
     /// rather than doing nothing.
+    /// SwiftUI answers true here for an app without a `MenuBarExtra` scene.
+    /// The status item is an `NSStatusItem` now, so without this the app
+    /// exited 0 three seconds after a launch that opened no window (the
+    /// reopen-to-self case below), and Cmd-W would have quit it too.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { AppWindow.main?.makeKeyAndOrderFront(nil) }
         return true
@@ -27,6 +35,9 @@ final class AppearanceLock: NSObject, NSApplicationDelegate {
         // over a light ground.
         ThemeStore.shared.applyToNativeChrome()
         _ = ScrollPocketWorkaround.disableScrollPocketsOnce
+        if let model = AppModel.shared {
+            MenuBarController.shared.install(model: model)
+        }
         // A `Window` scene does not always open at launch: after a kill or a
         // crash (no clean quit to record the window as open) the app came up
         // with the menu bar icon, the log's first line and nothing else, until
@@ -313,150 +324,153 @@ struct AnicatApp: App {
         // still left the detail page's hero taller than it wanted to be.
         // 1213x754 is the size the app was actually settled at in use.
         .defaultSize(width: 1213, height: 754)
-
-        MenuBarExtra {
-            // `.window` style renders arbitrary SwiftUI in a popover instead of
-            // a plain NSMenu, which is what makes the real MenuBarView (cover
-            // art, resume card) usable here instead of a menu of text rows.
-            MenuBarView(
-                lastWatchedTitle: model.activeStreamURL != nil
-                    ? (model.currentPlaybackTitle ?? model.playerController.title)
-                    : model.upNextItems.first?.title,
-                lastWatchedEpisode: model.activeStreamURL != nil
-                    ? Int(model.currentPlaybackEpisode ?? Int64(model.playerController.episodeNumber))
-                    : model.upNextItems.first.map { Int($0.nextEpisodeOrChapter) },
-                lastWatchedThumbnailURL: model.upNextItems.first?.thumbnailURL,
-                // "Airing today", not "airing at some point": `scheduleItems`
-                // is the whole forward schedule, so without the date test
-                // this listed episodes a fortnight out under a heading that
-                // says today. Watching-only, because a menu bar popover is
-                // the viewer's own queue and not a catalog listing.
-                airingItems: model.scheduleItems
-                    .filter { $0.isWatching && Calendar.current.isDateInToday(Date(timeIntervalSince1970: TimeInterval($0.airingAt))) }
-                    .map {
-                        MenuBarView.AiringTodayItem(
-                            id: $0.id,
-                            title: $0.title,
-                            episodeNumber: $0.episodeNumber,
-                            countdownText: $0.countdownText
-                        )
-                    },
-                // Everything after the one already drawn in the resume card
-                // above, so the same title is not offered twice.
-                upNext: model.upNextItems
-                    .dropFirst(model.activeStreamURL == nil ? 1 : 0)
-                    .prefix(3)
-                    .map {
-                        MenuBarView.UpNextItem(
-                            id: $0.id,
-                            title: $0.title,
-                            episodeNumber: Int($0.nextEpisodeOrChapter),
-                            thumbnailURL: $0.thumbnailURL
-                        )
-                    },
-                sleepTimerCaption: model.sleepTimerCaption,
-                nowPlaying: model.activeStreamURL != nil ? model.playerController : nil,
-                onOpenAiringItem: { item in
-                    model.handleDeepLink(.title(id: item.id, isManga: false))
-                },
-                onPlayUpNext: { item in
-                    model.handleDeepLink(.play(id: item.id, episode: item.episodeNumber))
-                },
-                onSetSleepTimer: { choice in
-                    switch choice {
-                    case .off: model.sleepTimer = .off
-                    case .afterEpisode: model.sleepTimer = .afterEpisode
-                    case .minutes(let m):
-                        model.sleepTimer = .at(Date().addingTimeInterval(TimeInterval(m * 60)))
-                    }
-                },
-                onMarkWatched: model.activeStreamURL != nil ? {
-                    guard let id = model.currentPlaybackCatalogId,
-                          let ep = model.currentPlaybackEpisode else { return }
-                    model.markEpisodeFinished(catalogId: id, episode: ep)
-                } : nil,
-                onResumeLastWatched: {
-                    if model.activeStreamURL != nil {
-                        // Restore the player if it was backgrounded (see
-                        // `AppModel.isPlayerMinimized`) rather than only
-                        // toggling play/pause somewhere the viewer can't
-                        // see — "Resume" should mean "show me the video",
-                        // not silently unpause it off-screen.
-                        NSApp.activate(ignoringOtherApps: true)
-                        AppWindow.main?.makeKeyAndOrderFront(nil)
-                        // Bare assignment: `PlayerView.minimizeCurve` owns
-                        // this transition, and a `withAnimation` here ran a
-                        // second transaction with a different curve against
-                        // it.
-                        model.isPlayerMinimized = false
-                        if !model.playerController.isPlaying {
-                            model.playerController.togglePlayPause()
-                        }
-                    } else if let first = model.upNextItems.first {
-                        if first.unit != "CH" {
-                            // Same sequence as the Up Next shelf: the show's
-                            // page opens first, so the viewer lands on a page
-                            // with a Cancel and an episode list rather than a
-                            // bare spinner over whatever was on screen.
-                            NSApp.activate(ignoringOtherApps: true)
-                            AppWindow.main?.makeKeyAndOrderFront(nil)
-                            playFromShelf(
-                                model: model,
-                                catalogId: first.id,
-                                episode: first.nextEpisodeOrChapter,
-                                title: first.title,
-                                coverURL: model.knownCovers[first.id] ?? first.thumbnailURL
-                            )
-                        } else {
-                            Task { @MainActor in
-                                await model.openDetail(id: first.id, isManga: true)
-                            }
-                        }
-                    }
-                },
-                onOpenMainApp: {
-                    NSApp.activate(ignoringOtherApps: true)
-                    AppWindow.main?.makeKeyAndOrderFront(nil)
-                },
-                onOpenSettings: {
-                    NSApp.activate(ignoringOtherApps: true)
-                    // The actual bug this fixes: `PlayerView` used to render
-                    // unconditionally over everything whenever a stream was
-                    // active, regardless of `currentNavSection` — so opening
-                    // Settings from the menu bar while something was playing
-                    // switched the section underneath but the video stayed
-                    // covering the whole window with no visible way back to
-                    // the app. Minimizing (not stopping) it is what actually
-                    // uncovers Settings.
-                    // Same as above: the curve lives in `PlayerView`.
-                    model.isPlayerMinimized = true
-                    // `RootView`'s detail page renders whenever
-                    // `selectedMediaDetails` is set, regardless of
-                    // `currentNavSection` -- the sidebar's own click handler
-                    // already clears it for exactly this reason. This entry
-                    // point skipped that, so opening Settings from the menu
-                    // bar while a title's detail page was open silently did
-                    // nothing: the section changed underneath, but the
-                    // detail page kept rendering over it.
-                    model.clearPersonPages()
-                    model.clearDetail()
-                    model.currentNavSection = .settings
-                    AppWindow.main?.makeKeyAndOrderFront(nil)
-                },
-                onQuit: {
-                    NSApp.terminate(nil)
-                }
-            )
-        } label: {
-            if let icon = BrandAssets.menuBarIcon {
-                icon
-            } else {
-                Image(systemName: "pawprint.fill")
-            }
-        }
-        .menuBarExtraStyle(.window)
     }
 }
+
+/// The status bar popover's content, built from the model on every render.
+///
+/// This used to be the body of a `MenuBarExtra(.window)` scene. SwiftUI
+/// activates the app before it shows that popover, and activating a hidden
+/// app (Cmd-H) unhides every window it has -- so the icon "opened Anicat"
+/// after a hide and only showed the menu otherwise [measured 2026-09-21:
+/// no reopen event, main window visible, app active]. `MenuBarController`
+/// shows the same view from an `NSPopover` without activating anything.
+struct MenuBarPopoverContent: View {
+    let model: AppModel
+
+    var body: some View {
+        MenuBarView(
+            lastWatchedTitle: model.activeStreamURL != nil
+                ? (model.currentPlaybackTitle ?? model.playerController.title)
+                : model.upNextItems.first?.title,
+            lastWatchedEpisode: model.activeStreamURL != nil
+                ? Int(model.currentPlaybackEpisode ?? Int64(model.playerController.episodeNumber))
+                : model.upNextItems.first.map { Int($0.nextEpisodeOrChapter) },
+            lastWatchedThumbnailURL: model.upNextItems.first?.thumbnailURL,
+            // "Airing today", not "airing at some point": `scheduleItems`
+            // is the whole forward schedule, so without the date test
+            // this listed episodes a fortnight out under a heading that
+            // says today. Watching-only, because a menu bar popover is
+            // the viewer's own queue and not a catalog listing.
+            airingItems: model.scheduleItems
+                .filter { $0.isWatching && Calendar.current.isDateInToday(Date(timeIntervalSince1970: TimeInterval($0.airingAt))) }
+                .map {
+                    MenuBarView.AiringTodayItem(
+                        id: $0.id,
+                        title: $0.title,
+                        episodeNumber: $0.episodeNumber,
+                        countdownText: $0.countdownText
+                    )
+                },
+            // Everything after the one already drawn in the resume card
+            // above, so the same title is not offered twice.
+            upNext: model.upNextItems
+                .dropFirst(model.activeStreamURL == nil ? 1 : 0)
+                .prefix(3)
+                .map {
+                    MenuBarView.UpNextItem(
+                        id: $0.id,
+                        title: $0.title,
+                        episodeNumber: Int($0.nextEpisodeOrChapter),
+                        thumbnailURL: $0.thumbnailURL
+                    )
+                },
+            sleepTimerCaption: model.sleepTimerCaption,
+            nowPlaying: model.activeStreamURL != nil ? model.playerController : nil,
+            onOpenAiringItem: { item in
+                model.handleDeepLink(.title(id: item.id, isManga: false))
+            },
+            onPlayUpNext: { item in
+                model.handleDeepLink(.play(id: item.id, episode: item.episodeNumber))
+            },
+            onSetSleepTimer: { choice in
+                switch choice {
+                case .off: model.sleepTimer = .off
+                case .afterEpisode: model.sleepTimer = .afterEpisode
+                case .minutes(let m):
+                    model.sleepTimer = .at(Date().addingTimeInterval(TimeInterval(m * 60)))
+                }
+            },
+            onMarkWatched: model.activeStreamURL != nil ? {
+                guard let id = model.currentPlaybackCatalogId,
+                      let ep = model.currentPlaybackEpisode else { return }
+                model.markEpisodeFinished(catalogId: id, episode: ep)
+            } : nil,
+            onResumeLastWatched: {
+                if model.activeStreamURL != nil {
+                    // Restore the player if it was backgrounded (see
+                    // `AppModel.isPlayerMinimized`) rather than only
+                    // toggling play/pause somewhere the viewer can't
+                    // see — "Resume" should mean "show me the video",
+                    // not silently unpause it off-screen.
+                    NSApp.activate(ignoringOtherApps: true)
+                    AppWindow.main?.makeKeyAndOrderFront(nil)
+                    // Bare assignment: `PlayerView.minimizeCurve` owns
+                    // this transition, and a `withAnimation` here ran a
+                    // second transaction with a different curve against
+                    // it.
+                    model.isPlayerMinimized = false
+                    if !model.playerController.isPlaying {
+                        model.playerController.togglePlayPause()
+                    }
+                } else if let first = model.upNextItems.first {
+                    if first.unit != "CH" {
+                        // Same sequence as the Up Next shelf: the show's
+                        // page opens first, so the viewer lands on a page
+                        // with a Cancel and an episode list rather than a
+                        // bare spinner over whatever was on screen.
+                        NSApp.activate(ignoringOtherApps: true)
+                        AppWindow.main?.makeKeyAndOrderFront(nil)
+                        playFromShelf(
+                            model: model,
+                            catalogId: first.id,
+                            episode: first.nextEpisodeOrChapter,
+                            title: first.title,
+                            coverURL: model.knownCovers[first.id] ?? first.thumbnailURL
+                        )
+                    } else {
+                        Task { @MainActor in
+                            await model.openDetail(id: first.id, isManga: true)
+                        }
+                    }
+                }
+            },
+            onOpenMainApp: {
+                NSApp.activate(ignoringOtherApps: true)
+                AppWindow.main?.makeKeyAndOrderFront(nil)
+            },
+            onOpenSettings: {
+                NSApp.activate(ignoringOtherApps: true)
+                // The actual bug this fixes: `PlayerView` used to render
+                // unconditionally over everything whenever a stream was
+                // active, regardless of `currentNavSection` — so opening
+                // Settings from the menu bar while something was playing
+                // switched the section underneath but the video stayed
+                // covering the whole window with no visible way back to
+                // the app. Minimizing (not stopping) it is what actually
+                // uncovers Settings.
+                // Same as above: the curve lives in `PlayerView`.
+                model.isPlayerMinimized = true
+                // `RootView`'s detail page renders whenever
+                // `selectedMediaDetails` is set, regardless of
+                // `currentNavSection` -- the sidebar's own click handler
+                // already clears it for exactly this reason. This entry
+                // point skipped that, so opening Settings from the menu
+                // bar while a title's detail page was open silently did
+                // nothing: the section changed underneath, but the
+                // detail page kept rendering over it.
+                model.clearPersonPages()
+                model.clearDetail()
+                model.currentNavSection = .settings
+                AppWindow.main?.makeKeyAndOrderFront(nil)
+            },
+            onQuit: {
+                NSApp.terminate(nil)
+            }
+        )
+    }
+}
+
 
 #else
 

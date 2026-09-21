@@ -78,7 +78,13 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         // and nothing in the log said which.
         Task.detached(priority: .utility) { [self] in
             let settings = await UNUserNotificationCenter.current().notificationSettings()
+            // tvOS has no alert style at all: `alertSetting` is marked
+            // unavailable there and the tvOS CI job failed on this line.
+            #if os(tvOS)
+            AppLog.write("[notify] authorization \(Self.describe(settings.authorizationStatus))")
+            #else
             AppLog.write("[notify] authorization \(Self.describe(settings.authorizationStatus)) alerts \(settings.alertSetting == .enabled ? "on" : "off")")
+            #endif
             if ProcessInfo.processInfo.environment["ANICAT_NOTIFY_TEST"] != nil {
                 // Three seconds in, not at launch: a post 20 ms after the
                 // process started landed in Notification Center without a

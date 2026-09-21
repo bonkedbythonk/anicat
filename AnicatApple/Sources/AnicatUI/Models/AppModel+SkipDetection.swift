@@ -109,8 +109,7 @@ extension AppModel {
         let sorted = playbackEpisodes
         guard !sorted.isEmpty else { return }
         hasBootstrappedOpening = true
-        let next: Int64? = sorted.firstIndex(where: { $0.number == Int(episode) })
-            .flatMap { sorted.indices.contains($0 + 1) && sorted[$0 + 1].isAired ? Int64(sorted[$0 + 1].number) : nil }
+        let neighbour = neighbourEpisode(of: episode)
         let resumedPastHead = playerController.currentTime >= Self.skipHeadSeconds
         let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
         let title = currentPlaybackTitle
@@ -136,14 +135,14 @@ extension AppModel {
                 }
                 switch await self.findStored(kind: "op", catalogId: catalogId, episode: episode, url: url,
                                              start: 0, length: Self.skipHeadSeconds, preferDub: preferDub,
-                                             announceMiss: next == nil) {
+                                             announceMiss: neighbour == nil) {
                 case .found, .failed: return
                 case .missed: storedMissed = true
                 }
             }
-            guard let next else {
+            guard let neighbour else {
                 if !hasOpening {
-                    print("[skipdetect] nothing later than ep \(episode) to learn \(catalogId)'s opening from")
+                    print("[skipdetect] no other aired episode to learn \(catalogId)'s opening from")
                 }
                 return
             }
@@ -154,38 +153,11 @@ extension AppModel {
             // is an upsert), so a rewatch of cour 1 misses once and learns it
             // back: one extra comparison per switch, not a lost opening.
             if storedMissed {
-                print("[skipdetect] stored op for \(catalogId) not in ep \(episode); learning it again from ep \(next)")
+                print("[skipdetect] stored op for \(catalogId) not in ep \(episode); learning it again from ep \(neighbour)")
             }
-            self.playerController.skipDetectionStatus = "Fetching episode \(next) to learn the opening from"
-            let req = StreamRequest(
-                catalog: .anilist,
-                catalogId: catalogId,
-                episode: next,
-                title: title,
-                preferDub: preferDub,
-                chosenName: nil,
-                resumeFraction: nil,
-                preload: true
-            )
-            let began = Date()
-            let otherURL = await Task.detached(priority: .utility) { () -> String? in
-                try? await engine.resolveStream(req: req).url
-            }.value
-            guard !Task.isCancelled, self.currentPlaybackEpisode == episode else { return }
-            guard let otherURL else {
-                print("[skipdetect] ep \(next) of \(catalogId) did not resolve, no opening to learn")
-                self.playerController.skipDetectionStatus = "Episode \(next) did not resolve; nothing to compare with"
-                return
-            }
-            print("[skipdetect] ep \(next) of \(catalogId) resolved in \(Int(Date().timeIntervalSince(began)))s to learn the opening from")
-            // `hasPreloadedNextEpisode` stays false on purpose. Setting it
-            // here skipped the 75% preload, and with it `nextEpisodePreloaded`
-            // — the only path that learns an *ending* from scratch, so this
-            // episode traded its outro for its opening. The preload's own
-            // resolve is the cheap reuse path once this one has added the
-            // torrent (measured 798-955ms).
-            self.preloadedNextStream = (catalogId, next, otherURL)
-            self.playerController.skipDetectionStatus = "Comparing episodes \(episode) and \(next)"
+            guard let otherURL = await self.resolveNeighbour(neighbour, catalogId: catalogId, episode: episode,
+                                                            name: "opening", title: title, preferDub: preferDub)
+            else { return }
             // The full head window, not a cheaper one: this show's own first
             // episode opens at 299s (the cold open before it runs that long),
             // and a 300s window would have read one second of the opening.
@@ -193,6 +165,70 @@ extension AppModel {
                                    otherURL: otherURL, start: 0,
                                    length: Self.skipHeadSeconds, preferDub: preferDub)
         }
+    }
+
+    /// The episode a changed or unknown segment is learned from: the next
+    /// aired one, else the one before. Next first, because the first episode
+    /// of a new cour shares its songs with the one after it and not the one
+    /// before. The one before is for the airing edge -- the newest episode of
+    /// a weekly show has no next, which is every episode the owner watches
+    /// as it airs, so next-only never learned a cour-2 song there at all.
+    /// Compared with a cour-1 episode it shares nothing, stores nothing, and
+    /// the week after learns it from this one.
+    func neighbourEpisode(of episode: Int64) -> Int64? {
+        let sorted = playbackEpisodes
+        guard let index = sorted.firstIndex(where: { $0.number == Int(episode) }) else { return nil }
+        if sorted.indices.contains(index + 1), sorted[index + 1].isAired {
+            return Int64(sorted[index + 1].number)
+        }
+        if sorted.indices.contains(index - 1) {
+            return Int64(sorted[index - 1].number)
+        }
+        return nil
+    }
+
+    /// Resolves `neighbour` purely to read its audio. The 75% preload's
+    /// stream is reused when it is that episode, rather than resolved again.
+    private func resolveNeighbour(_ neighbour: Int64, catalogId: Int64, episode: Int64, name: String,
+                                  title: String?, preferDub: Bool) async -> String? {
+        guard let engine else { return nil }
+        if let preloaded = preloadedNextStream, preloaded.catalogId == catalogId, preloaded.episode == neighbour {
+            playerController.skipDetectionStatus = "Comparing episodes \(episode) and \(neighbour)"
+            return preloaded.url
+        }
+        playerController.skipDetectionStatus = "Fetching episode \(neighbour) to learn the \(name) from"
+        let req = StreamRequest(
+            catalog: .anilist,
+            catalogId: catalogId,
+            episode: neighbour,
+            title: title,
+            preferDub: preferDub,
+            chosenName: nil,
+            resumeFraction: nil,
+            preload: true
+        )
+        let began = Date()
+        let otherURL = await Task.detached(priority: .utility) { () -> String? in
+            try? await engine.resolveStream(req: req).url
+        }.value
+        guard !Task.isCancelled, currentPlaybackEpisode == episode else { return nil }
+        guard let otherURL else {
+            print("[skipdetect] ep \(neighbour) of \(catalogId) did not resolve, no \(name) to learn")
+            playerController.skipDetectionStatus = "Episode \(neighbour) did not resolve; nothing to compare with"
+            return nil
+        }
+        print("[skipdetect] ep \(neighbour) of \(catalogId) resolved in \(Int(Date().timeIntervalSince(began)))s to learn the \(name) from")
+        // `hasPreloadedNextEpisode` stays false on purpose. Setting it here
+        // skipped the 75% preload, and with it `nextEpisodePreloaded` -- the
+        // path that learns an *ending* from scratch when there is a next
+        // episode, so this episode traded its outro for its opening. The
+        // preload's own resolve is the cheap reuse path once this one has
+        // added the torrent (measured 798-955ms).
+        if neighbour > episode {
+            preloadedNextStream = (catalogId, neighbour, otherURL)
+        }
+        playerController.skipDetectionStatus = "Comparing episodes \(episode) and \(neighbour)"
+        return otherURL
     }
 
     /// The tail search, driven by the playhead reaching
@@ -219,20 +255,46 @@ extension AppModel {
                 engine.hasSkipReference(catalog: .anilist, catalogId: catalogId, kind: "ed")
             }.value
             guard let self, !Task.isCancelled, !self.hasSkipWindow(.ending) else { return }
-            guard hasEnding else {
+            let neighbour = self.neighbourEpisode(of: episode)
+            if hasEnding {
+                let result = await self.findStored(kind: "ed", catalogId: catalogId, episode: episode, url: url,
+                                                   start: tailStart, length: Self.skipTailSeconds,
+                                                   preferDub: preferDub, announceMiss: neighbour == nil)
+                guard result == .missed, let neighbour else { return }
+                // The ending changes with the cour just as the opening does,
+                // and a stored cour-1 ending was then "not found" in every
+                // later episode. Same cure: compare with a neighbour, which
+                // overwrites the stored one.
+                print("[skipdetect] stored ed for \(catalogId) not in ep \(episode); learning it again from ep \(neighbour)")
+            } else if neighbour.map({ $0 > episode }) ?? false {
+                // A next episode exists, so the 75% preload is on its way and
+                // learns the ending in `nextEpisodePreloaded`.
                 print("[skipdetect] no ed reference for \(catalogId) yet; waiting for the next episode's preload")
                 return
+            } else if neighbour == nil {
+                print("[skipdetect] no other aired episode to learn \(catalogId)'s ending from")
+                return
             }
-            await self.findStored(kind: "ed", catalogId: catalogId, episode: episode, url: url,
-                                  start: tailStart, length: Self.skipTailSeconds, preferDub: preferDub)
+            // Here with no stored ending and no next episode: the newest
+            // episode of a weekly show, which the preload never serves.
+            guard let neighbour,
+                  let otherURL = await self.resolveNeighbour(neighbour, catalogId: catalogId, episode: episode,
+                                                            name: "ending", title: self.currentPlaybackTitle,
+                                                            preferDub: preferDub)
+            else { return }
+            // The neighbour's duration is not known before it plays; releases
+            // of one show run within seconds of each other, and the tail
+            // window is wide enough to absorb that.
+            await self.comparePair(kind: "ed", catalogId: catalogId, episode: episode, url: url,
+                                   otherURL: otherURL, start: tailStart,
+                                   length: Self.skipTailSeconds, preferDub: preferDub)
         }
     }
 
-    /// The preload landed. With a stored ending, search this episode's tail
-    /// for it (the playhead is now close to it). Without references, compare
-    /// the playing episode with the next one: the opening found is too late
-    /// for this episode, but the ending usually is not, and every episode
-    /// after this one has both.
+    /// The preload landed. Without references, compare the playing episode
+    /// with the next one: the opening found is too late for this episode,
+    /// but the ending usually is not, and every episode after this one has
+    /// both. A stored ending is not searched here; see the comment below.
     func nextEpisodePreloaded(catalogId: Int64, episode: Int64, url: String) {
         guard currentPlaybackCatalogId == catalogId else { return }
         preloadedNextStream = (catalogId, episode, url)
@@ -260,19 +322,17 @@ extension AppModel {
             }.value
             guard let self, !Task.isCancelled else { return }
             let tailStart = max(duration - Self.skipTailSeconds, 0)
-            if needsEnding, !self.hasSkipWindow(.ending) {
-                if hasEnding {
-                    await self.findStored(kind: "ed", catalogId: catalogId, episode: playingEpisode, url: playingURL,
-                                          start: tailStart, length: Self.skipTailSeconds, preferDub: preferDub)
-                } else {
-                    self.playerController.skipDetectionStatus = "Comparing episodes \(playingEpisode) and \(episode)"
-                    // The next episode's duration is not known before it
-                    // plays; releases of one show run within seconds of each
-                    // other, and the tail window is wide enough to absorb that.
-                    await self.comparePair(kind: "ed", catalogId: catalogId, episode: playingEpisode,
-                                           url: playingURL, otherURL: url, start: tailStart,
-                                           length: Self.skipTailSeconds, preferDub: preferDub)
-                }
+            // A stored ending is searched, and relearned on a miss, by
+            // `startStoredEndingDetection` from the same 75% tick; searching
+            // it here as well ran the identical search twice.
+            if needsEnding, !hasEnding, !self.hasSkipWindow(.ending) {
+                self.playerController.skipDetectionStatus = "Comparing episodes \(playingEpisode) and \(episode)"
+                // The next episode's duration is not known before it plays;
+                // releases of one show run within seconds of each other, and
+                // the tail window is wide enough to absorb that.
+                await self.comparePair(kind: "ed", catalogId: catalogId, episode: playingEpisode,
+                                       url: playingURL, otherURL: url, start: tailStart,
+                                       length: Self.skipTailSeconds, preferDub: preferDub)
             }
             guard !hasOpening, !Task.isCancelled else { return }
             self.playerController.skipDetectionStatus = "Comparing episodes \(playingEpisode) and \(episode)"
@@ -348,7 +408,7 @@ extension AppModel {
                 .map { (start: $0.start, end: $0.end) }
         }.value
         print("[skipdetect] \(kind) pair for \(catalogId) ep \(episode): \(span.map { "\(Int($0.start))-\(Int($0.end))s" } ?? "nothing shared") in \(Int(Date().timeIntervalSince(began)))s")
-        apply(span, kind: kind, catalogId: catalogId, episode: episode, source: "compared with the next episode")
+        apply(span, kind: kind, catalogId: catalogId, episode: episode, source: "compared with another episode")
     }
 
     enum StoredSearch { case found, missed, failed }

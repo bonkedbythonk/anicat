@@ -1487,6 +1487,8 @@ public struct MpvSurface {
         /// caller here wants that to read as "absent".
         /// When `demuxer-cache-state` was last read back; see the observer.
         var lastCacheStateRead: CFTimeInterval = 0
+        /// When `paused-for-cache` last went true, nil while playing.
+        var cacheStallBegan: CFTimeInterval?
 
         /// mpv's `demuxer-cache-state/seekable-ranges` as spans in seconds.
         func cachedSeekableRanges() -> [BufferedSpan] {
@@ -1876,6 +1878,20 @@ public struct MpvSurface {
                             }
                         } else if name == "paused-for-cache", let data = prop.data {
                             let buffering = data.assumingMemoryBound(to: Int32.self).pointee != 0
+                            // The property's own edges, not `isBuffering`,
+                            // which every time-pos tick also clears. Nothing
+                            // logged a stall before: "is there a buffering
+                            // problem?" had only the engine's download rate
+                            // to go on, never when or how long mpv waited.
+                            let now = CACurrentMediaTime()
+                            let at = self.stringProperty("time-pos") ?? "-"
+                            if buffering, self.cacheStallBegan == nil {
+                                self.cacheStallBegan = now
+                                PlayerLog.write("[buffer] paused for cache at time-pos \(at)")
+                            } else if !buffering, let began = self.cacheStallBegan {
+                                self.cacheStallBegan = nil
+                                PlayerLog.write(String(format: "[buffer] resumed after %.1fs at time-pos %@", now - began, at))
+                            }
                             await MainActor.run {
                                 self.controller.isBuffering = buffering
                             }

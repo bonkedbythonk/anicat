@@ -83,8 +83,12 @@ absent from its SDK whatever `if #available` says.
   `AppModel.handlePlaybackPositionChange`, because mpv's end-of-file events
   never fire when a torrent's tail pieces have not arrived.
 - **Continuity** (`Continuity/`): Handoff via `NSUserActivity` for playback
-  and reading, Bonjour discovery of other instances, Keychain storage of the
-  AniList token.
+  and reading, Bonjour discovery of other instances (advertised only when
+  Settings > Sharing allows it), and the AniList token store
+  (`iCloudSyncService.swift`, despite the name): `config.json` in Application
+  Support first, mode 0600, then the Tauri build's `config.toml`, then the
+  Keychain. The Keychain is last because its item is bound to the code
+  signature that wrote it, and a debug binary is re-signed on every build.
 - **Design system** (`DesignSystem/`): `SumiTheme` tokens resolved through
   `ThemeStore` (Ink & Index, Paper, OLED, follow system; `ThemedRoot`
   reroots the tree on a switch), bundled Geist and IBM Plex Mono,
@@ -183,6 +187,14 @@ lives here, and nothing here knows there is a UI.
   file.
 - **`discord.rs`** — Rich Presence.
 
+### Windows server (`server/`)
+
+The same engine behind a local HTTP API, one HTML page and an external mpv,
+living in the system tray: `server/` depends on `core/` by path, is compiled
+by CI on every push and released by `release-windows.yml` when a `v*` tag is
+pushed. It has no reader and no SwiftUI; the page is the whole UI. Best
+effort, and less tested than the Mac app.
+
 ## Sources of truth
 
 | State | Owner |
@@ -192,7 +204,7 @@ lives here, and nothing here knows there is a UI.
 | Per-episode resume position, watch history, provider slugs, local library | SQLite registry (local) |
 | Home and detail snapshots | `~/Library/Caches` (disposable) |
 | Preferences | `UserDefaults`, `anicat_*` keys |
-| AniList token | local Keychain |
+| AniList token | `config.json` in Application Support (0600); Keychain as fallback |
 | Navigation, selection, overlays | `AppModel` (in memory) |
 
 ## Build

@@ -1,5 +1,5 @@
 //! Anicat for Windows (and, for development, macOS): the Rust engine behind
-//! a local HTTP API and one HTML page. See docs/WINDOWS_PLAN.md.
+//! a local HTTP API and one HTML page. ARCHITECTURE.md has the layer map.
 
 // No console window in a release build. The console is the process's
 // lifetime on Windows: closing it, which a public user does by reflex to

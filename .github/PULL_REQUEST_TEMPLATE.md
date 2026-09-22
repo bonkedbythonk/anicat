@@ -11,5 +11,5 @@
 - [ ] `cargo test --lib` and `cargo clippy --lib --tests -- -D warnings` pass in `core/`
 - [ ] `swift build --product Anicat` and `swift test` pass in `AnicatApple/`
 - [ ] `scripts/build-xcframework.sh` rerun if `core/src/ffi.rs` changed
-- [ ] Shared views still compile for the iOS Simulator
+- [ ] Shared views still compile for the iOS and tvOS Simulators
 - [ ] Commit messages follow Conventional Commits; no emojis; English only

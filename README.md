@@ -8,7 +8,7 @@
 
   <p>
     <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=latest" alt="Latest Release">
-    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20iOS%20%7C%20tvOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform">
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
   </p>
 
@@ -28,7 +28,7 @@ Four kinds of thing, all in the one app:
 |---|---|---|
 | **Anime** | Fan-subtitled releases, which start playing while the rest is still arriving | Yes |
 | **Manga** | MangaDex, and a second site for titles MangaDex cannot show | Yes |
-| **Light novels** | Official volumes, and Japanese web novels | Yes |
+| **Light novels** | Japanese web novels, and an optional third-party source for licensed volumes, off until you turn it on | Yes |
 | **Films and TV** | The same way anime works | Yes |
 
 Video plays inside the app itself, the way a normal video player does. Nothing
@@ -38,7 +38,7 @@ skipping ahead pulls that part down next.
 Everything you watch or read is reported back to AniList automatically, so your
 lists, progress and scores stay right without you touching them.
 
-> **Disclaimer:** Anicat hosts zero content — it scrapes publicly accessible third-party sites and streams from public torrent swarms. It is for educational and personal use only, and use is at your own risk under your local laws. The developer has no affiliation with any content provider and is not responsible for how the app is used. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
+> **Disclaimer:** Anicat hosts zero content. Anime, films and TV come from public BitTorrent swarms through an embedded torrent client, so your IP address is visible to other peers and to your internet provider, as with any torrent client; uploading is disabled. Manga and light novels are fetched from third-party sites. Use is at your own risk under your local laws, and the developer has no affiliation with any content provider. See [DISCLAIMER.md](DISCLAIMER.md) and [PRIVACY.md](PRIVACY.md).
 
 > **Personal project.** Anicat is built and maintained by one person for their own use. Issues and pull requests are welcome, but there is no support promised, no release schedule, and no guarantee a report gets answered.
 
@@ -106,6 +106,13 @@ xattr -dr com.apple.quarantine /Applications/Anicat.app
 ```
 
 </details>
+
+If GitHub is not answering, the same installer is also served by Anicat's
+own release mirror:
+
+```bash
+curl -fsSL https://anicat-releases.anicat.workers.dev/install.sh | bash
+```
 
 Installing a new version replaces an older one in place, with nothing to
 uninstall first. If you are coming from an Anicat numbered 5.x or 6.x -- the
@@ -202,7 +209,8 @@ is never sent anywhere except AniList itself.
 
 - **Manga** — one page, two pages, or a continuous scroll; left-to-right or
   right-to-left; your place is saved and sent to AniList.
-- **Light novels** — official volumes and Japanese web novels, with control
+- **Light novels** — Japanese web novels, and licensed volumes from an
+  optional third-party source that stays off until you turn it on, with control
   over the typeface and size. A volume can be saved for offline reading or
   exported as an ebook file for a Kindle or Kobo.
 
@@ -251,7 +259,7 @@ is never sent anywhere except AniList itself.
   player.
 - **Manga** — MangaDex first, MangaKatana for titles MangaDex has matched but
   cannot serve.
-- **Light novels** — official volumes sliced out of one HTML page per volume,
+- **Light novels** — volumes sliced out of one HTML page per volume (opt-in, off by default),
   plus ncode.syosetu.com web novels; offline storage as JSON and EPUB export
   written without a zip dependency.
 - **AniList sync** — progress reported continuously while you watch, watched at
@@ -367,7 +375,7 @@ the TV.
 
 ## Project history
 
-Anicat has been rewritten from the ground up four times in four months. Each
+Anicat has been rewritten from the ground up three times in four months. Each
 rewrite threw away the UI layer and kept the idea: one place to find, play and
 track anime, with AniList as the source of truth. This repository starts at
 1.0.0, with the first version of the native app; everything before it lives in
@@ -399,7 +407,7 @@ developer a coffee at [ko-fi.com/bonkedbythonk](https://ko-fi.com/bonkedbythonk)
 
 ## Legal
 
-Anicat is for educational and personal use only. See [DISCLAIMER.md](DISCLAIMER.md) and [SECURITY.md](SECURITY.md).
+Anicat is for personal use. What it connects to and what it stores is in [PRIVACY.md](PRIVACY.md); the rest is in [DISCLAIMER.md](DISCLAIMER.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -1,23 +1,55 @@
 # Disclaimer
 
-Anicat scrapes public-facing websites for its streaming and downloading capabilities and primarily acts as a media API client. The developer of this application has no affiliation with these content providers. This application hosts zero content and is intended for educational and personal use only. Use at your own risk.
+Anicat is a client. It hosts no content, runs no server, and has no
+affiliation with any of the sites or networks it reads from. What it does,
+it does on the user's own machine, at the user's request, and under the
+user's own local law. Use it at your own risk.
 
-## Content and Ownership
+## How content reaches you
 
-The core aim of Anicat is to correlate automation and efficiency to extract what is provided to a user on the internet. All content available through the project is hosted by external non-affiliated sources.
+**Anime, films and TV** come from public BitTorrent swarms. Anicat embeds a
+torrent client, asks public indexes (Nyaa, SubsPlease, AnimeTosho, SeaDex and
+others) which releases exist, and downloads the one it picks while playing
+it. Joining a swarm means your machine's IP address is announced to public
+trackers and to the DHT, and is visible to every other peer in that swarm
+and to your internet provider, exactly as with any other torrent client.
+Anicat never uploads: the upload path is compiled out and it opens no
+listening port. That reduces what your machine does; it does not change who
+can see it. Whether any of this is permitted where you live, and whether to
+use a VPN, is your decision to make before you press play.
 
-**All content served through this project is publicly accessible. If your site is listed in this project, the code is public. Take necessary measures to counter the mechanisms used to extract content on your site.**
+**Manga and light novels** are fetched over HTTPS from third-party sites
+(MangaDex, MangaKatana, Lnori, Syosetu) the way a browser would fetch them.
 
-Anicat operates similarly to a standard web browser but in a more specific and targeted manner. While an average browser makes hundreds of requests to load a site, this project only makes requests associated with the content served by the sites.
+**Catalog and tracking data** come from AniList and TMDB under their API
+terms. Nothing about what you watch leaves your machine except what you
+choose to send: your AniList list updates when signed in, and Discord
+presence or sharing to other devices when you turn them on. Details are in
+[PRIVACY.md](PRIVACY.md).
 
-**This project is to be used at the user's own risk, based on their local government and laws. Anicat has no control over the content it serves. Using copyrighted content from providers will not be accounted for by the developer. It is the user's own risk.**
+## Copyright
 
-## DMCA and Copyright Infringement
+All content Anicat can reach is hosted and distributed by third parties that
+have nothing to do with this project. The repository contains code only. No
+copyrighted work is stored, mirrored, cached for others or redistributed by
+this project or by the developer. Whether a given file in a given swarm may
+be downloaded is a question about that file and that jurisdiction, not about
+this program, and the responsibility for it rests with the person who
+chooses to download it.
 
-**A browser is a tool, and the impact of the tool is based entirely on the user.**
+Notices about content should go to whoever hosts or indexes that content.
+Notices about this code go through GitHub. The developer will answer a
+notice that points at something in this repository; there is nothing to
+answer about content, because there is none here.
 
-Anicat uses client-side content access mechanisms. Therefore, copyright infringement or DMCA claims should be forwarded to the associated source sites. This is the primary reason the sites are listed within the project.
+## No warranty
 
-## Developer Privacy
+The software is provided as-is, without warranty of any kind, under the
+[GNU General Public License v3.0](LICENSE). The developer accepts no
+liability for any loss, account action, legal consequence or other outcome
+of using it.
 
-Do not harass the developer. Any personal information about the developer is intentionally not made public. Exploiting such information without consent in regards to this topic may lead to legal actions.
+## Developer privacy
+
+Do not harass the developer. The developer's identity is intentionally not
+public, and attempts to expose or exploit it may lead to legal action.

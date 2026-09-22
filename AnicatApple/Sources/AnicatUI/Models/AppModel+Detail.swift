@@ -325,7 +325,7 @@ extension AppModel {
                 novelSourceMissing = false
                 let fetched = (try? await engine.mangaChapters(detail: d)) ?? []
                 chapters = fetched.map {
-                    MediaDetailView.MangaChapterItem(id: $0.id, number: $0.number, title: $0.title)
+                    MediaDetailView.MangaChapterItem(id: $0.id, number: $0.number, title: $0.title, scanlationGroup: $0.scanlationGroup)
                 }
             } else {
                 novelVolumes = []

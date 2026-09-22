@@ -3,7 +3,10 @@ import Foundation
 @testable import AnicatCoreKit
 @testable import AnicatUI
 
-@Suite("Real Data Wiring & Zero Mock Verification")
+// Live AniList suite: the engine has no token and AniList refuses anonymous
+// requests during its outages, so CI runs it only on `ANICAT_LIVE=1`.
+@Suite("Real Data Wiring & Zero Mock Verification",
+       .enabled(if: ProcessInfo.processInfo.environment["ANICAT_LIVE"] == "1"))
 struct RealDataWiringTests {
 
     private func makeEngine() throws -> (AnicatEngine, String) {

@@ -123,7 +123,10 @@ struct AnicatUITests {
     /// `false` for an unwritten key — the exact shape that would have
     /// shipped Discord presence off for everyone who never opened Settings,
     /// since `@AppStorage`'s `= true` only supplies a default to the view.
-    @Test("Discord presence setting defaults to on when unwritten")
+    // Off, not on: the README promises "off unless you turn it on", and in
+    // Full mode presence publishes the title and cover to everyone who can
+    // see the profile.
+    @Test("Discord presence setting defaults to off when unwritten")
     @MainActor
     func testDiscordPresenceDefault() {
         let defaults = UserDefaults.standard
@@ -138,7 +141,7 @@ struct AnicatUITests {
         }
 
         defaults.removeObject(forKey: key)
-        #expect(AppModel.isDiscordPresenceEnabled)
+        #expect(!AppModel.isDiscordPresenceEnabled)
 
         defaults.set(false, forKey: key)
         #expect(!AppModel.isDiscordPresenceEnabled)

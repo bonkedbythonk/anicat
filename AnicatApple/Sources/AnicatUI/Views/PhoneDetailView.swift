@@ -53,6 +53,9 @@ struct PhoneDetailView: View {
 
     @State private var section: Section = .episodes
     @State private var synopsisExpanded = false
+    // `AppModel.isLnoriEnabled` owns the reader and the default (off);
+    // `@AppStorage` needs a literal here, so the two must agree.
+    @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
 
     var body: some View {
         ScrollView {
@@ -228,7 +231,32 @@ struct PhoneDetailView: View {
     /// `novel_offline.rs`) or removes it.
     @ViewBuilder
     private func volumeList(_ details: HeroBanner.Details) -> some View {
-        if model.novelVolumes.isEmpty {
+        if !lnoriEnabled {
+            // The reason and the switch on one card, so turning it on is
+            // not a trip to Settings and back. `loadLightNovelVolumes`
+            // returns before the network while it is off and lists only
+            // what is already downloaded.
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Official volumes come from a third-party site that hosts licensed light novels. It is off until you turn it on.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(SumiTheme.muted)
+                Toggle("Official volumes", isOn: $lnoriEnabled)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(SumiTheme.foreground)
+                Text("Web novels from Syosetu are unaffected.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(SumiTheme.muted)
+            }
+            .padding(16)
+            .background(SumiTheme.card, in: RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            // Downloaded volumes stay listed under the card: they are read
+            // from disk and never reach the site the switch is about.
+            if !model.novelVolumes.isEmpty {
+                volumeRows(details)
+            }
+        } else if model.novelVolumes.isEmpty {
             if model.isLoadingNovelVolumes {
                 ProgressView().frame(maxWidth: .infinity).padding(.top, 32)
             } else {
@@ -239,48 +267,55 @@ struct PhoneDetailView: View {
                     .padding(.top, 24)
             }
         } else {
-            let states = model.novelVolumeStates
-            LazyVStack(spacing: 0) {
-                ForEach(model.novelVolumes, id: \.url) { volume in
-                    let offline = states[volume.url] ?? .none
-                    Button {
-                        model.openLightNovelVolume(bookURL: volume.url, title: volume.title, catalogId: details.id)
-                    } label: {
-                        HStack(spacing: 12) {
-                            // `index` is already 1-based from the engine; +1 showed
-                            // "VOL 2" beside "Volume 1".
-                            Text("VOL \(volume.index)")
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(SumiTheme.indigo)
-                                .frame(width: 64, alignment: .leading)
-                            Text(volume.volumeName ?? volume.title)
-                                .font(.system(size: 14))
-                                .foregroundStyle(SumiTheme.foreground)
-                                .lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            offlineGlyph(offline)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .contentShape(Rectangle())
+            volumeRows(details)
+        }
+    }
+
+    /// The volume rows, shared by the "off" branch (downloaded volumes
+    /// only, read from disk) and the normal list.
+    @ViewBuilder
+    private func volumeRows(_ details: HeroBanner.Details) -> some View {
+        let states = model.novelVolumeStates
+        LazyVStack(spacing: 0) {
+            ForEach(model.novelVolumes, id: \.url) { volume in
+                let offline = states[volume.url] ?? .none
+                Button {
+                    model.openLightNovelVolume(bookURL: volume.url, title: volume.title, catalogId: details.id)
+                } label: {
+                    HStack(spacing: 12) {
+                        // `index` is already 1-based from the engine; +1 showed
+                        // "VOL 2" beside "Volume 1".
+                        Text("VOL \(volume.index)")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(SumiTheme.indigo)
+                            .frame(width: 64, alignment: .leading)
+                        Text(volume.volumeName ?? volume.title)
+                            .font(.system(size: 14))
+                            .foregroundStyle(SumiTheme.foreground)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        offlineGlyph(offline)
                     }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        switch offline {
-                        case .stored:
-                            Button(role: .destructive) { model.deleteNovelVolumeDownload(volume) } label: {
-                                Label("Remove Download", systemImage: "trash")
-                            }
-                        case .downloading, .exporting:
-                            EmptyView()
-                        default:
-                            Button { model.downloadNovelVolume(volume) } label: {
-                                Label("Download", systemImage: "arrow.down.circle")
-                            }
-                        }
-                    }
-                    Divider().overlay(SumiTheme.border)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    switch offline {
+                    case .stored:
+                        Button(role: .destructive) { model.deleteNovelVolumeDownload(volume) } label: {
+                            Label("Remove Download", systemImage: "trash")
+                        }
+                    case .downloading, .exporting:
+                        EmptyView()
+                    default:
+                        Button { model.downloadNovelVolume(volume) } label: {
+                            Label("Download", systemImage: "arrow.down.circle")
+                        }
+                    }
+                }
+                Divider().overlay(SumiTheme.border)
             }
         }
     }

@@ -34,6 +34,11 @@ public enum UpdateChecker {
     /// The nightly's view: every published release, pre-releases included.
     /// Read only by a build that is itself a pre-release.
     static let listEndpoint = URL(string: "https://api.github.com/repos/bonkedbythonk/anicat/releases?per_page=20")!
+    /// The release mirror (`services/release-mirror`), asked only when
+    /// GitHub answers with anything but a release. Every install learned of
+    /// a takedown from a 404 otherwise: the API, the assets and the installer
+    /// all live under the one repository.
+    static let mirrorEndpoint = URL(string: "https://anicat-releases.anicat.workers.dev/latest.json")!
 
     /// Not checked more than once a day. A launch is not a reason to spend a
     /// request, and GitHub rate-limits unauthenticated callers by IP -- which
@@ -52,7 +57,7 @@ public enum UpdateChecker {
         // Same shape as the other `ANICAT_*` debug hooks; absent in normal
         // use, and it only ever makes the app *more* willing to say an
         // update exists, never less.
-        if let forced = ProcessInfo.processInfo.environment["ANICAT_FAKE_VERSION"],
+        if let forced = DebugHooks.env("ANICAT_FAKE_VERSION"),
            !forced.isEmpty {
             return forced
         }
@@ -120,6 +125,30 @@ public enum UpdateChecker {
     /// with no releases yet. An update check that cannot reach GitHub is not
     /// something to interrupt anyone about.
     public static func latestRelease(includingPrereleases: Bool = false) async -> Release? {
+        if let release = await latestFromGitHub(includingPrereleases: includingPrereleases) {
+            return release
+        }
+        return await latestFromMirror()
+    }
+
+    /// `latest.json` as `publish-release.sh` writes it: `version`, `tag`,
+    /// `page`. Stable releases only; the nightly is never mirrored, so a
+    /// nightly install falling back here is offered the newest stable, which
+    /// `isNewer` accepts only when it really is newer.
+    static func latestFromMirror() async -> Release? {
+        var request = URLRequest(url: mirrorEndpoint)
+        request.setValue("Anicat/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = json["version"] as? String, !version.isEmpty,
+              let page = (json["page"] as? String).flatMap(URL.init(string:))
+        else { return nil }
+        return Release(version: version, pageURL: page, notes: nil)
+    }
+
+    static func latestFromGitHub(includingPrereleases: Bool) async -> Release? {
         var request = URLRequest(url: includingPrereleases ? listEndpoint : endpoint)
         // GitHub asks for an explicit Accept and rejects an empty User-Agent.
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -174,7 +203,7 @@ public enum UpdateChecker {
         }
         // Nothing to compare against, so nothing to offer. `ANICAT_FAKE_VERSION`
         // still gets through: it is set precisely to exercise this path.
-        let running = ProcessInfo.processInfo.environment["ANICAT_FAKE_VERSION"]
+        let running = DebugHooks.env("ANICAT_FAKE_VERSION")
             .flatMap { $0.isEmpty ? nil : $0 } ?? bundleVersion
         guard let running else { return nil }
         guard let release = await latestRelease(includingPrereleases: isPrerelease(running)) else { return nil }

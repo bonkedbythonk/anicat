@@ -86,7 +86,7 @@ final class AmbientMetalSampler {
     /// every colour stop over 100 ms on the render server, this only has
     /// to take the grain out, and a cut settles in three samples.
     static let smoothing: Float = 0.45
-    private let debugLogging = ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil
+    private let debugLogging = DebugHooks.env("ANICAT_PLAYER_DEBUG") != nil
 
     init?(device: MTLDevice) {
         guard let queue = device.makeCommandQueue() else { return nil }

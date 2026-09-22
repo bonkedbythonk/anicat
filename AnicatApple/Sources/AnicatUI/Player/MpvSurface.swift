@@ -141,7 +141,7 @@ public final class MpvMetalView: NSView {
         let scale = window?.backingScaleFactor ?? 2
         metalLayer.contentsScale = scale
         metalLayer.frame = bounds
-        if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil || metalLayer.drawableSize != CGSize(width: bounds.width * scale, height: bounds.height * scale) {
+        if DebugHooks.env("ANICAT_PLAYER_DEBUG") != nil || metalLayer.drawableSize != CGSize(width: bounds.width * scale, height: bounds.height * scale) {
             PlayerLog.write(String(format: "[metal] bounds %@ scale %.0f drawable %@ superview %@", NSStringFromRect(bounds), scale, NSStringFromSize(metalLayer.drawableSize), superview.map { NSStringFromRect($0.frame) } ?? "-"))
         }
         pendingDrawableSync?.cancel()
@@ -899,7 +899,7 @@ public struct MpvSurface {
         /// line for the nudges the layout path sends, so it could not say
         /// whether they were the cause. Rare enough to log always.
         func nudgeVideoReconfig(reason: String = "size check") -> Bool {
-            let debug = ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil
+            let debug = DebugHooks.env("ANICAT_PLAYER_DEBUG") != nil
             guard mpv != nil else {
                 if debug { PlayerLog.write("[nudge] skipped: no handle") }
                 return false
@@ -1003,7 +1003,7 @@ public struct MpvSurface {
                 let again = self.nudgeRequestedWhilePending
                 self.nudgeRequestedWhilePending = false
                 self.nudgeLock.unlock()
-                if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil {
+                if DebugHooks.env("ANICAT_PLAYER_DEBUG") != nil {
                     PlayerLog.write(String(format: "[nudge] restore to %@ after %.2fs, reconfigured %@%@", original, waited, reconfigured ? "yes" : "no", again ? ", running the deferred one" : ""))
                 }
                 self.runCommand(["set", "video-aspect-override", original])
@@ -1104,7 +1104,7 @@ public struct MpvSurface {
                   let w = stringProperty("osd-dimensions/w").flatMap(Double.init),
                   let h = stringProperty("osd-dimensions/h").flatMap(Double.init),
                   w > 0, h > 0 else { return }
-            if ProcessInfo.processInfo.environment["ANICAT_PLAYER_DEBUG"] != nil || force {
+            if DebugHooks.env("ANICAT_PLAYER_DEBUG") != nil || force {
                 // Forced checks are rare (file load, fullscreen change), so
                 // they always log: the line is what a report needs and the
                 // owner cannot be asked to relaunch from a terminal for it.

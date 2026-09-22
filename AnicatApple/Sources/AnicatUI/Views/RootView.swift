@@ -46,7 +46,7 @@ public struct RootView: View {
     private func enterFullscreenForPlaybackIfWanted() {
         guard model.activeStreamURL != nil, !enteredFullscreenForPlayback,
               let window = AppWindow.main, !window.styleMask.contains(.fullScreen),
-              ProcessInfo.processInfo.environment["ANICAT_NO_AUTO_FULLSCREEN"] == nil else { return }
+              DebugHooks.env("ANICAT_NO_AUTO_FULLSCREEN") == nil else { return }
         enteredFullscreenForPlayback = true
         FullScreenGuard.set(true, on: window)
     }

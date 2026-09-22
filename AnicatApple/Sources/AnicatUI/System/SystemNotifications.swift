@@ -85,7 +85,7 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
             #else
             AppLog.write("[notify] authorization \(Self.describe(settings.authorizationStatus)) alerts \(settings.alertSetting == .enabled ? "on" : "off")")
             #endif
-            if ProcessInfo.processInfo.environment["ANICAT_NOTIFY_TEST"] != nil {
+            if DebugHooks.env("ANICAT_NOTIFY_TEST") != nil {
                 // Three seconds in, not at launch: a post 20 ms after the
                 // process started landed in Notification Center without a
                 // banner, and a banner-less delivery to the frontmost app is

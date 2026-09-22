@@ -295,7 +295,7 @@ struct AnicatApp: App {
                     // before there was an engine to route it with; this is
                     // where it finally runs.
                     model.drainPendingDeepLink()
-                    if let path = ProcessInfo.processInfo.environment["ANICAT_DEBUG_PLAY_FILE"] {
+                    if let path = DebugHooks.env("ANICAT_DEBUG_PLAY_FILE") {
                         model.debugPlayLocalFile(path)
                     }
                 }
@@ -530,7 +530,7 @@ struct AnicatApp: App {
                 .task {
                     await model.initialize()
                     model.drainPendingDeepLink()
-                    if let path = ProcessInfo.processInfo.environment["ANICAT_DEBUG_PLAY_FILE"] {
+                    if let path = DebugHooks.env("ANICAT_DEBUG_PLAY_FILE") {
                         model.debugPlayLocalFile(path)
                     }
                 }

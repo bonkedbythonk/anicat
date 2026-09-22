@@ -89,7 +89,7 @@ final class ScrollActivity {
     static let shared = ScrollActivity()
     /// `ANICAT_NO_HOVER_GATE=1` keeps every card hit-testable through a
     /// scroll, for same-binary A/B profiles.
-    static let gateDisabled = ProcessInfo.processInfo.environment["ANICAT_NO_HOVER_GATE"] != nil
+    static let gateDisabled = DebugHooks.env("ANICAT_NO_HOVER_GATE") != nil
     var isScrolling = false
     private init() {}
 }

@@ -39,7 +39,7 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
         // Test hook: a chain of absolute paths replaces the bundled one, so
         // a candidate network can be A/B measured in the same harness as
         // the shipped chain without a rebuild per variant.
-        if let override = ProcessInfo.processInfo.environment["ANICAT_DEBUG_SHADERS"], !override.isEmpty {
+        if let override = DebugHooks.env("ANICAT_DEBUG_SHADERS"), !override.isEmpty {
             return override
         }
         let activeBundle = bundle ?? Bundle.anicatResources

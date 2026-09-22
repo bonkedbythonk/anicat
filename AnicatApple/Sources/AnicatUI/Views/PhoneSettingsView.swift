@@ -38,6 +38,8 @@ struct PhoneSettingsView: View {
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     // `SystemNotifications` owns the reader and the default (on).
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
+    // `AppModel.isLnoriEnabled` owns the reader and the default (off).
+    @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
     @AppStorage(FeedbackDefaults.hapticsKey) private var haptics: Bool = true
     @AppStorage(FeedbackDefaults.soundsKey) private var sounds: Bool = false
     @State private var copyFeedback: String?
@@ -69,6 +71,7 @@ struct PhoneSettingsView: View {
             storage
             notifications
             cinema
+            novels
             logs
             Section("About") {
                 AcknowledgementsButton {
@@ -315,6 +318,19 @@ struct PhoneSettingsView: View {
                 .buttonBorderShape(.capsule)
             }
             Text("Takes effect as you type it.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
+        }
+    }
+
+    /// Opt-in rather than a source picker: Syosetu carries text its authors
+    /// publish for free, Lnori carries publisher-owned volumes, and the app
+    /// must not contact the second without being told to.
+    @ViewBuilder
+    private var novels: some View {
+        Section("Light Novel Sources") {
+            Toggle("Official volumes", isOn: $lnoriEnabled)
+            Text("Official volumes come from a third-party site that hosts licensed light novels. It is off until you turn it on. Web novels from Syosetu are unaffected.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(SumiTheme.muted)
         }

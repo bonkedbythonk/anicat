@@ -37,7 +37,7 @@ public struct OnboardingView: View {
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_ambient_glow") private var ambientGlow: Bool = true
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
-    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = true
+    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = false
 
     public init(model: AppModel) {
         self.model = model
@@ -45,15 +45,22 @@ public struct OnboardingView: View {
 
     private static let authorizeURL = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token")!
 
+    /// How it works before anything else, and never filtered out. Every
+    /// other step is a preference Settings can change later; the torrent
+    /// swarm is the one thing a viewer cannot take back, since the first
+    /// play announces their IP address to it. Said before a token is pasted
+    /// or an episode is fetched, or it is said after the fact.
+    ///
     /// Mode before connect: AniList is the anime world's list, not the
     /// app's login. With connect first, someone here for films was asked
     /// for an AniList token as the very first thing and read the app as
     /// anime-only before ever seeing that Cinema exists.
     private enum Step: Int, CaseIterable {
-        case mode, connect, watching, picture, alerts, look
+        case howItWorks, mode, connect, watching, picture, alerts, look
 
         var title: String {
             switch self {
+            case .howItWorks: return "How it works"
             case .connect: return "Connect AniList"
             case .mode: return "Where to start"
             case .watching: return "How you watch"
@@ -70,6 +77,12 @@ public struct OnboardingView: View {
 
         var subtitle: String {
             switch self {
+            case .howItWorks:
+                #if os(macOS)
+                return "Where everything comes from, and what leaves this Mac."
+                #else
+                return "Where everything comes from, and what leaves this device."
+                #endif
             case .connect:
                 return "Your list is the source of truth for what you are watching and how far in you are."
             case .mode:
@@ -250,6 +263,9 @@ public struct OnboardingView: View {
     /// and dropped the viewer out of the whole flow -- the four preference
     /// steps never got a chance to be seen.
     private var continueLabel: String {
+        // "I understand", not "Continue": the step asks for nothing, and a
+        // "Continue" under a page of copy reads as one more page to skim.
+        if step == .howItWorks { return "I understand" }
         if isLastStep { return "Start watching" }
         if step == .connect, !model.isSignedIn { return "Continue without connecting" }
         return "Continue"
@@ -266,6 +282,7 @@ public struct OnboardingView: View {
     @ViewBuilder
     private var content: some View {
         switch step {
+        case .howItWorks: howItWorksStep
         case .connect: connectStep
         case .mode: modeStep
         case .watching: watchingStep
@@ -273,6 +290,45 @@ public struct OnboardingView: View {
         case .alerts: alertsStep
         case .look: lookStep
         }
+    }
+
+    /// Copy only, no control, laid out as the same rows the next steps are
+    /// made of: a bare paragraph here made it the one step that did not look
+    /// like the rest, and read as a licence screen to click past.
+    @ViewBuilder
+    private var howItWorksStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            infoRow(
+                "arrow.down.circle",
+                "Episodes and films come from public torrents",
+                "They start playing while they download. Anicat never uploads and opens no port, but your IP address is visible to the other peers and to your internet provider, as with any torrent client. Whether that is fine where you live, and whether to use a VPN, is your call."
+            )
+            infoRow(
+                "book",
+                "Manga and light novels come from the web",
+                "Read from third-party sites as you open them. Nothing is hosted by Anicat."
+            )
+            infoRow(
+                "list.bullet",
+                "AniList is optional",
+                Self.leavesDeviceCaption
+            )
+
+            Text("The long version is DISCLAIMER.md and PRIVACY.md in the repository.")
+                .font(.system(size: 12))
+                .foregroundColor(SumiTheme.muted.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Discord presence and iPhone pairing are Mac-only, so naming them on
+    /// the phone would list two switches it does not have.
+    private static var leavesDeviceCaption: String {
+        #if os(macOS)
+        return "It only sees your list changes. Films and TV are looked up on TMDB as you browse. Nothing else leaves this Mac unless you turn it on: Discord presence, or letting an iPhone control playback."
+        #else
+        return "It only sees your list changes. Films and TV are looked up on TMDB as you browse. Nothing else leaves this device unless you turn it on in Settings."
+        #endif
     }
 
     @ViewBuilder
@@ -625,6 +681,30 @@ public struct OnboardingView: View {
         #else
         return false
         #endif
+    }
+
+    /// `toggleRow` with the switch replaced by a glyph, drawn the way
+    /// `numbered` draws its badge, for a row that states rather than asks.
+    private func infoRow(_ symbol: String, _ title: String, _ caption: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(SumiTheme.indigo)
+                .frame(width: 22, height: 22)
+                .background(SumiTheme.indigo.opacity(0.12))
+                .clipShape(Circle())
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(SumiTheme.foreground)
+                Text(caption)
+                    .font(.system(size: 11.5))
+                    .foregroundColor(SumiTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func toggleRow(_ title: String, _ caption: String, _ binding: Binding<Bool>) -> some View {

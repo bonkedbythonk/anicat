@@ -177,6 +177,7 @@ public struct SettingsView: View {
         .init(label: "API Token", card: "AniList", tab: .accounts),
         .init(label: "Your own TMDB key", card: "Cinema (TMDB)", tab: .accounts),
 
+        .init(label: "Official volumes", card: "Light Novel Sources", tab: .advanced),
         .init(label: "Offline manga limit", card: "Storage", tab: .advanced),
         .init(label: "Streamed video cache", card: "Storage", tab: .advanced),
         .init(label: "Current version", card: "Updates", tab: .advanced),
@@ -739,7 +740,10 @@ private struct SharingTabSection: View {
     // agree.
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
     // Same literal-key constraint. `AppModel` owns the reader and default.
-    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = true
+    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = false
+    // Same literal-key constraint; `AppModel.isLanSharingEnabled` reads it
+    // and its defaults observer starts or stops the Bonjour listener.
+    @AppStorage("anicat_lan_sharing") private var lanSharing: Bool = false
     // Same literal-key constraint; `AppModel.discordPresenceDetail` reads it.
     @AppStorage("anicat_discord_presence_detail") private var discordPresenceDetail: String = "full"
     // Read once into state rather than off `UserDefaults` in the body: the
@@ -782,6 +786,13 @@ private struct SharingTabSection: View {
         }
 
         SettingsCard(title: "Devices") {
+            SettingField(
+                label: "Allow Other Devices",
+                description: "Announce this Mac on the local network so Anicat on an iPhone can find it, control playback and stream through it. Off, nothing on the network can tell Anicat is running."
+            ) {
+                SumiSwitch(isOn: $lanSharing)
+            }
+
             SettingField(
                 label: "Paired iPhones",
                 badge: RemoteHost.shared.attachedRemoteName.map { "\($0) connected" },
@@ -1085,6 +1096,9 @@ private struct MaintenanceTabSection: View {
 
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_offline_cap_gb") private var offlineCapGb: Int = 2
+    // Same literal-key constraint. `AppModel.isLnoriEnabled` owns the reader
+    // and the default (off).
+    @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
     @State private var cacheBytes: UInt64?
     /// Nil until a check has run; "Up to date" afterwards. A blank row would
     /// leave the button looking like it had done nothing.
@@ -1095,6 +1109,21 @@ private struct MaintenanceTabSection: View {
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
+        // Opt-in rather than a source picker: Syosetu carries text its
+        // authors publish for free, Lnori carries publisher-owned volumes,
+        // and the app must not contact the second without being told to.
+        SettingsCard(
+            title: "Light Novel Sources",
+            description: "Where the text of a light novel comes from."
+        ) {
+            SettingField(
+                label: "Official volumes",
+                description: "Official volumes come from a third-party site that hosts licensed light novels. It is off until you turn it on. Web novels from Syosetu are unaffected."
+            ) {
+                SumiSwitch(isOn: $lnoriEnabled)
+            }
+        }
+
         // Storage, which had no home at all: the offline-manga cap was filed
         // under Account because the engine happens to own both, and the
         // torrent stream cache -- easily the largest thing the app writes,

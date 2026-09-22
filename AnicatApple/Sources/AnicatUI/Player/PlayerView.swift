@@ -48,7 +48,7 @@ public struct PlayerView: View {
     @AppStorage("anicat_player_stream_details") private var showStreamDetails = false
     /// The same key as Settings' switch; `AppModel`'s defaults observer
     /// connects or clears Discord the moment it changes.
-    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = true
+    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = false
     @State private var mpvDetails: [StreamDetailRow] = []
     @State private var torrentDetails: [StreamDetailRow] = []
     @State private var showEpisodeList = false

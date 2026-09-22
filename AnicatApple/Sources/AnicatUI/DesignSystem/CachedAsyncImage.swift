@@ -61,24 +61,27 @@ final class ImageDecodeCache: @unchecked Sendable {
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.default
-        let memoryCapacity = 50 * 1024 * 1024 // 50 MB
-        let diskCapacity = 200 * 1024 * 1024 // 200 MB
-        // An absolute directory, not the bare name this used to pass. A
-        // relative `diskPath` is resolved against the process's working
-        // directory, which is `/` for anything launched from Finder or
-        // `open` — so every normal launch logged "NetworkStorageDB: failed
-        // to open read/write connection to DB @ anicat_image_cache/Cache.db"
-        // and ran with the memory cache alone. Cover art was refetched from
-        // AniList's CDN on every cold start while the 200 MB disk budget
-        // above was never once used.
-        config.urlCache = URLCache(
-            memoryCapacity: memoryCapacity,
-            diskCapacity: diskCapacity,
-            directory: imageCacheDirectory()
-        )
+        config.urlCache = urlCache
         config.requestCachePolicy = .returnCacheDataElseLoad
         return URLSession(configuration: config)
     }()
+
+    /// Held apart from the session so `fetch` can ask it whether a request
+    /// is about to leave the machine at all.
+    ///
+    /// An absolute directory, not the bare name this used to pass. A
+    /// relative `diskPath` is resolved against the process's working
+    /// directory, which is `/` for anything launched from Finder or
+    /// `open` — so every normal launch logged "NetworkStorageDB: failed
+    /// to open read/write connection to DB @ anicat_image_cache/Cache.db"
+    /// and ran with the memory cache alone. Cover art was refetched from
+    /// AniList's CDN on every cold start while the 200 MB disk budget
+    /// was never once used.
+    private static let urlCache = URLCache(
+        memoryCapacity: 50 * 1024 * 1024, // 50 MB
+        diskCapacity: 200 * 1024 * 1024, // 200 MB
+        directory: imageCacheDirectory()
+    )
 
     /// `nil` when the directory cannot be created, which leaves `URLCache`
     /// on its own default location rather than on a path it cannot write.
@@ -177,7 +180,7 @@ final class ImageDecodeCache: @unchecked Sendable {
         // Runs on a background cooperative worker thread rather than inheriting @MainActor:
         // CGImageSource thumbnail decoding is CPU-heavy and must never block the 120Hz display link.
         let task = Task.detached(priority: priority) { () -> CGImage? in
-            guard let (data, _) = try? await session.data(from: url) else { return nil }
+            guard let data = await Self.fetch(url, session: session) else { return nil }
             return Self.downsample(data: data, fit: fit)
         }
         setInFlight(key: key, task: task)
@@ -190,6 +193,38 @@ final class ImageDecodeCache: @unchecked Sendable {
             storeCache(nsKey: nsKey, image: result)
         }
         return result
+    }
+
+    /// The one network read every image in the app goes through. A page
+    /// from a MangaDex@Home node is reported to the network once it lands
+    /// (`MangaDexHomeReporter`, which also says what happens to a client
+    /// that does not); nothing else is. A hit in this session's own
+    /// `URLCache` is answered without a request, and a report for it would
+    /// describe a fetch that never reached the node, so the lookup that
+    /// decides is made before the request rather than from the response.
+    /// A cancelled fetch is not a failure of the node either.
+    nonisolated private static func fetch(_ url: URL, session: URLSession) async -> Data? {
+        let reportable = MangaDexHomeReporter.isAtHomeURL(url)
+            && urlCache.cachedResponse(for: URLRequest(url: url)) == nil
+        let started = DispatchTime.now().uptimeNanoseconds
+        do {
+            let (data, response) = try await session.data(from: url)
+            if reportable {
+                MangaDexHomeReporter.report(
+                    url: url, response: response, bytes: data.count,
+                    durationNanoseconds: DispatchTime.now().uptimeNanoseconds - started
+                )
+            }
+            return data
+        } catch {
+            if reportable, !Task.isCancelled, (error as? URLError)?.code != .cancelled {
+                MangaDexHomeReporter.report(
+                    url: url, response: nil, bytes: 0,
+                    durationNanoseconds: DispatchTime.now().uptimeNanoseconds - started
+                )
+            }
+            return nil
+        }
     }
 
     /// Runs off the main actor — `ImageIO`'s thumbnail decode is the actual CPU

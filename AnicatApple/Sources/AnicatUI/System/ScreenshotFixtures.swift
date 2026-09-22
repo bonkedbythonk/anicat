@@ -14,7 +14,7 @@ import AnicatCoreKit
 /// the covers and counts are whatever AniList has this week and the
 /// screenshots do not date.
 enum ScreenshotFixtures {
-    static let isEnabled = ProcessInfo.processInfo.environment["ANICAT_SCREENSHOT_MODE"] != nil
+    static let isEnabled = DebugHooks.env("ANICAT_SCREENSHOT_MODE") != nil
 
     private static let now = Int64(Date().timeIntervalSince1970)
 

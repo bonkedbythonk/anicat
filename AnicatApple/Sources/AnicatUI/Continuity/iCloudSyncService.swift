@@ -153,6 +153,12 @@ public final class iCloudSyncService: @unchecked Sendable {
         if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
             try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? data.write(to: fileURL, options: .atomic)
+            // The token is a bearer credential for the owner's AniList
+            // account and the file was created world-readable (0644, the
+            // umask default): any process running as the user, or a backup
+            // that keeps modes, could read it. `.atomic` renames a fresh temp
+            // file into place, so the mode is set on the final path, after.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
         }
     }
 

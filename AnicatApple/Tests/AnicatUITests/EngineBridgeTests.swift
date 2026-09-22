@@ -2,7 +2,9 @@ import Testing
 import Foundation
 @testable import AnicatCoreKit
 
-@Suite("AnicatEngine Swift-Rust Integration")
+// Live AniList suite, see RealDataWiringTests: runs only on `ANICAT_LIVE=1`.
+@Suite("AnicatEngine Swift-Rust Integration",
+       .enabled(if: ProcessInfo.processInfo.environment["ANICAT_LIVE"] == "1"))
 struct EngineBridgeTests {
     @Test("Instantiate Engine and Search Anime")
     func testEngineInitAndSearch() async throws {

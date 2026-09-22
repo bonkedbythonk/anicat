@@ -832,14 +832,44 @@ public final class AppModel {
     /// in `SettingsView`, read here.
     public nonisolated static let discordPresenceKey = "anicat_discord_presence"
 
-    /// Defaults to on. `UserDefaults.bool(forKey:)` answers `false` for a
-    /// key nothing has written yet, and `@AppStorage`'s default lives in the
-    /// view, not in the store — so a plain `bool` read would have shipped
-    /// presence off for everyone who never opened Settings.
+    /// Defaults to off. The README promises "off unless you turn it on", and
+    /// in Full mode presence sends the title, cover and an AniList or TMDB
+    /// link to everyone who can see the profile; 1.0.x shipped it on for
+    /// anyone who never opened Settings. The explicit `object(forKey:)` check
+    /// stays so the `@AppStorage` defaults in `SettingsView`, `PlayerView`
+    /// and `OnboardingView` keep one source of truth here.
     public static var isDiscordPresenceEnabled: Bool {
         let defaults = UserDefaults.standard
-        guard defaults.object(forKey: discordPresenceKey) != nil else { return true }
+        guard defaults.object(forKey: discordPresenceKey) != nil else { return false }
         return defaults.bool(forKey: discordPresenceKey)
+    }
+
+    /// The "Official volumes" switch for light novels. Written by
+    /// `@AppStorage` in `SettingsView`, `PhoneSettingsView` and the card on
+    /// a novel's own page; read here before anything reaches lnori.com.
+    public nonisolated static let lnoriKey = "anicat_lnori_enabled"
+
+    /// Off until the user turns it on. Lnori serves whole English volumes of
+    /// licensed light novels -- publisher-owned text, unlike Syosetu's
+    /// author-published web novels -- so the app must not contact it, or
+    /// show what it would find, for anyone who has not read what it is and
+    /// chosen it. A plain `bool` read is the right one here: an unwritten
+    /// key means off, which is the default wanted.
+    public static var isLnoriEnabled: Bool {
+        UserDefaults.standard.bool(forKey: lnoriKey)
+    }
+
+    /// Settings > Sharing > "Allow other devices". Written by `@AppStorage`
+    /// in `SettingsView`, read here and by the defaults observer below.
+    public nonisolated static let lanSharingKey = "anicat_lan_sharing"
+
+    /// Defaults to off. Advertising `_anicat-stream._tcp` publishes this
+    /// Mac's device name and the range server's port to everything on the
+    /// LAN, on every launch, and 1.0.x did that with no switch at all; the
+    /// pairing prompt only ever gated who could control playback, not
+    /// whether the Mac announced itself.
+    public static var isLanSharingEnabled: Bool {
+        UserDefaults.standard.bool(forKey: lanSharingKey)
     }
 
     /// Settings' "Show on profile" choice, `"full"` or `"private"`. A second
@@ -856,6 +886,12 @@ public final class AppModel {
     /// keys from the many other keys `didChangeNotification` fires for.
     private var lastDiscordPresenceEnabled = AppModel.isDiscordPresenceEnabled
     private var lastDiscordPresenceDetail = AppModel.discordPresenceDetail
+    private var lastLanSharingEnabled = AppModel.isLanSharingEnabled
+    private var lastLnoriEnabled = AppModel.isLnoriEnabled
+    /// The range server's port, kept so the sharing switch can start
+    /// advertising after launch; `streamPort()` is async and the defaults
+    /// observer is not.
+    @ObservationIgnored private var streamServerPort: UInt16?
     // `nonisolated(unsafe)`: `deinit` is nonisolated and has to reach it.
     // Written once from `init` on the main actor, read once in deinit.
     @ObservationIgnored private nonisolated(unsafe) var defaultsObserver: NSObjectProtocol?
@@ -882,6 +918,19 @@ public final class AppModel {
                     self.lastDiscordPresenceDetail = detail
                     self.engine?.discordSetDetail(detail: detail)
                 }
+                // Same edge check for the Lnori switch: a novel's page keeps
+                // whatever it showed until something asks again, and the
+                // switch can be flipped from Settings with that page open.
+                let lnori = AppModel.isLnoriEnabled
+                if lnori != self.lastLnoriEnabled {
+                    self.lastLnoriEnabled = lnori
+                    self.reloadNovelVolumes()
+                }
+                let sharing = AppModel.isLanSharingEnabled
+                if sharing != self.lastLanSharingEnabled {
+                    self.lastLanSharingEnabled = sharing
+                    self.applyLanSharingSetting(sharing)
+                }
                 let enabled = AppModel.isDiscordPresenceEnabled
                 guard enabled != self.lastDiscordPresenceEnabled else { return }
                 self.lastDiscordPresenceEnabled = enabled
@@ -894,6 +943,20 @@ public final class AppModel {
         if let defaultsObserver {
             NotificationCenter.default.removeObserver(defaultsObserver)
         }
+    }
+
+    /// Starts or stops the Bonjour advertisement to match the setting. A
+    /// paired phone mid-session loses its connection when the listener is
+    /// cancelled, which is what turning sharing off should mean.
+    private func applyLanSharingSetting(_ enabled: Bool) {
+        #if os(macOS)
+        if enabled {
+            guard let port = streamServerPort else { return }
+            BonjourDiscovery.shared.startAdvertising(port: port)
+        } else {
+            BonjourDiscovery.shared.stopAdvertising()
+        }
+        #endif
     }
 
     /// Connects or disconnects Discord to match the setting. Both return at
@@ -1026,9 +1089,14 @@ public final class AppModel {
                 coreEngine.discordConnect()
             }
 
-            // Bonjour Local Swarm Offload: advertise on macOS, browse on iOS
+            // Bonjour Local Swarm Offload: advertise on macOS, browse on iOS.
+            // The Mac side only when Settings > Sharing allows it.
             #if os(macOS)
-            BonjourDiscovery.shared.startAdvertising(port: port)
+            streamServerPort = port
+            lastLanSharingEnabled = Self.isLanSharingEnabled
+            if lastLanSharingEnabled {
+                BonjourDiscovery.shared.startAdvertising(port: port)
+            }
             #else
             BonjourDiscovery.shared.startBrowsing()
             #endif

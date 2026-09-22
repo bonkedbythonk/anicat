@@ -34,6 +34,15 @@ extension AppModel {
         guard let engine else { return }
         novelVolumes = []
         novelSourceMissing = false
+        // The one place a catalogue entry turns into a request to lnori.com,
+        // and every NOVEL page opened comes through it -- so without this
+        // guard the site was contacted for each light novel merely looked
+        // at. Before `isLoadingNovelVolumes`, so the page shows the card and
+        // never a skeleton for a search that is not going to run.
+        guard Self.isLnoriEnabled else {
+            novelVolumes = storedNovelVolumes()
+            return
+        }
         isLoadingNovelVolumes = true
         defer { isLoadingNovelVolumes = false }
 
@@ -50,6 +59,49 @@ extension AppModel {
         novelVolumes = volumes
         novelSourceMissing = volumes.isEmpty
     }
+
+    /// The volumes of the open title already kept on disk, as rows the
+    /// detail page can list under the "off" card. Read from the registry
+    /// only: opening one goes through `loadLightNovelVolume`, which answers
+    /// from the offline copy before it would ever reach lnori.com. Without
+    /// this, turning the source off (the default) hid volumes someone had
+    /// downloaded behind a card, with nothing on the page to open them by.
+    func storedNovelVolumes() -> [NovelChapterRef] {
+        guard let engine, let details = selectedMediaDetails else { return [] }
+        let rows = ((try? engine.offlineChapters()) ?? []).filter {
+            $0.kind == .novel && $0.catalog == .anilist && $0.catalogId == details.id
+        }
+        return rows
+            .sorted { lhs, rhs in
+                let l = Double(lhs.chapterNumber) ?? .greatestFiniteMagnitude
+                let r = Double(rhs.chapterNumber) ?? .greatestFiniteMagnitude
+                return l == r ? lhs.downloadedAt < rhs.downloadedAt : l < r
+            }
+            .enumerated()
+            .map { offset, row in
+                let index = Int32(Double(row.chapterNumber) ?? Double(offset + 1))
+                return NovelChapterRef(
+                    index: index,
+                    title: row.title ?? "Volume \(index)",
+                    url: row.chapterId,
+                    volumeName: row.title
+                )
+            }
+    }
+
+    /// Runs the lookup again for the open page when the Lnori switch changes
+    /// under it. `refreshNovelVolumes` keys on the title, which has not
+    /// changed; without this the page kept its "off" card after the switch
+    /// went on, and its rows after it went off, until the next navigation.
+    public func reloadNovelVolumes() {
+        guard let details = selectedMediaDetails, details.format == "NOVEL" else { return }
+        novelVolumesTitle = nil
+        Task { await refreshNovelVolumes(for: details) }
+    }
+
+    /// What the reader or a download says when it needs lnori.com and the
+    /// switch is off. One string, so every path that stops here agrees.
+    static let lnoriDisabledMessage = "Official volumes are off. Turn them on in Settings, under Light Novel Sources, to read this one online. Downloaded volumes still open."
 
     /// Opens one volume in the novel reader. The volume is a single page, so
     /// its table of contents becomes the reader's chapter list.
@@ -89,6 +141,13 @@ extension AppModel {
                 await loadSyosetuChapter(url: stored[start].url, index: start)
                 return
             }
+        }
+        // After the stored copy, not before it: the Continue button and a
+        // Handoff both land here for a volume that may well be on disk.
+        guard Self.isLnoriEnabled else {
+            syosetuSession?.isLoading = false
+            syosetuSession?.errorMessage = Self.lnoriDisabledMessage
+            return
         }
         do {
             let chapters = try await engine.lightNovelChapters(bookUrl: bookURL)
@@ -140,6 +199,12 @@ extension AppModel {
     /// Fetches a whole volume and keeps it.
     public func downloadNovelVolume(_ volume: NovelChapterRef) {
         guard let engine, let anilistId = selectedMediaDetails?.id else { return }
+        // Rows only exist while the switch is on, but a row pressed in the
+        // same instant the switch went off would still have fetched.
+        guard Self.isLnoriEnabled else {
+            errorMessage = Self.lnoriDisabledMessage
+            return
+        }
         // AniList fills this from the staff credit for a novel; empty is
         // fine, the engine writes "Unknown" rather than an empty creator.
         let author = selectedMediaDetails?.studio ?? ""
@@ -172,6 +237,10 @@ extension AppModel {
         )
         novelVolumeWork[volume.url] = nil
         loadOfflineChapters()
+        // With the source off the list *is* the downloads, so a removed one
+        // has to leave it; kept, its row offered only a Download that the
+        // switch then refuses.
+        if !Self.isLnoriEnabled { novelVolumes = storedNovelVolumes() }
     }
 
     /// Writes the volume out as an EPUB and reveals it.
@@ -280,11 +349,17 @@ extension AppModel {
                        chapterUrl: url
                    ) {
                     chapter = stored
-                } else {
+                } else if Self.isLnoriEnabled {
                     chapter = try await engine.lightNovelChapter(
                         bookUrl: bookURL,
                         anchor: parts.count > 1 ? String(parts[1]) : ""
                     )
+                } else {
+                    // A stored table of contents with a chapter missing from
+                    // it is the only way here; it must still not fetch.
+                    syosetuSession?.isLoading = false
+                    syosetuSession?.errorMessage = Self.lnoriDisabledMessage
+                    return
                 }
             } else {
                 chapter = try await engine.novelChapter(url: url)

@@ -2297,10 +2297,22 @@ public struct MediaDetailView: View {
                     Text("CH \(chapter.number)")
                         .sumiTabularMono(size: 11.5)
                         .foregroundColor(SumiTheme.indigo)
-                    Text(chapter.title)
-                        .font(.sumiHeading(size: 13.5, weight: .medium))
-                        .foregroundColor(SumiTheme.foreground)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(chapter.title)
+                            .font(.sumiHeading(size: 13.5, weight: .medium))
+                            .foregroundColor(SumiTheme.foreground)
+                            .lineLimit(1)
+                        // MangaDex's API rules make crediting the scanlation
+                        // group a condition of use. The phone row credited
+                        // it from the start; this one listed the chapter as
+                        // if nobody had translated it.
+                        if let group = chapter.scanlationGroup, !group.isEmpty {
+                            Text(group)
+                                .sumiTabularMono(size: 10.5)
+                                .foregroundColor(SumiTheme.muted)
+                                .lineLimit(1)
+                        }
+                    }
                     Spacer()
                     offlineControl
                 }
@@ -2790,7 +2802,20 @@ private struct MangaTabSection: View {
     /// miss stays a first-class outcome rather than an error.
     @ViewBuilder
     var novelVolumeList: some View {
-        if isLoadingNovelVolumes {
+        if !lnoriEnabled {
+            // Downloaded volumes stay listed under the card: they are read
+            // from disk and never reach the site the switch is about.
+            VStack(alignment: .leading, spacing: 12) {
+                lnoriDisabledCard
+                if !novelVolumes.isEmpty {
+                    LazyVStack(spacing: 8) {
+                        ForEach(novelVolumes, id: \.url) { volume in
+                            volumeRow(volume)
+                        }
+                    }
+                }
+            }
+        } else if isLoadingNovelVolumes {
             EpisodeListSkeleton(count: 4, isCompact: true)
         } else if !novelVolumes.isEmpty {
             LazyVStack(spacing: 8) {
@@ -2809,6 +2834,53 @@ private struct MangaTabSection: View {
                 detail: "Nothing readable was found for this title."
             )
         }
+    }
+
+    /// Why the list is empty before the switch has ever been touched, and
+    /// the switch itself: the reason and the choice on one card, so turning
+    /// it on is not a trip to Settings and back. Same dashed frame as the
+    /// miss state above; `SumiEmptyState` has no slot for a control.
+    private var lnoriDisabledCard: some View {
+        VStack(spacing: 8) {
+            Text("Official volumes are off")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(SumiTheme.foreground)
+            Text("Official volumes come from a third-party site that hosts licensed light novels. It is off until you turn it on.")
+                .font(.system(size: 13))
+                .foregroundColor(SumiTheme.muted)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 10) {
+                Text("Official volumes")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(SumiTheme.foreground)
+                lnoriSwitch
+            }
+            .padding(.top, 6)
+            Text("Web novels from Syosetu are unaffected.")
+                .font(.system(size: 12))
+                .foregroundColor(SumiTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .padding(.horizontal, 24)
+        .overlay(
+            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+                .strokeBorder(SumiTheme.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+        )
+    }
+
+    @ViewBuilder
+    private var lnoriSwitch: some View {
+        // `SwitchToggleStyle` is not in the tvOS SDK. Nothing mounts this tab
+        // on the TV; the default style only keeps it compiling there.
+        #if os(tvOS)
+        Toggle("Official volumes", isOn: $lnoriEnabled)
+            .labelsHidden()
+        #else
+        Toggle("Official volumes", isOn: $lnoriEnabled)
+            .labelsHidden()
+            .toggleStyle(.switch)
+        #endif
     }
 
     @ViewBuilder
@@ -2895,6 +2967,9 @@ private struct MangaTabSection: View {
     let chapters: [MediaDetailView.MangaChapterItem]
     let format: String?
     var isLoading: Bool = false
+    // `AppModel.isLnoriEnabled` owns the reader and the default (off);
+    // `@AppStorage` needs a literal here, so the two must agree.
+    @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
     var novelVolumes: [NovelChapterRef] = []
     var isLoadingNovelVolumes: Bool = false
     var novelSourceMissing: Bool = false

@@ -93,26 +93,25 @@ struct ServerPickerView: View {
                         }
                     }
                 }
-                // A row is about 62pt (a name on up to two 12pt lines, the
-                // seeders line, 9pt of padding either side, a divider), and
-                // `list_candidates` does not truncate — a popular episode
-                // comes back with dozens. At 380 that was six rows on
-                // screen, so picking a healthier release meant scrolling a
-                // list whose shape you could not see; 560 shows nine and
-                // still leaves room above and below the anchored row on a
-                // laptop display.
-                //
-                // A height, not a `maxHeight`: a popover sizes itself to its
-                // content's ideal size, and a ScrollView's ideal height is
-                // next to nothing, so under `maxHeight` the list collapsed to
-                // one clipped row (six releases found, one half-visible name
-                // and no seeders line).
-                .frame(height: min(CGFloat(candidates.count) * 62, 560))
+                // Fills whatever the fixed popover leaves below the header
+                // and the sort row; see `popoverHeight`.
+                .frame(maxHeight: .infinity)
             }
         }
-        .frame(width: 460)
+        .frame(width: 460, height: Self.popoverHeight, alignment: .top)
         .background(SumiTheme.card)
     }
+
+    /// One size in every state, because a popover takes its size once, when
+    /// it opens, and this one opens on "Searching indexers" (about 80pt).
+    /// Sized to the content, it then squashed the list that arrived a second
+    /// later into that height; the sort row added above the list made it
+    /// worse ("opens fine and then collapses"). Earlier the list had a
+    /// computed height for the same reason and a `maxHeight` before that,
+    /// which collapsed it to one clipped row. 560 of list shows about nine
+    /// releases at roughly 62pt each and still leaves room above and below
+    /// the anchored row on a laptop display.
+    static let popoverHeight: CGFloat = 33 + 32 + 560
 }
 
 // MARK: - Studio navigation

@@ -64,6 +64,41 @@ function cacheSeconds(path) {
   return 21600;
 }
 
+/** Requests per IP per window. */
+const LIMITS = {
+  search: { name: "search", limit: 60, periodMs: 60_000 },
+  any: { name: "any", limit: 300, periodMs: 60_000 },
+};
+
+/**
+ * One instance per client IP (`idFromName(ip)`), so every request from that
+ * address is counted by the same object wherever in the world it lands.
+ * Fixed windows kept in memory: an object evicted while idle starts again
+ * from zero, which only ever errs towards letting a person through.
+ * Plain class with `fetch`, not `extends DurableObject`, so the module has
+ * no `cloudflare:workers` import and the tests still run under Node.
+ */
+export class RateLimiter {
+  constructor() {
+    this.windows = new Map();
+  }
+
+  async fetch(request) {
+    const params = new URL(request.url).searchParams;
+    const bucket = params.get("bucket") || "any";
+    const limit = Number(params.get("limit")) || 300;
+    const period = Number(params.get("period")) || 60_000;
+    const now = Date.now();
+    let window = this.windows.get(bucket);
+    if (!window || now - window.start >= period) {
+      window = { start: now, count: 0 };
+      this.windows.set(bucket, window);
+    }
+    window.count += 1;
+    return new Response(null, { status: window.count > limit ? 429 : 204 });
+  }
+}
+
 function deny(status, message) {
   return new Response(JSON.stringify({ status_message: message }), {
     status,
@@ -91,16 +126,22 @@ export default {
     // shares. Search is limited hardest: it is cached for ten minutes where
     // a row is cached for hours, so it is the path that turns requests into
     // upstream calls. The limits are generous for a person (a home screen is
-    // eight rows, a cinema search two requests) and approximate by design:
-    // Cloudflare counts per location and eventually, which is enough to stop
-    // a loop and not meant as accounting. Absent bindings (the tests, or a
-    // deploy without them) mean no limit rather than an outage.
+    // eight rows, a cinema search two requests).
+    //
+    // Counted by `RateLimiter`, one Durable Object per IP, not Cloudflare's
+    // rate-limit binding: that binding was deployed first and never refused
+    // anything on this account, not even at a limit of one request per ten
+    // seconds (five in a row, all answered, 2026-09-22). No binding (the
+    // tests, a deploy without it) means no limit rather than an outage.
     const ip = request.headers.get("cf-connecting-ip") || "unknown";
     const isSearch = url.pathname.startsWith("/3/search/");
-    const limiter = isSearch ? env.SEARCH_LIMIT : env.REQUEST_LIMIT;
-    if (limiter) {
-      const { success } = await limiter.limit({ key: `${isSearch ? "search" : "any"}:${ip}` });
-      if (!success) {
+    if (env.LIMITER) {
+      const bucket = isSearch ? LIMITS.search : LIMITS.any;
+      const stub = env.LIMITER.get(env.LIMITER.idFromName(ip));
+      const verdict = await stub.fetch(
+        `https://limiter/hit?bucket=${bucket.name}&limit=${bucket.limit}&period=${bucket.periodMs}`,
+      );
+      if (verdict.status === 429) {
         // The app's TMDB client parks every caller for the Retry-After it
         // names (catalog/tmdb/client.rs), so this slows it rather than
         // breaking a page.

@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import worker from "./worker.js";
+import worker, { RateLimiter } from "./worker.js";
 
 /** Captures the upstream request the worker would have made. */
 function stubFetch() {
@@ -152,38 +152,52 @@ test("with a token set, only requests carrying it are served", async () => {
 });
 
 test("a caller over the per-IP limit gets 429 with Retry-After, and search has its own budget", async () => {
-  const seen = [];
-  const limiter = (allow) => ({
-    async limit({ key }) {
-      seen.push(key);
-      return { success: allow };
+  // A stand-in namespace backed by the real RateLimiter class, one instance
+  // per name, the way Cloudflare routes idFromName.
+  const objects = new Map();
+  const LIMITER = {
+    idFromName: (name) => name,
+    get: (id) => {
+      if (!objects.has(id)) objects.set(id, new RateLimiter());
+      const object = objects.get(id);
+      return { fetch: (url) => object.fetch(new Request(url)) };
     },
-  });
+  };
   const upstream = globalThis.fetch;
   globalThis.fetch = async () => new Response("{}", { status: 200 });
   try {
-    const headers = { "cf-connecting-ip": "203.0.113.9" };
-    const blocked = await worker.fetch(
-      new Request("https://p.example/3/search/movie?query=x", { headers }),
-      { TMDB_KEY: "k".repeat(32), SEARCH_LIMIT: limiter(false), REQUEST_LIMIT: limiter(true) },
-    );
+    const env = { TMDB_KEY: "k".repeat(32), LIMITER };
+    const call = (path, ip) =>
+      worker.fetch(new Request(`https://p.example${path}`, { headers: { "cf-connecting-ip": ip } }), env);
+
+    for (let i = 0; i < 60; i++) {
+      assert.equal((await call("/3/search/movie?query=x", "203.0.113.9")).status, 200);
+    }
+    const blocked = await call("/3/search/movie?query=x", "203.0.113.9");
     assert.equal(blocked.status, 429);
     assert.equal(blocked.headers.get("retry-after"), "60");
 
-    const allowed = await worker.fetch(
-      new Request("https://p.example/3/trending/movie/week", { headers }),
-      { TMDB_KEY: "k".repeat(32), SEARCH_LIMIT: limiter(false), REQUEST_LIMIT: limiter(true) },
-    );
-    assert.equal(allowed.status, 200);
-    assert.deepEqual(seen, ["search:203.0.113.9", "any:203.0.113.9"]);
+    // Rows have their own, larger budget, and another address its own count.
+    assert.equal((await call("/3/trending/movie/week", "203.0.113.9")).status, 200);
+    assert.equal((await call("/3/search/movie?query=x", "198.51.100.4")).status, 200);
 
-    // No bindings: no limit, not an outage.
+    // No binding: no limit, not an outage.
     const unbound = await worker.fetch(
-      new Request("https://p.example/3/search/movie?query=x", { headers }),
+      new Request("https://p.example/3/search/movie?query=x", { headers: { "cf-connecting-ip": "203.0.113.9" } }),
       { TMDB_KEY: "k".repeat(32) },
     );
     assert.equal(unbound.status, 200);
   } finally {
     globalThis.fetch = upstream;
   }
+});
+
+test("the limiter's window resets after its period", async () => {
+  const limiter = new RateLimiter();
+  const hit = () => limiter.fetch(new Request("https://limiter/hit?bucket=search&limit=2&period=50"));
+  assert.equal((await hit()).status, 204);
+  assert.equal((await hit()).status, 204);
+  assert.equal((await hit()).status, 429);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal((await hit()).status, 204);
 });

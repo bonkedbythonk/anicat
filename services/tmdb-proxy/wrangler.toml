@@ -12,21 +12,14 @@ compatibility_date = "2026-09-08"
 # thousand installs open is a handful of requests to TMDB, not a thousand.
 workers_dev = true
 
-# Per-IP request limits (worker.js). Search is the path that reaches TMDB
-# most often, so it has its own, tighter budget. `period` may only be 10 or
-# 60 seconds; the counts are per Cloudflare location and approximate.
-[[ratelimits]]
-name = "SEARCH_LIMIT"
-namespace_id = "1001"
+# Per-IP request limits: worker.js's RateLimiter, one Durable Object per
+# client IP. Durable Objects on the free plan need the SQLite storage
+# backend, hence `new_sqlite_classes`. Cloudflare's `[[ratelimits]]`
+# binding was tried first and never refused a request on this account.
+[[durable_objects.bindings]]
+name = "LIMITER"
+class_name = "RateLimiter"
 
-  [ratelimits.simple]
-  limit = 60
-  period = 60
-
-[[ratelimits]]
-name = "REQUEST_LIMIT"
-namespace_id = "1002"
-
-  [ratelimits.simple]
-  limit = 300
-  period = 60
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]

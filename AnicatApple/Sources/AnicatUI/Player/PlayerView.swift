@@ -60,6 +60,10 @@ public struct PlayerView: View {
     @State private var expandedTrackList: TrackListKind?
     @State private var releases: [MediaDetailView.ReleaseCandidateItem] = []
     @State private var releaseSort: ReleaseSort = .best
+    // The same two keys Settings > Playback > Subtitles writes, so a change
+    // in either place shows in the other.
+    @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
+    @AppStorage(SubtitleStyle.key) private var subtitleStyleRaw: String = SubtitleStyle.release.rawValue
     @State private var isLoadingReleases = false
     @State private var releaseError: String?
     /// What `releases` was fetched for, so reopening the popover does not
@@ -1497,6 +1501,8 @@ public struct PlayerView: View {
                 refreshTracks()
             }
 
+            subtitleLookSection
+
             if controller.titleTrackMemory != nil {
                 Button {
                     controller.forgetTrackMemory()
@@ -1719,6 +1725,46 @@ public struct PlayerView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+    }
+
+    /// Size and style of the subtitles, next to the subtitle track list, so
+    /// they can be changed with the episode in view instead of from
+    /// Settings. Applied at once through the controller, and written to the
+    /// same keys Settings reads.
+    private var subtitleLookSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Subtitle look")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(SumiTheme.muted)
+            HStack(spacing: 6) {
+                ForEach([(0.8, "S"), (1.0, "M"), (1.25, "L"), (1.5, "XL")], id: \.0) { scale, label in
+                    Button {
+                        subtitleScale = scale
+                        controller.onSetSubtitleScale?(scale)
+                    } label: {
+                        Text(label)
+                            .sumiTabularMono(size: 11, weight: subtitleScale == scale ? .bold : .regular)
+                            .foregroundColor(subtitleScale == scale ? SumiTheme.indigo : SumiTheme.foreground)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(subtitleScale == scale ? SumiTheme.indigo.opacity(0.15) : Color.clear)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.sumiPressable)
+                    .help("Subtitle size \(label)")
+                }
+            }
+            SubtitleStyleTiles(
+                selection: Binding(
+                    get: { SubtitleStyle(rawValue: subtitleStyleRaw) ?? .release },
+                    set: { style in
+                        subtitleStyleRaw = style.rawValue
+                        controller.onSetSubtitleStyle?(style)
+                    }
+                ),
+                compact: true
+            )
         }
     }
 

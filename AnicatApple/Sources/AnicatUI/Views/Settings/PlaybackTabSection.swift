@@ -54,12 +54,11 @@ struct PlaybackTabSection: View {
         )
     }
 
-    /// The dropdown shows labels; the setting stores the case name.
-    private var subtitleStyleBinding: Binding<String> {
+    /// The tiles speak `SubtitleStyle`; the setting stores the case name.
+    private var subtitleStyleBinding: Binding<SubtitleStyle> {
         Binding(
-            get: { (SubtitleStyle(rawValue: subtitleStyle) ?? .release).label },
-            set: { label in
-                guard let style = SubtitleStyle.allCases.first(where: { $0.label == label }) else { return }
+            get: { SubtitleStyle(rawValue: subtitleStyle) ?? .release },
+            set: { style in
                 subtitleStyle = style.rawValue
                 AppModel.shared?.playerController.onSetSubtitleStyle?(style)
             }
@@ -186,18 +185,29 @@ struct PlaybackTabSection: View {
             Divider()
                 .background(SumiTheme.border)
 
-            SettingField(
-                label: "Style",
-                description: (SubtitleStyle(rawValue: subtitleStyle) ?? .release).summary
-                    + (subtitleStyle == SubtitleStyle.release.rawValue
-                        ? ""
-                        : " Only the dialogue changes: signs, song lyrics and on-screen text keep the look the release gave them.")
-            ) {
-                SumiDropdown(
-                    options: SubtitleStyle.allCases.map(\.label),
-                    selected: subtitleStyleBinding,
-                    minWidth: 170
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Style")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(SumiTheme.foreground)
+                // The chosen look, at the chosen size, over a stand-in frame
+                // with a typeset sign in the corner that does not change:
+                // the note below promises exactly that.
+                SubtitleScene(
+                    style: subtitleStyleBinding.wrappedValue,
+                    scale: subtitleScale
                 )
+                .frame(maxWidth: 520)
+
+                SubtitleStyleTiles(selection: subtitleStyleBinding)
+                    .frame(maxWidth: 620)
+
+                Text(subtitleStyleBinding.wrappedValue.summary
+                    + (subtitleStyleBinding.wrappedValue == .release
+                        ? ""
+                        : " Only the dialogue changes: signs, song lyrics and on-screen text keep the look the release gave them."))
+                    .font(.system(size: 12))
+                    .foregroundColor(SumiTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
 

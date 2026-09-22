@@ -1905,7 +1905,13 @@ public struct MpvSurface {
                                     self.controller.checkIntroStatus()
                                     self.controller.onPositionChange?(pos, self.controller.duration)
                                 }
-                                self.controller.isBuffering = false
+                                // Only on a change: this runs once per video
+                                // frame, `@Observable` announces every write,
+                                // and `PlayerView` reads it (see
+                                // `PlayerController.checkIntroStatus`).
+                                if self.controller.isBuffering {
+                                    self.controller.isBuffering = false
+                                }
                             }
                         } else if name == "eof-reached", let data = prop.data {
                             let reached = data.assumingMemoryBound(to: Int32.self).pointee != 0

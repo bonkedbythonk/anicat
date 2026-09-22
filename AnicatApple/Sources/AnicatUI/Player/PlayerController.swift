@@ -1113,11 +1113,19 @@ public final class PlayerController {
             return
         }
 
+        // Written only on a change. This runs on every time-pos event, one
+        // per video frame, and `@Observable` announces every write, equal or
+        // not: `PlayerView` reads these, so it was re-evaluated 24+ times a
+        // second, and with the controls up that rebuilt both bars and every
+        // button in them (`sample`, fullscreen, 2026-09-23: PlayerView.body
+        // 422 samples with the controls up vs 256 hidden, PlayerBottomBar
+        // 271; about 7 CPU points, 50.6-53.4% vs 44.7%).
         let active = windows.first { $0.contains(currentTime) }
-        activeSkipWindow = active
-        pendingSkipWindow = windows.first { $0.isPending(at: currentTime) }
-        isIntroActive = active?.kind == .opening
-        isOutroActive = active?.kind == .ending
+        let pending = windows.first { $0.isPending(at: currentTime) }
+        if activeSkipWindow != active { activeSkipWindow = active }
+        if pendingSkipWindow != pending { pendingSkipWindow = pending }
+        if isIntroActive != (active?.kind == .opening) { isIntroActive = active?.kind == .opening }
+        if isOutroActive != (active?.kind == .ending) { isOutroActive = active?.kind == .ending }
 
         checkNextEpisodeCountdown()
     }
@@ -1130,7 +1138,15 @@ public final class PlayerController {
         // Arm first, expire second, in one pass. A window that ends at the
         // end of the file arms the countdown at a position nothing will ever
         // move past — there is no second tick to expire it in.
-        if nextEpisodeCountdown.advance(to: currentTime, duration: duration) {
+        //
+        // Advanced on a copy and written back only if it moved: a mutating
+        // call through the stored property is a write every tick, which
+        // re-evaluated every view reading the countdown once per frame
+        // (see `checkIntroStatus`).
+        var countdown = nextEpisodeCountdown
+        let expired = countdown.advance(to: currentTime, duration: duration)
+        if countdown != nextEpisodeCountdown { nextEpisodeCountdown = countdown }
+        if expired {
             print("[autonext] countdown expired at \(Int(currentTime))s of \(Int(duration))s, playing next")
             onNextEpisode?()
         }

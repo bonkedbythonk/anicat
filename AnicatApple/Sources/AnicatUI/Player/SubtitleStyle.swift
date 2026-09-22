@@ -107,6 +107,16 @@ public enum SubtitleStyle: String, CaseIterable, Identifiable, Sendable {
 
     /// `sub-ass-style-overrides`, or the empty string for `.release`, which
     /// clears whatever an earlier pick set.
+    ///
+    /// Font, weight, colours and border style only: no `Outline`, no
+    /// `Shadow`. Those two are in the file's own script pixels, and a
+    /// release's coordinate space is whatever its group chose: SubsPlease
+    /// writes PlayResY 360, a BD group 720 or 1080. The widths here are in
+    /// mpv's 720-line units, so written into a 360-line SubsPlease file the
+    /// outline came out twice as thick, and with the bold weight Simulcast
+    /// read as a size larger than the release's own look (owner: "much
+    /// bigger than the standard one"). The group already tuned the width
+    /// for its own PlayRes; the preset keeps it.
     var assOverrides: String {
         guard let look else { return "" }
         let fields: [(String, String)] = [
@@ -116,8 +126,6 @@ public enum SubtitleStyle: String, CaseIterable, Identifiable, Sendable {
             ("OutlineColour", Self.assColour(look.outline)),
             ("BackColour", Self.assColour(look.shadow)),
             ("BorderStyle", look.boxed ? "3" : "1"),
-            ("Outline", Self.number(look.outlineWidth)),
-            ("Shadow", Self.number(look.shadowOffset)),
         ]
         return Self.dialogueStyleNames
             .flatMap { style in fields.map { "\(style).\($0.0)=\($0.1)" } }

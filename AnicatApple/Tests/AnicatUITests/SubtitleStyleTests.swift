@@ -33,6 +33,16 @@ struct SubtitleStyleTests {
         #expect(!overrides.contains { $0.hasPrefix("Sign.") || $0.hasPrefix("TS.") || $0.hasPrefix("Title.") })
     }
 
+    @Test("ASS overrides never set outline or shadow widths")
+    func noWidthsInAss() {
+        // Those are in each file's own script pixels (SubsPlease: 360-line),
+        // and mpv-unit widths written there doubled the outline.
+        for style in SubtitleStyle.allCases {
+            let fields = style.assOverrides.split(separator: ",").map { $0.split(separator: "=")[0] }
+            #expect(!fields.contains { $0.hasSuffix(".Outline") || $0.hasSuffix(".Shadow") })
+        }
+    }
+
     @Test("Boxed draws a box, the others an outline")
     func boxed() {
         let boxed = Dictionary(uniqueKeysWithValues: SubtitleStyle.boxed.textOptions)

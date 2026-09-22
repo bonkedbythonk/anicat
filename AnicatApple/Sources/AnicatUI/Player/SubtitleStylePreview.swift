@@ -1,13 +1,22 @@
 import SwiftUI
+import CoreText
 
 /// What a subtitle style looks like, drawn by SwiftUI rather than by mpv, so
 /// Settings and the player's menu can show it without a video playing.
 ///
 /// An approximation, not mpv's renderer: the outline is eight hard shadows
-/// around the glyphs, which reads the same at preview size. Sizes follow
-/// mpv's own units, which are relative to a 720-line frame: text is
-/// `sub-font-size` 55 at scale 1, the outline is `sub-border-size` in the
-/// same units, so a preview of height `h` scales everything by `h / 720`.
+/// around the glyphs, which reads the same at preview size. Sizes are
+/// relative to a 720-line frame, so a preview of height `h` scales
+/// everything by `h / 720`.
+///
+/// The size is what real releases use, and it is a line height, not a point
+/// size. SubsPlease writes its dialogue at 26 in a 360-line script, 52 at
+/// 720; a YURI BD release, 50 at 720 (both read from files in the stream
+/// cache, 2026-09-22). libass sizes a font so ascent plus descent equals
+/// that number, while SwiftUI's size is the em; for these fonts ascent plus
+/// descent is 1.12 to 1.17 em (CoreText, per 100pt: Trebuchet MS 116.1,
+/// Helvetica Neue 116.5, Arial 111.7, Roboto about 117). Drawn as a point
+/// size, every preview came out a step too large.
 struct SubtitleSample: View {
     let style: SubtitleStyle
     var scale: Double = 1
@@ -18,7 +27,7 @@ struct SubtitleSample: View {
     var body: some View {
         let look = style.look ?? SubtitleStyle.releaseLook
         let unit = frameHeight / 720
-        let size = 55 * unit * CGFloat(scale)
+        let size = Self.releaseLineHeight * unit * CGFloat(scale) / Self.lineHeightPerEm(look.font)
         let outline = max(CGFloat(look.outlineWidth) * unit, look.boxed ? 0 : 0.6)
         Text(text)
             .font(fontFor(look, size: size))
@@ -35,6 +44,20 @@ struct SubtitleSample: View {
             .padding(.vertical, look.boxed ? outline * 0.5 + 1 : 0)
             .background(look.boxed ? Color(argb: look.outline) : .clear)
             .accessibilityLabel("Sample subtitle in the \(style.label) style")
+    }
+
+    /// A typical release's dialogue line height, in 720-line units.
+    static let releaseLineHeight: CGFloat = 52
+
+    /// Ascent plus descent per em, as libass measures a font. "sans-serif"
+    /// stands for the release's own font, which on this Mac resolves to
+    /// Helvetica (1.00) while the fonts releases actually ship, Roboto and
+    /// its kind, are about 1.17.
+    static func lineHeightPerEm(_ name: String) -> CGFloat {
+        guard name != "sans-serif" else { return 1.17 }
+        let font = CTFontCreateWithName(name as CFString, 100, nil)
+        let cell = CTFontGetAscent(font) + CTFontGetDescent(font)
+        return cell > 0 ? cell / 100 : 1.17
     }
 
     private func fontFor(_ look: SubtitleStyle.Look, size: CGFloat) -> Font {

@@ -59,6 +59,7 @@ public struct PlayerView: View {
     /// is taller than the popover a 16:9 window has room for.
     @State private var expandedTrackList: TrackListKind?
     @State private var releases: [MediaDetailView.ReleaseCandidateItem] = []
+    @State private var releaseSort: ReleaseSort = .best
     @State private var isLoadingReleases = false
     @State private var releaseError: String?
     /// What `releases` was fetched for, so reopening the popover does not
@@ -1770,9 +1771,10 @@ public struct PlayerView: View {
                     .font(.system(size: 11))
                     .foregroundColor(SumiTheme.muted)
             } else {
+                ReleaseSortPicker(sort: $releaseSort)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(releases) { release in
+                        ForEach(releaseSort.apply(releases)) { release in
                             let isCurrent = release.name == controller.currentReleaseName
                             Button {
                                 showInfoMenu = false
@@ -1802,15 +1804,7 @@ public struct PlayerView: View {
                                                 .foregroundColor(SumiTheme.indigo)
                                         }
                                     }
-                                    HStack(spacing: 6) {
-                                        if release.isDub {
-                                            Text("DUB")
-                                                .sumiTabularMono(size: 9.5, weight: .bold)
-                                                .foregroundColor(SumiTheme.indigo)
-                                        }
-                                        Text("\(release.seeders) seeders")
-                                            .sumiTabularMono(size: 10)
-                                            .foregroundColor(SumiTheme.muted)
+                                    ReleaseStatsLine(item: release, fontSize: 10) {
                                         // The engine tries this one first
                                         // on every play of the episode and
                                         // never said so; a viewer choosing

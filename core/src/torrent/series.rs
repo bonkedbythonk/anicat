@@ -45,6 +45,8 @@ struct KnabenHit {
     #[serde(default)]
     seeders: Option<u64>,
     #[serde(default)]
+    bytes: Option<u64>,
+    #[serde(default)]
     category_id: Vec<i64>,
 }
 
@@ -288,6 +290,8 @@ fn collect(hits: Vec<KnabenHit>, title_norm: &str, criteria: EpisodeCriteria) ->
             magnet: Some(magnet),
             torrent_url: None,
             seeders,
+            seeders_known: true,
+            size_bytes: hit.bytes,
             score: score + seeder_score(seeders),
             // A season pack holds many episodes, so the shared loop has to
             // pick the file by name rather than taking the only video.

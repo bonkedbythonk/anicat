@@ -86,6 +86,8 @@ impl RememberedRelease {
             // Unknown until the swarm answers; only the search ranking read
             // these and this candidate is not ranked against anything.
             seeders: 0,
+            seeders_known: false,
+            size_bytes: None,
             score: 0,
             assume_batch: self.assume_batch,
         }
@@ -355,6 +357,8 @@ const CANDIDATE_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(
 pub struct TorrentChoice {
     pub name: String,
     pub seeders: u64,
+    pub seeders_known: bool,
+    pub size_bytes: Option<u64>,
     pub is_dub: bool,
 }
 
@@ -1530,6 +1534,8 @@ impl TorrentManager {
                 TorrentChoice {
                     name: c.name,
                     seeders: c.seeders,
+                    seeders_known: c.seeders_known,
+                    size_bytes: c.size_bytes,
                     is_dub,
                 }
             })
@@ -2970,6 +2976,8 @@ mod tests {
             magnet: None,
             torrent_url: None,
             seeders: 50,
+            seeders_known: true,
+            size_bytes: None,
             score: 1000,
             assume_batch: true,
             anidb_aid: Some(aid),
@@ -3089,6 +3097,8 @@ mod tests {
             magnet: None,
             torrent_url: None,
             seeders: 40,
+            seeders_known: true,
+            size_bytes: None,
             score: 1000,
             assume_batch: false,
         }];

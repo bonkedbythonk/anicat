@@ -217,6 +217,8 @@ pub(crate) async fn find_candidates(
             // treating them as healthy is the same bet already made for
             // SubsPlease's API results just below in the ranking.
             seeders: 50,
+            seeders_known: false,
+            size_bytes: None,
             score,
             assume_batch: files.len() > 1,
         });

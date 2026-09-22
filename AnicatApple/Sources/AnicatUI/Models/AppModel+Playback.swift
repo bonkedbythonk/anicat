@@ -197,7 +197,10 @@ extension AppModel {
             )
         }
         return choices.map {
-            MediaDetailView.ReleaseCandidateItem(name: $0.name, seeders: Int($0.seeders), isDub: $0.isDub)
+            MediaDetailView.ReleaseCandidateItem(
+                name: $0.name, seeders: Int($0.seeders), isDub: $0.isDub,
+                seedersKnown: $0.seedersKnown, sizeBytes: $0.sizeBytes.map { Int64(clamping: $0) }
+            )
         }
     }
 
@@ -808,7 +811,10 @@ extension AppModel {
                 title: details.title
             )
             return choices.map {
-                MediaDetailView.ReleaseCandidateItem(name: $0.name, seeders: Int($0.seeders), isDub: $0.isDub)
+                MediaDetailView.ReleaseCandidateItem(
+                name: $0.name, seeders: Int($0.seeders), isDub: $0.isDub,
+                seedersKnown: $0.seedersKnown, sizeBytes: $0.sizeBytes.map { Int64(clamping: $0) }
+            )
             }
         } catch {
             return []

@@ -1015,6 +1015,10 @@ impl From<crate::torrent::EpisodeDownloadStatus> for FfiDownloadStatus {
 pub struct FfiTorrentChoice {
     pub name: String,
     pub seeders: u64,
+    /// False when the index gave no swarm count and `seeders` is a stand-in.
+    pub seeders_known: bool,
+    /// Total torrent size in bytes, where the index lists it.
+    pub size_bytes: Option<u64>,
     pub is_dub: bool,
 }
 
@@ -2417,6 +2421,8 @@ impl AnicatEngine {
             .map(|c| FfiTorrentChoice {
                 name: c.name,
                 seeders: c.seeders,
+                seeders_known: c.seeders_known,
+                size_bytes: c.size_bytes,
                 is_dub: c.is_dub,
             })
             .collect())

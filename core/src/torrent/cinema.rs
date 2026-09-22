@@ -63,7 +63,7 @@ struct ApibayRow {
     name: String,
     info_hash: String,
     seeders: String,
-    #[allow(dead_code)]
+    /// Bytes, as a decimal string like the seeders.
     size: String,
 }
 
@@ -77,6 +77,8 @@ struct KnabenHit {
     hash: Option<String>,
     #[serde(default)]
     seeders: Option<u64>,
+    #[serde(default)]
+    bytes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -283,8 +285,10 @@ fn collect(rows: Vec<ApibayRow>, title_norm: &str, criteria: MovieCriteria, requ
             anidb_aid: None,
             magnet: Some(magnet_for(&row.info_hash, &row.name)),
             torrent_url: None,
+            size_bytes: row.size.parse().ok(),
             name: row.name,
             seeders,
+            seeders_known: true,
             score: score + seeder_score(seeders),
             // A film is one file, not a series batch: `try_candidate` takes a
             // lone video directly rather than hunting for an episode number in
@@ -354,6 +358,8 @@ fn collect_knaben(
             torrent_url: None,
             name: hit.title,
             seeders,
+            seeders_known: true,
+            size_bytes: hit.bytes,
             score: score + seeder_score(seeders),
             assume_batch: false,
         });

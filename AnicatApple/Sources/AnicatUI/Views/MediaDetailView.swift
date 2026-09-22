@@ -40,11 +40,19 @@ public struct MediaDetailView: View {
         public let id: String
         public let seeders: Int
         public let isDub: Bool
+        /// False where the index reports no swarm and `seeders` is the
+        /// engine's stand-in (SubsPlease, SeaDex): shown as "seeders
+        /// unknown" rather than as a count nobody measured.
+        public let seedersKnown: Bool
+        /// Total torrent size, where the index lists it.
+        public let sizeBytes: Int64?
 
-        public init(name: String, seeders: Int, isDub: Bool) {
+        public init(name: String, seeders: Int, isDub: Bool, seedersKnown: Bool = true, sizeBytes: Int64? = nil) {
             self.id = name
             self.seeders = seeders
             self.isDub = isDub
+            self.seedersKnown = seedersKnown
+            self.sizeBytes = sizeBytes
         }
 
         public var name: String { id }
@@ -3896,6 +3904,7 @@ private struct ServerPickerView: View {
     let isLoading: Bool
     let candidates: [MediaDetailView.ReleaseCandidateItem]
     let onSelect: (String) -> Void
+    @State private var sort: ReleaseSort = .best
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -3922,9 +3931,14 @@ private struct ServerPickerView: View {
                     .foregroundColor(SumiTheme.muted)
                     .padding(14)
             } else {
+                ReleaseSortPicker(sort: $sort)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                Divider()
+                let sorted = sort.apply(candidates)
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(candidates) { candidate in
+                        ForEach(sorted) { candidate in
                             Button {
                                 onSelect(candidate.name)
                             } label: {
@@ -3956,16 +3970,7 @@ private struct ServerPickerView: View {
                                             // that width.
                                             .lineLimit(2)
                                             .fixedSize(horizontal: false, vertical: true)
-                                        HStack(spacing: 6) {
-                                            if candidate.isDub {
-                                                Text("DUB")
-                                                    .sumiTabularMono(size: 10, weight: .bold)
-                                                    .foregroundColor(SumiTheme.indigo)
-                                            }
-                                            Text("\(candidate.seeders) seeders")
-                                                .sumiTabularMono(size: 10.5)
-                                                .foregroundColor(SumiTheme.muted)
-                                        }
+                                        ReleaseStatsLine(item: candidate)
                                     }
                                     Spacer(minLength: 8)
                                     Image(systemName: "play.fill")
@@ -3978,7 +3983,7 @@ private struct ServerPickerView: View {
                             }
                             .buttonStyle(.sumiPressable)
 
-                            if candidate.id != candidates.last?.id {
+                            if candidate.id != sorted.last?.id {
                                 Divider().padding(.leading, 14)
                             }
                         }

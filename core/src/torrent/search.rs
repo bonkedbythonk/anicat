@@ -28,6 +28,34 @@ pub struct Candidate {
     /// The AniDB anime AnimeTosho matched this torrent to, when the listing
     /// came from AnimeTosho and it had one. See `verify`.
     pub anidb_aid: Option<i64>,
+    /// False where the index reports no swarm and `seeders` is a stand-in
+    /// (SubsPlease's API, SeaDex, AnimeTosho before it has scraped a
+    /// tracker). The ranking still needs a number; the release picker must
+    /// not print "50 seeders" for a count nobody measured.
+    pub seeders_known: bool,
+    /// Total size of the torrent in bytes, where the index lists it (Nyaa,
+    /// AnimeTosho, Knaben, apibay). Shown in the release picker; nothing
+    /// ranks on it.
+    pub size_bytes: Option<u64>,
+}
+
+/// Nyaa writes sizes as "6.6 GiB", "700.0 MiB", "1.2 TiB" (binary units, one
+/// decimal). `None` for anything else rather than a guess.
+pub(crate) fn parse_size(text: &str) -> Option<u64> {
+    let mut parts = text.split_whitespace();
+    let value: f64 = parts.next()?.parse().ok()?;
+    let unit = match parts.next()? {
+        "B" | "Bytes" => 1.0,
+        "KiB" => 1024.0,
+        "MiB" => 1024.0 * 1024.0,
+        "GiB" => 1024.0 * 1024.0 * 1024.0,
+        "TiB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    if !value.is_finite() || value < 0.0 {
+        return None;
+    }
+    Some((value * unit).round() as u64)
 }
 
 /// Standard open trackers appended to infohash-only magnets so peers are
@@ -1407,6 +1435,8 @@ async fn search_subsplease(
                         magnet: Some(magnet.to_string()),
                         torrent_url: None,
                         seeders: 50, // not reported by the API; assume healthy
+                        seeders_known: false,
+                        size_bytes: None,
                         score,
                         // The API states the episode (or range) explicitly, so
                         // there is never anything to assume here.
@@ -1576,6 +1606,8 @@ async fn search_animetosho(
             magnet,
             torrent_url,
             seeders,
+            seeders_known: seeders_known.is_some(),
+            size_bytes: item.get("total_size").and_then(|v| v.as_u64()),
             score,
             assume_batch,
             anidb_aid: item.get("anidb_aid").and_then(|v| v.as_i64()),
@@ -1674,6 +1706,8 @@ async fn search_nyaa(
             magnet,
             torrent_url: if torrent_url.is_empty() { None } else { Some(torrent_url) },
             seeders,
+            seeders_known: true,
+            size_bytes: parse_size(&field(item, "nyaa:size")),
             score,
             assume_batch,
         });
@@ -2206,6 +2240,10 @@ fn merge_duplicates(candidates: Vec<Candidate>) -> Vec<Candidate> {
                 let kept: &mut Candidate = &mut out[i];
                 kept.score = kept.score.max(c.score);
                 kept.seeders = kept.seeders.max(c.seeders);
+                kept.seeders_known |= c.seeders_known;
+                if kept.size_bytes.is_none() {
+                    kept.size_bytes = c.size_bytes;
+                }
                 if kept.torrent_url.is_none() {
                     kept.torrent_url = c.torrent_url;
                 }
@@ -2277,6 +2315,18 @@ mod tests {
     /// nothing to say about an entry's relatives.
     pub(super) const NO_SIBLINGS: SiblingTitles<'static> = SiblingTitles { own: &[], related: &[] };
 
+    #[test]
+    fn nyaa_sizes_are_read_in_binary_units_and_nonsense_is_none() {
+        assert_eq!(parse_size("6.6 GiB"), Some(7_086_696_038));
+        assert_eq!(parse_size("700.0 MiB"), Some(734_003_200));
+        assert_eq!(parse_size("1.2 TiB"), Some(1_319_413_953_331));
+        assert_eq!(parse_size("512 Bytes"), Some(512));
+        assert_eq!(parse_size(""), None);
+        assert_eq!(parse_size("6.6"), None);
+        assert_eq!(parse_size("6.6 GB"), None);
+        assert_eq!(parse_size("big GiB"), None);
+    }
+
     fn candidate(score: i64, seeders: u64, assume_batch: bool) -> Candidate {
         Candidate {
             anidb_aid: None,
@@ -2286,6 +2336,8 @@ mod tests {
             seeders,
             score,
             assume_batch,
+            seeders_known: true,
+            size_bytes: None,
         }
     }
 
@@ -2399,6 +2451,8 @@ mod tests {
             seeders: 40,
             score: 700,
             assume_batch: false,
+            seeders_known: true,
+            size_bytes: Some(1_468_006_400),
         };
         // Nyaa scores the same release higher (its `trusted` flag is worth
         // TRUSTED_BONUS, which AnimeTosho's copy never gets) and reports a
@@ -2412,12 +2466,16 @@ mod tests {
             seeders: 55,
             score: 800,
             assume_batch: false,
+            seeders_known: true,
+            size_bytes: None,
         };
 
         let merged = merge_duplicates(vec![from_tosho, from_nyaa]);
 
         assert_eq!(merged.len(), 1, "the same release must not be raced twice");
         assert_eq!(merged[0].score, 800);
+        // The size only AnimeTosho listed survives the merge too.
+        assert_eq!(merged[0].size_bytes, Some(1_468_006_400));
         assert_eq!(merged[0].seeders, 55);
         assert!(
             merged[0].torrent_url.is_some(),

@@ -19,7 +19,13 @@ uniffi = { version = "0.28", features = ["tokio", "cli"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+# gzip: with default-features off nothing sent Accept-Encoding, so every
+# AniList page, TMDB row, Nyaa RSS feed and MangaDex chapter list came down
+# uncompressed; the largest AniList home response is ~400 KB of JSON. Not
+# brotli: it drags in alloc-stdlib, which ships no license file and would
+# need a hand-kept exception in the notices generator, for servers that all
+# speak gzip anyway.
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "gzip"], default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }

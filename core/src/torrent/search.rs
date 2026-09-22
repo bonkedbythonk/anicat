@@ -40,6 +40,14 @@ pub(crate) const TRACKERS: &[&str] = &[
     "udp://tracker.torrent.eu.org:451/announce",
 ];
 
+/// Per-request deadline for an index query (SubsPlease, Nyaa, SeaDex). The
+/// shared client carries only a connect timeout, so a host that accepted the
+/// connection and then went quiet held the whole search wave, and every
+/// resolve behind it, until the kernel gave up on its own. AnimeTosho has a
+/// tighter budget of its own (`TOSHO_TIMEOUT`) because it is raced, not
+/// joined.
+pub(crate) const INDEX_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// A title as it should be typed into Nyaa's search box: punctuation dropped,
 /// words and separators kept.
 ///
@@ -1336,7 +1344,13 @@ async fn search_subsplease(
         "https://subsplease.org/api/?f=search&tz=UTC&s={}",
         urlencoding_encode(title)
     );
-    let resp = match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
+    let resp = match client
+        .get(&url)
+        .timeout(INDEX_TIMEOUT)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+    {
         Ok(r) => r,
         Err(e) => {
             log::warn!("torrent: subsplease search failed: {}", e);
@@ -1486,7 +1500,7 @@ async fn search_animetosho(
         const TOSHO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
         let request = client
             .get(&url)
-            .header("User-Agent", "Anicat/5.8.0")
+            .header("User-Agent", concat!("Anicat/", env!("CARGO_PKG_VERSION")))
             .timeout(TOSHO_TIMEOUT);
         match request.send().await {
             Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt == 0 => {
@@ -1592,7 +1606,7 @@ async fn search_nyaa(
     // that wins is whichever survived the throttle rather than the best one.
     let mut body = String::new();
     for attempt in 0..=1 {
-        match client.get(&url).send().await {
+        match client.get(&url).timeout(INDEX_TIMEOUT).send().await {
             Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt == 0 => {
                 tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                 continue;
@@ -2147,7 +2161,7 @@ async fn stated_episodes(
         "https://nyaa.si/?page=rss&c=1_2&f=0&s=seeders&o=desc&q={}",
         urlencoding_encode(query)
     );
-    let Ok(resp) = client.get(&url).send().await else { return vec![] };
+    let Ok(resp) = client.get(&url).timeout(INDEX_TIMEOUT).send().await else { return vec![] };
     if !resp.status().is_success() {
         log::warn!("torrent: nyaa numbering probe returned HTTP {} for '{}'", resp.status(), query);
         return vec![];

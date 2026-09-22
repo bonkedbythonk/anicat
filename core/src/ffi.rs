@@ -138,6 +138,9 @@ pub struct MangaChapter {
     pub title: String,
     pub id: String,
     pub pages: u32,
+    /// Scanlation group to credit in the chapter list (a MangaDex API
+    /// rule); `None` for MangaKatana chapters.
+    pub scanlation_group: Option<String>,
 }
 
 /// One chapter link from a Syosetu novel's table of contents.
@@ -1099,6 +1102,13 @@ impl AnicatEngine {
                 env!("CARGO_PKG_VERSION"),
                 " (+https://github.com/bonkedbythonk/anicat)"
             ))
+            // A connect deadline only. A total-request timeout here would cut
+            // off the manga page and .torrent downloads that share this
+            // client; the per-request deadlines live at each call site
+            // (`INDEX_TIMEOUT` for the indexers, `REQUEST_TIMEOUT` in the
+            // readers). Without this a host that black-holes SYNs held every
+            // resolve for the kernel's own 75 s.
+            .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .map_err(AnicatError::internal)?;
         let registry = Registry::open(&dir.join("registry.sqlite"))
@@ -2997,6 +3007,7 @@ impl AnicatEngine {
                 title: c.title,
                 id: c.id,
                 pages: c.pages,
+                scanlation_group: c.scanlation_group,
             })
             .collect())
     }

@@ -50,7 +50,16 @@ async fn fetch_releases(client: &reqwest::Client, media_id: i64) -> Option<Vec<S
         "https://releases.moe/api/collections/entries/records?filter=alID%3D{}&expand=trs",
         media_id
     );
-    let resp = match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
+    // Per-request deadline: the shared client has none, and this lookup runs
+    // inside the same wave as the indexers, so a releases.moe that accepts
+    // the connection and never answers would hold every resolve open.
+    let resp = match client
+        .get(&url)
+        .timeout(super::search::INDEX_TIMEOUT)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+    {
         Ok(r) => r,
         Err(e) => {
             log::warn!("torrent: seadex lookup failed for alID {}: {}", media_id, e);

@@ -228,21 +228,29 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     }
 
     if version < 6 {
-        conn.execute_batch(
-            "BEGIN TRANSACTION;
+        // Guarded on the column, like every ALTER below: the stamp is a
+        // second statement after the batch, and a crash between the two
+        // leaves the column in place at the old version. On the next launch
+        // an unguarded ALTER fails with "duplicate column", `migrate` errors,
+        // `Registry::open` fails and the engine never constructs. A CREATE
+        // has IF NOT EXISTS for the same reason; ALTER has no such form.
+        if !has_column(conn, "offline_chapters", "last_used_at")? {
+            conn.execute_batch(
+                "BEGIN TRANSACTION;
 
-            -- When a downloaded chapter was last opened, which is what the
-            -- size cap evicts by. Downloading is not using: a chapter grabbed
-            -- for a trip and never read should go before one read yesterday,
-            -- and `downloaded_at` alone cannot tell them apart. Backfilled to
-            -- the download time, which is the only thing known about rows
-            -- that existed before this column did.
-            ALTER TABLE offline_chapters ADD COLUMN last_used_at TEXT;
-            UPDATE offline_chapters SET last_used_at = downloaded_at WHERE last_used_at IS NULL;
+                -- When a downloaded chapter was last opened, which is what the
+                -- size cap evicts by. Downloading is not using: a chapter grabbed
+                -- for a trip and never read should go before one read yesterday,
+                -- and `downloaded_at` alone cannot tell them apart. Backfilled to
+                -- the download time, which is the only thing known about rows
+                -- that existed before this column did.
+                ALTER TABLE offline_chapters ADD COLUMN last_used_at TEXT;
+                UPDATE offline_chapters SET last_used_at = downloaded_at WHERE last_used_at IS NULL;
 
-            COMMIT;",
-        )
-        .map_err(|e| e.to_string())?;
+                COMMIT;",
+            )
+            .map_err(|e| e.to_string())?;
+        }
         conn.pragma_update(None, "user_version", 6)
             .map_err(|e| e.to_string())?;
     }
@@ -323,21 +331,25 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     }
 
     if version < 9 {
-        conn.execute_batch(
-            "BEGIN TRANSACTION;
+        // Same guard as 6: a stamp lost to a crash must not turn this ALTER
+        // into a "duplicate column" error on every launch after.
+        if !has_column(conn, "offline_chapters", "kind")? {
+            conn.execute_batch(
+                "BEGIN TRANSACTION;
 
-            -- What kind of thing was downloaded. Everything before this was a
-            -- manga chapter -- a directory of page images -- and
-            -- `offline_chapter_pages` answers with file paths the reader hands
-            -- straight to an image view. A downloaded novel volume is prose in
-            -- one JSON file, so without a discriminator here the first novel
-            -- download would come back through that same call and the manga
-            -- reader would try to decode a text file as a page.
-            ALTER TABLE offline_chapters ADD COLUMN kind TEXT NOT NULL DEFAULT 'manga';
+                -- What kind of thing was downloaded. Everything before this was a
+                -- manga chapter -- a directory of page images -- and
+                -- `offline_chapter_pages` answers with file paths the reader hands
+                -- straight to an image view. A downloaded novel volume is prose in
+                -- one JSON file, so without a discriminator here the first novel
+                -- download would come back through that same call and the manga
+                -- reader would try to decode a text file as a page.
+                ALTER TABLE offline_chapters ADD COLUMN kind TEXT NOT NULL DEFAULT 'manga';
 
-            COMMIT;",
-        )
-        .map_err(|e| e.to_string())?;
+                COMMIT;",
+            )
+            .map_err(|e| e.to_string())?;
+        }
         conn.pragma_update(None, "user_version", 9)
             .map_err(|e| e.to_string())?;
     }
@@ -423,4 +435,64 @@ fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> Result<
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LATEST: i64 = 11;
+
+    fn user_version(conn: &Connection) -> i64 {
+        conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap()
+    }
+
+    fn column_count(conn: &Connection, table: &str, column: &str) -> usize {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})")).unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter(|name| name.as_deref() == Ok(column))
+            .count()
+    }
+
+    /// A database whose schema is at the latest version but whose stamp says
+    /// `stamped`: what a crash between a migration's batch and its
+    /// `pragma_update` leaves behind.
+    fn schema_at_latest_stamped(stamped: i64) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(user_version(&conn), LATEST);
+        conn.pragma_update(None, "user_version", stamped).unwrap();
+        conn
+    }
+
+    #[test]
+    fn a_stamp_lost_before_the_first_alter_replays_every_alter() {
+        // 5 is the version before `last_used_at` (6) and `kind` (9): both
+        // ALTERs run again against a table that already has the columns.
+        let conn = schema_at_latest_stamped(5);
+        migrate(&conn).unwrap();
+        assert_eq!(user_version(&conn), LATEST);
+        assert_eq!(column_count(&conn, "offline_chapters", "last_used_at"), 1);
+        assert_eq!(column_count(&conn, "offline_chapters", "kind"), 1);
+    }
+
+    #[test]
+    fn a_stamp_lost_at_eight_replays_the_kind_alter() {
+        let conn = schema_at_latest_stamped(8);
+        migrate(&conn).unwrap();
+        assert_eq!(user_version(&conn), LATEST);
+        assert_eq!(column_count(&conn, "offline_chapters", "kind"), 1);
+    }
+
+    #[test]
+    fn every_stamp_behind_the_schema_migrates() {
+        // A crash can land between any batch and its stamp, so every version
+        // has to be a safe restart point against the full schema.
+        for stamped in 0..LATEST {
+            let conn = schema_at_latest_stamped(stamped);
+            migrate(&conn).unwrap_or_else(|e| panic!("stamped {stamped}: {e}"));
+            assert_eq!(user_version(&conn), LATEST);
+        }
+    }
 }

@@ -45,10 +45,27 @@ const CACHE_TTL: Duration = Duration::from_secs(900);
 /// The feed endpoint's own per-request maximum.
 const FEED_PAGE: usize = 500;
 
+/// MangaDex's published cap is 5 requests a second per IP, answered past
+/// that with a 429. A chapter download fans its page fetches four wide
+/// (`offline::PAGE_CONCURRENCY`) and a bulk download queues one `at-home`
+/// lookup per chapter behind them, so a burst of API calls with nothing
+/// pacing them runs straight into the cap. Four in flight and a request
+/// start every 250 ms holds a sustained 4/s, one under the limit.
+const MAX_IN_FLIGHT: usize = 4;
+const MIN_SPACING: Duration = Duration::from_millis(250);
+/// Longest a 429 parks requests for, however large its `Retry-After` says:
+/// the reader is waiting on a chapter and a header asking for minutes would
+/// hold every page behind it.
+const MAX_COOLDOWN: Duration = Duration::from_secs(30);
+/// Waited when a 429 arrives with no usable `Retry-After` at all.
+const DEFAULT_COOLDOWN: Duration = Duration::from_secs(2);
+
 /// Every list endpoint takes the rating filter; without it MangaDex applies
 /// its own default and a perfectly ordinary seinen title goes missing.
-const CONTENT_RATING: &str =
-    "contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica";
+/// Stops at `suggestive`: the app is family-friendly by owner rule (the
+/// AniList `isAdult` filter is always on), and `erotica` here surfaced on
+/// the manga side what the catalog hides.
+const CONTENT_RATING: &str = "contentRating[]=safe&contentRating[]=suggestive";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MangaSummary {
@@ -94,6 +111,10 @@ pub struct ChapterRow {
     pub title: String,
     pub id: String,
     pub pages: u32,
+    /// The scanlation group's name, when the feed names one. MangaDex's API
+    /// rules make crediting the group a condition of use; `None` for a
+    /// MangaKatana row and for a MangaDex chapter with no group relation.
+    pub scanlation_group: Option<String>,
 }
 
 pub struct MangaDexClient {
@@ -104,6 +125,10 @@ pub struct MangaDexClient {
     /// the FFI layer would re-run MangaKatana's search and page scrape (two
     /// requests, no cache of their own) every time the title was opened.
     katana: MangaKatanaClient,
+    /// Every request to `api.mangadex.org` goes through this; the MangaKatana
+    /// fallback and the page images (a different host with its own limits)
+    /// do not.
+    throttle: Throttle,
 }
 
 impl MangaDexClient {
@@ -112,23 +137,43 @@ impl MangaDexClient {
             katana: MangaKatanaClient::new(http.clone()),
             http,
             cache: Mutex::new(HashMap::new()),
+            throttle: Throttle::new(),
         }
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, String> {
-        let resp = self
-            .http
+        let _permit = self.throttle.permits.acquire().await.map_err(|e| e.to_string())?;
+        self.throttle.wait_turn().await;
+        let mut resp = self.send(url).await?;
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            // One retry, after the cooldown the server named. The hold is on
+            // the shared throttle, not just this task: the other three in
+            // flight would otherwise each earn their own 429 and MangaDex
+            // counts those against the same window.
+            let cooldown = cooldown_from_retry_after(retry_after(&resp));
+            log::warn!("[mangadex] 429 for {url}; retrying in {cooldown:?}");
+            self.throttle.hold(cooldown);
+            self.throttle.wait_turn().await;
+            resp = self.send(url).await?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                self.throttle.hold(cooldown_from_retry_after(retry_after(&resp)));
+            }
+        }
+        if !resp.status().is_success() {
+            return Err(format!("mangadex {} for {url}", resp.status()));
+        }
+        resp.json::<T>().await.map_err(|e| e.to_string())
+    }
+
+    async fn send(&self, url: &str) -> Result<reqwest::Response, String> {
+        self.http
             .get(url)
             .header(reqwest::header::USER_AGENT, USER_AGENT)
             .header(reqwest::header::ACCEPT, "application/json")
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Err(format!("mangadex {} for {url}", resp.status()));
-        }
-        resp.json::<T>().await.map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())
     }
 
     /// Search by title. When `anilist_id` is given, any result MangaDex has
@@ -168,7 +213,8 @@ impl MangaDexClient {
         loop {
             let url = format!(
                 "{BASE_URL}/manga/{manga_id}/feed?translatedLanguage[]=en&includeExternalUrl=0\
-                 &limit={FEED_PAGE}&offset={offset}&order[chapter]=asc&{CONTENT_RATING}"
+                 &limit={FEED_PAGE}&offset={offset}&order[chapter]=asc&{CONTENT_RATING}\
+                 &includes[]=scanlation_group"
             );
             let page: ChapterListResponse = match self.get_json(&url).await {
                 Ok(p) => p,
@@ -263,6 +309,68 @@ impl MangaDexClient {
         let (at, hit) = c.get(manga_id)?;
         (at.elapsed() < CACHE_TTL).then(|| hit.clone())
     }
+}
+
+// --- rate limiting ------------------------------------------------------------
+
+/// A concurrency cap and a floor on the gap between request starts, the
+/// shape `AniListClient` uses. The permits alone are not enough: four fast
+/// answers release four permits at once and the next four start together,
+/// which is a burst of eight inside one second.
+struct Throttle {
+    permits: tokio::sync::Semaphore,
+    /// The earliest the next request may start; `None` until the first.
+    /// Tokio's clock rather than std's so a test can drive it under paused
+    /// time instead of sleeping for real.
+    next_start: Mutex<Option<tokio::time::Instant>>,
+}
+
+impl Throttle {
+    fn new() -> Self {
+        Self {
+            permits: tokio::sync::Semaphore::new(MAX_IN_FLIGHT),
+            next_start: Mutex::new(None),
+        }
+    }
+
+    /// Claims the next start slot and sleeps until it. The slot is reserved
+    /// under the lock and the sleep happens outside it, so concurrent callers
+    /// line up in order rather than all waking at the same instant.
+    async fn wait_turn(&self) {
+        let at = {
+            let mut next = self.next_start.lock().unwrap_or_else(|p| p.into_inner());
+            let now = tokio::time::Instant::now();
+            let at = next.map_or(now, |n| n.max(now));
+            *next = Some(at + MIN_SPACING);
+            at
+        };
+        tokio::time::sleep_until(at).await;
+    }
+
+    /// Pushes every later start past a server-stated cooldown.
+    fn hold(&self, cooldown: Duration) {
+        let mut next = self.next_start.lock().unwrap_or_else(|p| p.into_inner());
+        let until = tokio::time::Instant::now() + cooldown;
+        if next.is_none_or(|n| n < until) {
+            *next = Some(until);
+        }
+    }
+}
+
+fn retry_after(resp: &reqwest::Response) -> Option<&str> {
+    resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok())
+}
+
+/// How long to wait after a 429, from the header that came with it. The
+/// HTTP-date form of `Retry-After` parses as nothing here and takes the
+/// default, which is the safe direction: an unparsed header must not read as
+/// permission to retry at once.
+fn cooldown_from_retry_after(header: Option<&str>) -> Duration {
+    header
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_COOLDOWN)
+        .min(MAX_COOLDOWN)
 }
 
 // --- pure helpers, unit-tested against captured payload shapes ---------------
@@ -389,6 +497,7 @@ fn collapse_feed(feed: &[ChapterEntity]) -> Vec<ChapterRow> {
             title,
             id: ch.id.clone(),
             pages: a.pages,
+            scanlation_group: group_name(&ch.relationships),
         };
         match best.get(&num_str) {
             Some((_, prev)) if prev.pages >= a.pages => {}
@@ -415,10 +524,24 @@ fn collapse_feed(feed: &[ChapterEntity]) -> Vec<ChapterRow> {
                 title: format!("Chapter 1: {t}"),
                 id: ch.id.clone(),
                 pages: ch.attributes.pages,
+                scanlation_group: group_name(&ch.relationships),
             });
         }
     }
     rows
+}
+
+/// The first scanlation group the feed attached to a chapter. Only present
+/// when the request asked for `includes[]=scanlation_group`; without it the
+/// relationship arrives with no attributes and this is `None` for every row.
+fn group_name(relationships: &[Relationship]) -> Option<String> {
+    relationships
+        .iter()
+        .filter(|r| r.kind == "scanlation_group")
+        .filter_map(|r| r.attributes.as_ref()?.name.as_deref())
+        .map(str::trim)
+        .find(|n| !n.is_empty())
+        .map(str::to_owned)
 }
 
 /// Every name MangaDex knows the manga by, the display title first: the
@@ -599,6 +722,9 @@ struct Relationship {
 struct RelationshipAttributes {
     #[serde(rename = "fileName", default)]
     file_name: Option<String>,
+    /// A scanlation group's display name.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -615,6 +741,8 @@ struct ChapterEntity {
     id: String,
     #[serde(default)]
     attributes: ChapterAttributes,
+    #[serde(default)]
+    relationships: Vec<Relationship>,
 }
 
 #[derive(Deserialize, Default)]

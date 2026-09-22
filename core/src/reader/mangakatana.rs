@@ -223,7 +223,7 @@ fn parse_chapter_list(html: &str) -> Vec<ChapterRow> {
         let Some((number, value)) = parse_chapter_number(&raw_title) else { continue };
         let volume = parse_volume_number(&raw_title).unwrap_or(0.0);
         let url = if href.starts_with("http") { href } else { format!("{BASE_URL}{href}") };
-        rows.push((value, volume, ChapterRow { number, title: raw_title, id: url, pages: 1 }));
+        rows.push((value, volume, ChapterRow { number, title: raw_title, id: url, pages: 1, scanlation_group: None }));
     }
     // Ordered by the parsed number rather than by reversing document order:
     // the page ships its own sort toggle (`id="reverse_order"`), so which end

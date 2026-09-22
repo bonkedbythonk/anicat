@@ -55,6 +55,28 @@ fn feed(json: &str) -> Vec<ChapterEntity> {
 }
 
 #[test]
+fn the_scanlation_group_is_read_off_the_feed_relationship() {
+    // MangaDex's API rules make crediting the group a condition of use, and
+    // the credit is only in the feed when the request asked for
+    // `includes[]=scanlation_group`; a relationship that arrives without
+    // attributes, or a user relationship, must not become a blank credit.
+    let rows = collapse_feed(&feed(
+        r#"{"data":[
+            {"id":"a","attributes":{"chapter":"1","pages":20},
+             "relationships":[{"type":"user","id":"u1"},
+                              {"type":"scanlation_group","id":"g1","attributes":{"name":"  Kirei Cake "}}]},
+            {"id":"b","attributes":{"chapter":"2","pages":20},
+             "relationships":[{"type":"scanlation_group","id":"g2"}]},
+            {"id":"c","attributes":{"chapter":"3","pages":20}}
+        ],"total":3}"#,
+    ));
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].scanlation_group.as_deref(), Some("Kirei Cake"));
+    assert_eq!(rows[1].scanlation_group, None);
+    assert_eq!(rows[2].scanlation_group, None);
+}
+
+#[test]
 fn duplicate_uploads_collapse_to_the_longest_and_sort_numerically() {
     // "10" must not sort before "9", and the 3-page credits-only upload of
     // chapter 9 must not win over the real 40-page one.
@@ -106,7 +128,7 @@ fn query_encoding_survives_punctuation_and_unicode() {
 // --- sparse feeds and the MangaKatana fill ---------------------------------
 
 fn row(number: &str, id: &str) -> ChapterRow {
-    ChapterRow { number: number.into(), title: format!("Chapter {number}"), id: id.into(), pages: 1 }
+    ChapterRow { number: number.into(), title: format!("Chapter {number}"), id: id.into(), pages: 1, scanlation_group: None }
 }
 
 fn run(from: u32, to: u32, id_prefix: &str) -> Vec<ChapterRow> {
@@ -244,6 +266,79 @@ fn every_known_title_is_offered_with_the_display_title_first() {
     assert_eq!(attrs.last_chapter.as_deref().and_then(chapter_value).filter(|n| *n > 0.0), None);
     assert_eq!(chapter_value("180"), Some(180.0));
     assert_eq!(chapter_value("0").filter(|n| *n > 0.0), None);
+}
+
+#[test]
+fn the_rating_filter_stops_at_suggestive() {
+    // Family-friendly by owner rule: the AniList side hides isAdult and the
+    // manga side must not open what the catalog hides.
+    assert_eq!(CONTENT_RATING, "contentRating[]=safe&contentRating[]=suggestive");
+    assert!(!CONTENT_RATING.contains("erotica"));
+    assert!(!CONTENT_RATING.contains("pornographic"));
+}
+
+// Paused time: the sleeps advance tokio's clock instead of the wall clock,
+// so the spacing is asserted exactly and the test finishes at once.
+#[tokio::test(start_paused = true)]
+async fn request_starts_are_spaced_without_the_network() {
+    let throttle = Throttle::new();
+    let mut starts = Vec::new();
+    for _ in 0..6 {
+        let _permit = throttle.permits.acquire().await.unwrap();
+        throttle.wait_turn().await;
+        starts.push(tokio::time::Instant::now());
+    }
+    // Six starts span five gaps.
+    assert!(starts[5] - starts[0] >= MIN_SPACING * 5, "span {:?}", starts[5] - starts[0]);
+    for pair in starts.windows(2) {
+        assert!(pair[1] - pair[0] >= MIN_SPACING, "gap {:?}", pair[1] - pair[0]);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_burst_of_concurrent_requests_is_spread_out() {
+    // The shape `offline.rs` produces: several requests polled together
+    // must still start one spacing apart, not all at the same instant.
+    let throttle = Throttle::new();
+    let mut starts: Vec<tokio::time::Instant> = futures_util::future::join_all((0..6).map(|_| async {
+        let _permit = throttle.permits.acquire().await.unwrap();
+        throttle.wait_turn().await;
+        tokio::time::Instant::now()
+    }))
+    .await;
+    starts.sort();
+    for pair in starts.windows(2) {
+        assert!(pair[1] - pair[0] >= MIN_SPACING, "gap {:?}", pair[1] - pair[0]);
+    }
+    assert!(starts[5] - starts[0] >= MIN_SPACING * 5);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hold_parks_the_next_start_past_the_cooldown() {
+    let throttle = Throttle::new();
+    throttle.wait_turn().await;
+    let before = tokio::time::Instant::now();
+    throttle.hold(Duration::from_secs(3));
+    throttle.wait_turn().await;
+    assert!(tokio::time::Instant::now() - before >= Duration::from_secs(3));
+    // A shorter hold never pulls an already later start forward.
+    throttle.hold(Duration::from_secs(10));
+    throttle.hold(Duration::from_millis(1));
+    let before = tokio::time::Instant::now();
+    throttle.wait_turn().await;
+    assert!(tokio::time::Instant::now() - before >= Duration::from_secs(10));
+}
+
+#[test]
+fn a_retry_after_is_honoured_but_capped() {
+    assert_eq!(cooldown_from_retry_after(Some("3")), Duration::from_secs(3));
+    assert_eq!(cooldown_from_retry_after(Some(" 5 ")), Duration::from_secs(5));
+    // A header asking for minutes would hold every page of the chapter
+    // behind one answer.
+    assert_eq!(cooldown_from_retry_after(Some("600")), MAX_COOLDOWN);
+    assert_eq!(cooldown_from_retry_after(None), DEFAULT_COOLDOWN);
+    // The HTTP-date form must not read as "retry now".
+    assert_eq!(cooldown_from_retry_after(Some("Wed, 21 Oct 2026 07:28:00 GMT")), DEFAULT_COOLDOWN);
 }
 
 #[tokio::test]

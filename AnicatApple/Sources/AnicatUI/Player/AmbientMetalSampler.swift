@@ -32,13 +32,16 @@ final class AmbientMetalSampler {
     /// at 14:32 can be looked at on the same file, and an intermittent
     /// report otherwise names no moment at all.
     var playbackPosition: (() -> Double)?
-    /// Minimum spacing between samples. 66 ms: it was 33, and the glow on
-    /// its own measured 26% GPU against 19% for plain playback on the M4
-    /// Pro (ioreg Device Utilization, 25 s means, 2026-09-20). Each sample
-    /// is a readback on the main thread plus a colour-stop ease on four
-    /// layers; the view eases every stop over 100 ms, so consecutive
-    /// samples still overlap into one drift and nothing tighter is seen.
-    var interval: CFTimeInterval = 0.066
+    /// Minimum spacing between samples. 100 ms, matching the view's
+    /// 100 ms colour ease (`AmbientGlowView.easeDuration`), so each ease
+    /// ends as the next sample arrives and the light still drifts rather
+    /// than steps. It was 33 ms, then 66 ms when the glow measured 26% GPU
+    /// against 19% for plain playback (M4 Pro, 2026-09-20). At 66 ms the
+    /// glow still cost about 5 CPU points in a fullscreen release build
+    /// (46.3/46.8% on, 41.7/41.4% off, per-second medians, 2026-09-22), all
+    /// of it per sample: the hand-off, the gradient stops, the four eases.
+    /// Faster than the ease is work nobody sees.
+    var interval: CFTimeInterval = 0.1
     /// Spacing while nothing is lit — no window letterbox and no bars found
     /// burned into the last sample. This used to be an outright `return`,
     /// which is why baked-in bars were never noticed at all: a 16:9 file on

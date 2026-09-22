@@ -13,6 +13,7 @@ jobs:
   core:
     name: Rust core
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +32,23 @@ jobs:
         working-directory: core
         run: cargo test --lib
 
+      # publish-release.sh refuses to build on a stale notices file, but the
+      # nightly does not run that script, so it shipped stale notices
+      # unchecked. The generator reads license texts out of the cargo
+      # registry, hence the fetches (all targets: the Windows crate's
+      # Windows-only dependencies are part of the file).
+      - name: Third-party notices are current
+        run: |
+          (cd core && cargo fetch --locked)
+          (cd server && cargo fetch --locked)
+          python3 scripts/generate-third-party-notices.py --check
+
+      # The two workers' own test files, otherwise run by nobody.
+      - name: Worker tests
+        run: |
+          node --test services/tmdb-proxy/worker.test.mjs
+          node --test services/release-mirror/worker.test.mjs
+
   apple:
     name: Swift package
     # macos-26, not macos-15: the image's Xcode decides the Swift version, and
@@ -42,12 +60,25 @@ jobs:
     # that disagrees with the toolchain the release is cut with reports on a
     # build nobody ships.
     runs-on: macos-26
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-tvos,aarch64-apple-tvos-sim
+
+      # MPVKit's static xcframeworks are about 1.7 GB and SwiftPM unpacks
+      # them into .build/artifacts on resolve; without this every Apple job
+      # and every nightly downloaded them again. Keyed on Package.resolved,
+      # so an MPVKit bump misses the cache and nothing stale is linked.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            AnicatApple/.build/artifacts
+            AnicatApple/.build/checkouts
+            AnicatApple/.build/repositories
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('AnicatApple/Package.resolved') }}
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -109,19 +140,24 @@ jobs:
             -derivedDataPath .build-xcode \
             ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
 
-      # Not `swift test`: several suites call the live AniList API and fail
-      # outright during its outages, which would make CI red for reasons
-      # unrelated to the change.
+      # The offline suites. The three that call the live AniList API
+      # (BridgeTests, RealDataWiringTests, EngineBridgeTests) skip themselves
+      # unless ANICAT_LIVE=1 is set, which it is not here: they went red
+      # through every AniList outage for reasons unrelated to the change.
+      - name: swift test
+        working-directory: AnicatApple
+        run: swift test
 
   windows:
     name: Windows server
-    # Compile only, no tests: it exists so a change made and checked on a Mac
-    # cannot break the Windows build unseen. Cross-compiling from macOS dies
+    # It exists so a change made and checked on a Mac cannot break the
+    # Windows build unseen. Cross-compiling from macOS dies
     # in aws-lc-sys's C build (tried 2026-09-12), so a Mac session has no
     # other way to find out. The toolchain matches
     # scripts/setup-windows-dev.ps1; the runner image already carries the
     # Build Tools and CMake.
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -135,6 +171,10 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: server -> target
+
+      - name: cargo test --locked
+        working-directory: server
+        run: cargo test --locked
 
       - name: cargo build --release --locked
         working-directory: server

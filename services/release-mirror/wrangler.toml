@@ -1,0 +1,27 @@
+# Anicat's release mirror. Deploy with `npx wrangler deploy` from this
+# directory; scripts/publish-release.sh writes into it on every release.
+# Nothing secret lives here: the worker holds the app's own build artifacts
+# and a JSON file naming them, all of which are public on the release page.
+name = "anicat-releases"
+main = "worker.js"
+compatibility_date = "2026-09-08"
+workers_dev = true
+
+# latest.json, SHA256SUMS and install.sh. Create once with
+#   npx wrangler kv namespace create RELEASES
+# and paste the id it prints here. Free plan: 100k reads a day, far beyond
+# a friend group's update checks.
+[[kv_namespaces]]
+binding = "RELEASES"
+id = "94e3c850b3e447579bbd77197ff43299"
+
+# The binaries themselves. Optional, and off until uncommented: R2 has to be
+# enabled on the account first (free tier: 10 GB stored, 10 million reads a
+# month, no egress fee; Cloudflare asks for a payment method to enable it
+# and charges nothing at this size). Without it /download/<asset> redirects
+# to the GitHub release, which is enough for the update check to keep
+# working through an API outage but not through a takedown.
+#
+# [[r2_buckets]]
+# binding = "ASSETS"
+# bucket_name = "anicat-releases"

@@ -33,7 +33,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       # Without the proxy baked into Info.plist, Films and TV silently
       # disappears from the sidebar (both 6.0.0 bundles shipped that way).
-      ANICAT_TMDB_PROXY: https://anicat-tmdb.anicat.workers.dev
+      # The repository variable is what release-windows.yml reads; the
+      # literal is the fallback so a fork without the variable still builds.
+      ANICAT_TMDB_PROXY: ${{ vars.ANICAT_TMDB_PROXY || 'https://anicat-tmdb.anicat.workers.dev' }}
       # Ad-hoc: the runner has no identity, and the package script must not
       # go looking for one.
       ANICAT_CODESIGN_IDENTITY: "-"
@@ -95,6 +97,8 @@ jobs:
         run: |
           bash scripts/package-anicat-macos-app.sh release zip
           mv "AnicatApple/dist/Anicat-${ANICAT_VERSION}-macos-arm64.zip" AnicatApple/dist/Anicat-nightly-macos-arm64.zip
+          # install_macos.sh --nightly verifies the zip against this file.
+          (cd AnicatApple/dist && shasum -a 256 Anicat-nightly-macos-arm64.zip > SHA256SUMS)
 
       - name: Publish
         if: steps.changed.outputs.build == 'true'
@@ -131,7 +135,7 @@ jobs:
           gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
           git tag -f nightly HEAD
           git push -f origin refs/tags/nightly
-          gh release create nightly AnicatApple/dist/Anicat-nightly-macos-arm64.zip \
+          gh release create nightly AnicatApple/dist/Anicat-nightly-macos-arm64.zip AnicatApple/dist/SHA256SUMS \
             --title "Anicat $VERSION" \
             --notes-file "$notes" \
             --prerelease \

@@ -116,3 +116,15 @@ jobs:
           # name already being taken.
           gh release upload "$tag" "$zip" --clobber --repo "$GITHUB_REPOSITORY"
           echo "Uploaded $(basename "$zip") to $tag"
+          # install_windows.ps1 checks the zip against the release's
+          # SHA256SUMS, which the Mac side wrote before this zip existed.
+          # Download, drop any earlier line for this file (a re-run), append,
+          # replace. A release that has no SHA256SUMS at all predates the
+          # checksums and gets one holding the Windows line only.
+          sums="$(mktemp)"
+          gh release download "$tag" --pattern SHA256SUMS --output "$sums" --repo "$GITHUB_REPOSITORY" 2>/dev/null || : > "$sums"
+          grep -v " $(basename "$zip")\$" "$sums" > "$sums.new" || true
+          (cd "$(dirname "$zip")" && sha256sum "$(basename "$zip")") >> "$sums.new"
+          mv "$sums.new" SHA256SUMS
+          gh release upload "$tag" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          echo "Updated SHA256SUMS on $tag"

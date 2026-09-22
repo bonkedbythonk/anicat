@@ -24,6 +24,11 @@ DMG="$ROOT/AnicatApple/dist/Anicat-${VERSION}-macos-arm64.dmg"
 # the phone half did not compile. Run scripts/package-anicat-ios-ipa.sh first
 # when the release is meant to carry it.
 IPA="$ROOT/AnicatApple/dist/Anicat-${VERSION}-ios.ipa"
+# One line per asset, basenames only, so `shasum -c` matches the file a user
+# downloaded whatever directory it landed in. install_macos.sh downloads it
+# from the release and refuses a zip that does not match; the Windows
+# workflow appends its own zip's line when it attaches that asset later.
+SUMS="$ROOT/AnicatApple/dist/SHA256SUMS"
 ASSETS=("$ZIP" "$DMG")
 [ -f "$IPA" ] && ASSETS+=("$IPA")
 DRAFT="--draft"
@@ -56,6 +61,12 @@ ANICAT_CODESIGN_IDENTITY="-" bash "$ROOT/scripts/package-anicat-macos-app.sh" re
 # person downloading by hand expects to drag. The second run reuses the same
 # build directory, so it repackages rather than recompiling.
 ANICAT_CODESIGN_IDENTITY="-" bash "$ROOT/scripts/package-anicat-macos-app.sh" release dmg
+
+# After both packages exist and before the release is created: a release
+# without this file is one the installer cannot verify, and it says so to
+# the user on every install.
+(cd "$ROOT/AnicatApple/dist" && shasum -a 256 "${ASSETS[@]##*/}" > "$SUMS")
+ASSETS+=("$SUMS")
 
 NOTES="$(mktemp)"
 if [ -f "$ROOT/RELEASE_NOTES.md" ]; then
@@ -126,3 +137,55 @@ git -C "$ROOT" push origin "$TAG"
 gh release create "$TAG" "${ASSETS[@]}" --title "Anicat $VERSION" --notes-file "$NOTES" $DRAFT
 rm -f "$NOTES"
 echo "publish-release: $TAG ${DRAFT:+(draft) }created"
+
+# The release mirror (services/release-mirror/README.md): latest.json, the
+# checksum file and the installer into KV, and the assets into R2 when the
+# bucket is configured. A release that reaches GitHub and not the mirror is
+# the state the mirror exists to avoid, so once the mirror is set up a
+# failure here stops the script; ANICAT_SKIP_MIRROR=1 is the explicit
+# opt-out for a machine without `wrangler login`.
+#
+# Until then it is skipped with a note. This runs after `gh release create`,
+# so a hard failure against a mirror nobody has deployed yet would leave a
+# tagged, published release and a scary error, on a script run from habit.
+# The placeholder id in wrangler.toml is the signal: `wrangler kv namespace
+# create` hands out the real one and the README says to paste it there.
+MIRROR="${ANICAT_RELEASE_MIRROR:-https://anicat-releases.anicat.workers.dev}"
+MIRROR_DIR="$ROOT/services/release-mirror"
+if grep -q 'REPLACE_WITH_THE_ID_WRANGLER_PRINTS' "$MIRROR_DIR/wrangler.toml"; then
+    echo "publish-release: release mirror not set up yet (services/release-mirror/README.md); skipped"
+elif [ "${ANICAT_SKIP_MIRROR:-}" != "1" ]; then
+    LATEST="$(mktemp)"
+    {
+        printf '{"version":"%s","tag":"%s","published_at":"%s","page":"https://github.com/bonkedbythonk/anicat/releases/tag/%s","assets":{' \
+            "$VERSION" "$TAG" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG"
+        first=1
+        for asset in "${ASSETS[@]}"; do
+            name="${asset##*/}"
+            [ "$name" = "SHA256SUMS" ] && continue
+            [ "$first" = 1 ] || printf ','
+            first=0
+            printf '"%s":{"sha256":"%s","size":%s,"url":"%s/download/%s"}' \
+                "$name" "$(shasum -a 256 "$asset" | cut -d' ' -f1)" "$(stat -f %z "$asset")" "$MIRROR" "$name"
+        done
+        printf '}}\n'
+    } > "$LATEST"
+    # --remote on every write: wrangler 4 defaults to a local simulated
+    # store, so without it these commands print success and the live
+    # mirror never changes.
+    (
+        cd "$MIRROR_DIR"
+        npx wrangler kv key put --binding RELEASES --remote latest.json --path "$LATEST"
+        npx wrangler kv key put --binding RELEASES --remote SHA256SUMS --path "$SUMS"
+        npx wrangler kv key put --binding RELEASES --remote install.sh --path "$ROOT/scripts/install_macos.sh"
+        if grep -q '^\[\[r2_buckets\]\]' wrangler.toml; then
+            for asset in "${ASSETS[@]}"; do
+                npx wrangler r2 object put --remote "anicat-releases/${asset##*/}" --file "$asset"
+            done
+        else
+            echo "publish-release: R2 not configured in services/release-mirror/wrangler.toml; downloads on the mirror redirect to GitHub"
+        fi
+    )
+    rm -f "$LATEST"
+    echo "publish-release: mirror updated at $MIRROR"
+fi

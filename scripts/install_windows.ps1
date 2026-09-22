@@ -24,6 +24,9 @@
     $ProgressPreference = 'SilentlyContinue'
 
     $Repo = 'bonkedbythonk/anicat'
+    # services/release-mirror: asked when GitHub answers with no release, and
+    # for the zip when the release's own asset does not download.
+    $Mirror = 'https://anicat-releases.anicat.workers.dev'
     $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\Anicat'
     $StartMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
     $Shortcut = Join-Path $StartMenu 'Anicat.lnk'
@@ -73,6 +76,17 @@
             } catch { }
         }
 
+        if (-not $downloadUrl -and -not $tag) {
+            try {
+                $latest = Invoke-RestMethod -Uri "$Mirror/latest.json" -UseBasicParsing
+                if ($latest.version) {
+                    $tag = "v$($latest.version)"
+                    $downloadUrl = "$Mirror/download/Anicat-$($latest.version)-windows-x64.zip"
+                    Say "GitHub did not answer; using the release mirror for $($latest.version)."
+                }
+            } catch { }
+        }
+
         if (-not $downloadUrl) {
             if ($tag) {
                 # The Mac half of a release is published first and the Windows
@@ -95,9 +109,60 @@
             try {
                 Invoke-WebRequest -Uri $downloadUrl -OutFile $zip -UseBasicParsing
             } catch {
-                Complain "The download failed: $($_.Exception.Message)"
-                Say "If the release was just published, its Windows zip may still be uploading. Try again in a few minutes."
-                return
+                if ($downloadUrl.StartsWith($Mirror)) {
+                    Complain "The download failed: $($_.Exception.Message)"
+                    return
+                }
+                # The asset is named but not there: try the same file name
+                # on the mirror before giving up. The checksum check below
+                # applies to it all the same.
+                Say "The download from GitHub failed; trying the release mirror."
+                $zipName = $downloadUrl.Substring($downloadUrl.LastIndexOf('/') + 1)
+                $downloadUrl = "$Mirror/download/$zipName"
+                try {
+                    Invoke-WebRequest -Uri $downloadUrl -OutFile $zip -UseBasicParsing
+                } catch {
+                    Complain "The download failed: $($_.Exception.Message)"
+                    Say "If the release was just published, its Windows zip may still be uploading. Try again in a few minutes."
+                    return
+                }
+            }
+
+            # The release publishes SHA256SUMS (the Mac side writes it, the
+            # Windows workflow appends this zip's line). A release without
+            # one predates the checksums and is installed with a warning; a
+            # file that exists and does not match is refused, because the
+            # next steps strip the Mark of the Web from every file in it.
+            $sumsUrl = ($downloadUrl -replace '/[^/]+$', '/SHA256SUMS')
+            $sums = $null
+            try { $sums = (Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing).Content } catch { }
+            # A release from before the checksums (1.0.1) has none on GitHub;
+            # the mirror holds sums computed from its assets. Taken only when
+            # it names this exact file.
+            if (-not $sums) {
+                try {
+                    $mirrorSums = (Invoke-WebRequest -Uri "$Mirror/SHA256SUMS" -UseBasicParsing).Content
+                    $name = $downloadUrl.Substring($downloadUrl.LastIndexOf('/') + 1)
+                    if ($mirrorSums -match ('\s' + [regex]::Escape($name) + '(\r?\n|$)')) { $sums = $mirrorSums }
+                } catch { }
+            }
+            if ($sums) {
+                $zipName = $downloadUrl.Substring($downloadUrl.LastIndexOf('/') + 1)
+                $line = $sums -split "`n" | Where-Object { $_.Trim() -match ('\s' + [regex]::Escape($zipName) + '$') } | Select-Object -First 1
+                if (-not $line) {
+                    Complain "The release's SHA256SUMS has no entry for $zipName; not installing."
+                    return
+                }
+                $expected = ($line.Trim() -split '\s+')[0].ToLowerInvariant()
+                $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+                if ($expected -ne $actual) {
+                    Complain "Checksum mismatch for ${zipName}: expected $expected, got $actual."
+                    Say 'The download is damaged or is not the file the release was cut with. Nothing was installed.'
+                    return
+                }
+                Say 'Checksum verified.'
+            } else {
+                Say 'This release publishes no SHA256SUMS, so the download could not be verified.'
             }
 
             Say 'Step 3: Installing...'

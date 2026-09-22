@@ -13,8 +13,14 @@ set -e
 #   curl -fsSL https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_macos.sh | bash -s -- --nightly
 #
 # Running the plain command again moves a nightly install back to stable.
+#
+# The same script is served by the release mirror, for the day GitHub is not
+# answering (services/release-mirror/README.md):
+#
+#   curl -fsSL https://anicat-releases.anicat.workers.dev/install.sh | bash
 
 REPO="bonkedbythonk/anicat"
+MIRROR="https://anicat-releases.anicat.workers.dev"
 NIGHTLY=""
 for arg in "$@"; do
     case "$arg" in
@@ -85,6 +91,20 @@ else
     fi
 fi
 
+# GitHub answered with no release at all: rate limited twice over, down, or
+# the repository is gone. The mirror's latest.json names the version and
+# its /download/ route serves the zip itself when the binaries are mirrored,
+# else redirects to the GitHub asset. Stable only; there is no mirrored
+# nightly.
+if [ -z "$DOWNLOAD_URL" ] && [ -z "$NIGHTLY" ]; then
+    MIRROR_VERSION="$(curl -fsSL "$MIRROR/latest.json" 2>/dev/null \
+        | grep -o '"version":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
+    if [ -n "$MIRROR_VERSION" ]; then
+        echo "GitHub did not answer; using the release mirror for $MIRROR_VERSION."
+        DOWNLOAD_URL="$MIRROR/download/Anicat-${MIRROR_VERSION}-macos-arm64.zip"
+    fi
+fi
+
 if [ -z "$DOWNLOAD_URL" ]; then
     echo "Couldn't find a download link. The latest release might still be building."
     echo "Try again in a few minutes, or download manually from:"
@@ -99,17 +119,84 @@ TMP_ZIP="$TMP_DIR/anicat.zip"
 echo "Step 2: Downloading... (this might take a minute)"
 # -f: without it a 404 (no nightly published yet) is saved as the zip and
 # only surfaces later as "the archive did not contain Anicat.app".
-if [ -t 2 ]; then
-    curl -fL -o "$TMP_ZIP" "$DOWNLOAD_URL" --progress-bar
+fetch_zip() {
+    if [ -t 2 ]; then
+        curl -fL -o "$TMP_ZIP" "$1" --progress-bar
+    else
+        curl -fL -sS -o "$TMP_ZIP" "$1"
+    fi
+}
+if ! fetch_zip "$DOWNLOAD_URL"; then
+    # The release page named the asset and the asset is not there: a
+    # takedown of the assets alone looks exactly like this. Same file name
+    # on the mirror; the checksum check below still applies to it.
+    ZIP_NAME="${DOWNLOAD_URL##*/}"
+    case "$DOWNLOAD_URL" in
+        "$MIRROR"/*) exit 1 ;;
+    esac
+    echo "The download from GitHub failed; trying the release mirror."
+    DOWNLOAD_URL="$MIRROR/download/$ZIP_NAME"
+    fetch_zip "$DOWNLOAD_URL"
+fi
+
+# The release publishes SHA256SUMS beside its assets (publish-release.sh and
+# nightly.yml). The zip came over HTTPS from GitHub, so this is not a defence
+# against GitHub; it is the check that the bytes about to be unpacked, have
+# their quarantine flag stripped and be launched are the bytes the release
+# was cut with, on a mirror, a proxy, a truncated download or a tampered
+# asset. A release with no SHA256SUMS at all (1.0.1 and earlier) is warned
+# about and installed; one whose file exists and does not match is refused.
+SUMS_URL="${DOWNLOAD_URL%/*}/SHA256SUMS"
+ZIP_NAME="${DOWNLOAD_URL##*/}"
+# A release cut before the checksums existed (1.0.1) has no SHA256SUMS on
+# GitHub, but the mirror was seeded with sums computed from its assets. Used
+# only when it names this exact file, so a mirror that has moved on to a
+# newer version cannot vouch for, or refuse, a different one.
+fetch_sums() {
+    curl -fL -sS -o "$TMP_DIR/SHA256SUMS" "$SUMS_URL" 2>/dev/null && return 0
+    curl -fL -sS -o "$TMP_DIR/SHA256SUMS" "$MIRROR/SHA256SUMS" 2>/dev/null \
+        && grep -q " $ZIP_NAME\$" "$TMP_DIR/SHA256SUMS"
+}
+if fetch_sums; then
+    EXPECTED="$(grep " $ZIP_NAME\$" "$TMP_DIR/SHA256SUMS" | head -n 1 | cut -d' ' -f1)"
+    ACTUAL="$(shasum -a 256 "$TMP_ZIP" | cut -d' ' -f1)"
+    if [ -z "$EXPECTED" ]; then
+        echo "The release's SHA256SUMS has no entry for $ZIP_NAME; not installing." >&2
+        exit 1
+    fi
+    if [ "$EXPECTED" != "$ACTUAL" ]; then
+        echo "Checksum mismatch for $ZIP_NAME:" >&2
+        echo "  expected $EXPECTED" >&2
+        echo "  got      $ACTUAL" >&2
+        echo "The download is damaged or is not the file the release was cut with. Nothing was installed." >&2
+        exit 1
+    fi
+    echo "Checksum verified."
 else
-    curl -fL -sS -o "$TMP_ZIP" "$DOWNLOAD_URL"
+    echo "This release publishes no SHA256SUMS, so the download could not be verified."
 fi
 
 echo "Step 3: Installing..."
 # A running copy holds its own executable open; replacing the bundle under it
-# leaves a half-old app that crashes on the next window. Quit it first.
-osascript -e 'tell application "Anicat" to quit' 2>/dev/null || true
-sleep 2
+# leaves a half-old app that crashes on the next window. Quit it first, but
+# ask: the owner was mid-episode more than once when the installer ran on
+# the same Mac. `curl | bash` leaves stdin as the pipe, so the question goes
+# to the terminal directly; with no terminal (a script driving this one) the
+# old behaviour, quit without asking, stays.
+if pgrep -x Anicat >/dev/null 2>&1; then
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf 'Anicat is running and has to quit to be replaced. Quit it now? [Y/n] ' > /dev/tty
+        read -r answer < /dev/tty || answer=""
+        case "$answer" in
+            n|N|no|NO|No)
+                echo "Leaving the running Anicat alone. Run the installer again when it is closed."
+                exit 0
+                ;;
+        esac
+    fi
+    osascript -e 'tell application "Anicat" to quit' 2>/dev/null || true
+    sleep 2
+fi
 
 # ditto, not unzip: unzip drops the symlinks and extended attributes inside a
 # .app bundle, which breaks the signature and Gatekeeper rejects the result.

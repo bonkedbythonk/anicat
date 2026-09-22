@@ -64,6 +64,11 @@ ehthumbs.db
 Thumbs.db
 
 # IDEs & Editors
+# Every dot-directory at the root: editor state, agent scratch, caches and
+# tool configs all live in one, and a fresh clone has none of this checkout's
+# local excludes. Tracked dot-directories are re-included by name below.
+/.*/
+!/.github/
 .vscode/
 .idea/
 *.swp
@@ -158,3 +163,6 @@ AnicatApple/.build-sim/
 
 # Windows server crate (server/), its own target like core/
 server/target/
+
+# Cloudflare wrangler's local cache and dev state, one per worker directory.
+.wrangler/

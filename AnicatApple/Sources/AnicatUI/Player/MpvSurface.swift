@@ -847,6 +847,12 @@ public struct MpvSurface {
             // style's sizes can be put into that file's own units: changes
             // with every file and every track switch.
             mpv_observe_property(handle, 12, "sub-ass-extradata", MPV_FORMAT_NONE)
+            // Which decoder mpv actually settled on, into the log: whether a
+            // file plays on VideoToolbox or falls back to software decoding
+            // is invisible otherwise, and a software fallback costs about 20
+            // CPU points for as long as the file plays. Fires once per file
+            // once the decoder is up, and again if mpv switches.
+            mpv_observe_property(handle, 13, "hwdec-current", MPV_FORMAT_NONE)
             // Displayed size — what the overlay chrome needs to know where
             // the letterboxed video rect actually sits, as opposed to the
             // window's own size.
@@ -1510,6 +1516,8 @@ public struct MpvSurface {
         var lastCacheStateRead: CFTimeInterval = 0
         /// When `paused-for-cache` last went true, nil while playing.
         var cacheStallBegan: CFTimeInterval?
+        /// The last `[decoder]` line written; see the `hwdec-current` event.
+        var lastDecoderLine: String?
         /// The current ASS track's script height (PlayResY), which a
         /// subtitle style's sizes and widths are scaled into. Written from
         /// the event loop, read from the main actor's style callback.
@@ -1924,6 +1932,18 @@ public struct MpvSurface {
                             }
                             await MainActor.run {
                                 self.controller.isBuffering = buffering
+                            }
+                        } else if name == "hwdec-current" {
+                            // mpv announces this far more often than it
+                            // changes (every decoder reinit, several a
+                            // second around a seek), so only a different
+                            // answer is written.
+                            let decoder = self.stringProperty("hwdec-current") ?? "no"
+                            let codec = self.stringProperty("video-codec") ?? "?"
+                            let line = "\(decoder == "no" ? "software" : decoder) (hwdec=\(self.stringProperty("hwdec") ?? "?"), codec=\(codec))"
+                            if line != self.lastDecoderLine {
+                                self.lastDecoderLine = line
+                                PlayerLog.write("[decoder] \(line)")
                             }
                         } else if name == "sub-ass-extradata" {
                             // A plain-text track has no header; the style

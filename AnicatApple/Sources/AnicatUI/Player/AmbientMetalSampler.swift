@@ -85,7 +85,7 @@ final class AmbientMetalSampler {
     /// the view hard-cut between images; now that `AmbientGlowView` eases
     /// every colour stop over 100 ms on the render server, this only has
     /// to take the grain out, and a cut settles in three samples.
-    static let smoothing: Float = 0.45
+    nonisolated static let smoothing: Float = 0.45
     private let debugLogging = DebugHooks.env("ANICAT_PLAYER_DEBUG") != nil
 
     init?(device: MTLDevice) {
@@ -162,6 +162,34 @@ final class AmbientMetalSampler {
         buffer.commit()
     }
 
+    /// `smoothed = smoothed * (1 - smoothing) + sample * smoothing`, per
+    /// byte, in 8.8 fixed point over raw buffers.
+    ///
+    /// It was a `for i in 0..<count` loop in Float over two arrays: in a debug
+    /// build (what `dev-run.sh` makes) each element went through Range's
+    /// generic iterator, metadata lookups and two bounds checks, and the
+    /// profile put 742 of the glow's 1407 main-thread samples here, about
+    /// half its cost, for 9216 bytes 15 times a second (30 s `sample`,
+    /// 2026-09-22). Release builds optimised it away already; this keeps a
+    /// development build's measurements about the glow and not about the
+    /// loop. Weights are 115/256 and 141/256 for `smoothing` 0.45, and the
+    /// sum is taken in UInt32 so no intermediate can wrap.
+    nonisolated static func blend(_ sample: [UInt8], into smoothed: inout [UInt8]) {
+        let take = UInt32((smoothing * 256).rounded())
+        let keep = 256 - take
+        let count = min(sample.count, smoothed.count)
+        sample.withUnsafeBufferPointer { src in
+            smoothed.withUnsafeMutableBufferPointer { dst in
+                guard let s = src.baseAddress, let d = dst.baseAddress else { return }
+                var i = 0
+                while i < count {
+                    d[i] = UInt8(truncatingIfNeeded: (UInt32(d[i]) &* keep &+ UInt32(s[i]) &* take &+ 128) >> 8)
+                    i &+= 1
+                }
+            }
+        }
+    }
+
     /// The bars as the tall probe sees them. Its own left/right are
     /// meaningless — the probe is only 64 wide — and are discarded by the
     /// caller.
@@ -210,10 +238,7 @@ final class AmbientMetalSampler {
         // and grain from one frame to the next, and drawn as they came the
         // bars shimmered ("flickers really fast").
         if smoothed.count == bytes.count {
-            let keep = 1 - Self.smoothing, take = Self.smoothing
-            for i in 0..<bytes.count {
-                smoothed[i] = UInt8(Float(smoothed[i]) * keep + Float(bytes[i]) * take + 0.5)
-            }
+            Self.blend(bytes, into: &smoothed)
         } else {
             smoothed = bytes
         }

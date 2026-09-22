@@ -415,3 +415,27 @@ struct AmbientGlowTests {
         #expect(inset.top == 4.0 / 36.0)
     }
 }
+
+@Suite("Glow thumbnail smoothing")
+struct AmbientSmoothingTests {
+    @Test("The fixed-point blend matches the float formula it replaced, within one step")
+    func blendMatchesFloat() {
+        var rng = SystemRandomNumberGenerator()
+        let previous = (0..<9216).map { _ in UInt8.random(in: 0...255, using: &rng) }
+        let sample = (0..<9216).map { _ in UInt8.random(in: 0...255, using: &rng) }
+        var fixed = previous
+        AmbientMetalSampler.blend(sample, into: &fixed)
+        let keep = 1 - AmbientMetalSampler.smoothing, take = AmbientMetalSampler.smoothing
+        for i in 0..<sample.count {
+            let float = Int(UInt8(Float(previous[i]) * keep + Float(sample[i]) * take + 0.5))
+            #expect(abs(Int(fixed[i]) - float) <= 1)
+        }
+        // The ends stay put: black on black stays black, white on white white.
+        var black = [UInt8](repeating: 0, count: 4)
+        AmbientMetalSampler.blend([0, 0, 0, 0], into: &black)
+        #expect(black == [0, 0, 0, 0])
+        var white = [UInt8](repeating: 255, count: 4)
+        AmbientMetalSampler.blend([255, 255, 255, 255], into: &white)
+        #expect(white == [255, 255, 255, 255])
+    }
+}

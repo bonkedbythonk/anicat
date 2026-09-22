@@ -159,6 +159,8 @@ public struct SettingsView: View {
         .init(label: "Play the next episode", card: "What plays", tab: .playback),
         .init(label: "Next episode card", card: "What plays", tab: .playback),
         .init(label: "GPU Upscaling", card: "Video", tab: .playback),
+        .init(label: "Subtitle Size", card: "Subtitles", tab: .playback),
+        .init(label: "Subtitle Style", card: "Subtitles", tab: .playback),
         .init(label: "Hardware Decoding", card: "Video", tab: .playback),
         .init(label: "Ambient Glow", card: "Video", tab: .playback),
         .init(label: "Glow in windowed mode", card: "Video", tab: .playback),
@@ -505,6 +507,43 @@ private struct PlaybackTabSection: View {
     @AppStorage("anicat_sounds") private var interfaceSounds: Bool = false
     @AppStorage("anicat_sounds_volume") private var interfaceSoundVolume: Double = 0.3
     @AppStorage("anicat_haptics") private var haptics: Bool = true
+    // `PlayerController.subtitleScaleKey` and `SubtitleStyle.key`; the phone
+    // has had the size since its settings screen was built, the Mac had
+    // neither.
+    @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
+    @AppStorage(SubtitleStyle.key) private var subtitleStyle: String = SubtitleStyle.release.rawValue
+
+    private static let subtitleSizes: [(key: String, label: String)] = [
+        ("0.8", "Small"), ("1.0", "Normal"), ("1.25", "Large"), ("1.5", "Huge"),
+    ]
+
+    /// The segmented control speaks strings; the setting is the `Double`
+    /// mpv takes. A stored value between the four steps shows as Normal
+    /// rather than as nothing selected.
+    private var subtitleSizeBinding: Binding<String> {
+        Binding(
+            get: {
+                Self.subtitleSizes.first { Double($0.key) == subtitleScale }?.key ?? "1.0"
+            },
+            set: { key in
+                guard let scale = Double(key) else { return }
+                subtitleScale = scale
+                AppModel.shared?.playerController.onSetSubtitleScale?(scale)
+            }
+        )
+    }
+
+    /// The dropdown shows labels; the setting stores the case name.
+    private var subtitleStyleBinding: Binding<String> {
+        Binding(
+            get: { (SubtitleStyle(rawValue: subtitleStyle) ?? .release).label },
+            set: { label in
+                guard let style = SubtitleStyle.allCases.first(where: { $0.label == label }) else { return }
+                subtitleStyle = style.rawValue
+                AppModel.shared?.playerController.onSetSubtitleStyle?(style)
+            }
+        )
+    }
 
     private static let hourOptions = (0...23).map { String(format: "%02d:00", $0) }
 
@@ -609,6 +648,35 @@ private struct PlaybackTabSection: View {
                 ) {
                     SumiSwitch(isOn: $ambientGlowWindowed)
                 }
+            }
+        }
+
+        SettingsCard(
+            title: "Subtitles",
+            description: "Applied straight away, including to an episode that is playing."
+        ) {
+            SettingField(
+                label: "Size",
+                description: "Scales every subtitle, styled releases included."
+            ) {
+                SumiSegmentedControl(options: Self.subtitleSizes, selection: subtitleSizeBinding)
+            }
+
+            Divider()
+                .background(SumiTheme.border)
+
+            SettingField(
+                label: "Style",
+                description: (SubtitleStyle(rawValue: subtitleStyle) ?? .release).summary
+                    + (subtitleStyle == SubtitleStyle.release.rawValue
+                        ? ""
+                        : " Only the dialogue changes: signs, song lyrics and on-screen text keep the look the release gave them.")
+            ) {
+                SumiDropdown(
+                    options: SubtitleStyle.allCases.map(\.label),
+                    selected: subtitleStyleBinding,
+                    minWidth: 170
+                )
             }
         }
 

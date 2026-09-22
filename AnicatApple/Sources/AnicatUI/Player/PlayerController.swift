@@ -330,6 +330,9 @@ public final class PlayerController {
         UserDefaults.standard.set(scale, forKey: Self.subtitleScaleKey)
         onSetSubtitleScale?(scale)
     }
+    /// The look picked in Settings > Playback (`SubtitleStyle`). Wired by the
+    /// coordinator; applied on every new file too, from the stored value.
+    public var onSetSubtitleStyle: (@Sendable (_ style: SubtitleStyle) -> Void)?
 
     // Rotate video 90 degrees — mirrors the mpv Lua script's "sideways mode"
     // (Shift+V) in the Tauri build: 0 = off, 1 = 90 CW, 2 = 90 CCW. Session-

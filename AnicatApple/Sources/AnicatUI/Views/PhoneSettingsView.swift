@@ -30,6 +30,7 @@ struct PhoneSettingsView: View {
     // `PlayerController.isNextEpisodeCardEnabled` owns the reader (default on).
     @AppStorage("anicat_next_up_card") private var nextUpCard: Bool = true
     @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
+    @AppStorage(SubtitleStyle.key) private var subtitleStyle: String = SubtitleStyle.release.rawValue
     // `AppModel.isCellularWarningEnabled` owns the reader and the default;
     // `@AppStorage` needs a literal here, so the two must agree.
     @AppStorage("anicat_warn_on_cellular") private var warnOnCellular: Bool = true
@@ -227,6 +228,14 @@ struct PhoneSettingsView: View {
             }
             .onChange(of: subtitleScale) { _, scale in
                 AppModel.shared?.playerController.onSetSubtitleScale?(scale)
+            }
+            Picker("Subtitle style", selection: $subtitleStyle) {
+                ForEach(SubtitleStyle.allCases) { style in
+                    Text(style.label).tag(style.rawValue)
+                }
+            }
+            .onChange(of: subtitleStyle) { _, raw in
+                AppModel.shared?.playerController.onSetSubtitleStyle?(SubtitleStyle(rawValue: raw) ?? .release)
             }
             Toggle("Warn on cellular", isOn: $warnOnCellular)
             Text("Asked before each episode you start off Wi-Fi. Personal hotspots count.")

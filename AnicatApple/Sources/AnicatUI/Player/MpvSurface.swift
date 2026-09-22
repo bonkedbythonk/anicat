@@ -817,6 +817,9 @@ public struct MpvSurface {
             controller.onSetSubtitleScale = { [weak self] scale in
                 self?.setSubtitleScale(scale)
             }
+            controller.onSetSubtitleStyle = { [weak self] style in
+                self?.setSubtitleStyle(style)
+            }
             controller.onCycleSideways = { [weak self] in
                 self?.cycleSideways()
             }
@@ -864,6 +867,7 @@ public struct MpvSurface {
             setMuted(controller.isMuted)
             setSpeed(controller.playbackRate)
             setSubtitleScale(PlayerController.subtitleScaleSetting)
+            setSubtitleStyle(SubtitleStyle.current)
 
             if let pending = pendingStreamURL {
                 loadFile(url: pending)
@@ -1226,6 +1230,19 @@ public struct MpvSurface {
             guard let mpv = mpv else { return }
             var value = scale
             mpv_set_property(mpv, "sub-scale", MPV_FORMAT_DOUBLE, &value)
+        }
+
+        /// ASS releases through named-style overrides, text subtitles through
+        /// the `sub-*` options; `SubtitleStyle` says why not `force`. A
+        /// failed set (an option this libmpv does not know) is ignored: the
+        /// rest of the look still applies, and a subtitle is not worth an
+        /// error in the middle of an episode.
+        func setSubtitleStyle(_ style: SubtitleStyle) {
+            guard let mpv = mpv else { return }
+            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides)
+            for (name, value) in style.textOptions {
+                mpv_set_property_string(mpv, name, value)
+            }
         }
 
         /// Cycles off / 90 CW / 90 CCW, same three states and same reasoning

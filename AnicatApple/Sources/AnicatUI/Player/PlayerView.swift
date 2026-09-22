@@ -406,7 +406,7 @@ public struct PlayerView: View {
         let geometry = Self.chromeGeometry(
             windowSize: windowSize,
             aspectRatio: controller.videoAspectRatio,
-            contentInset: glowFrame == nil ? .zero : controller.chromeContentInset
+            contentInset: glowActive ? controller.chromeContentInset : .zero
         )
         let videoRect = geometry.videoRect
         let naturalTop = geometry.naturalTop
@@ -639,7 +639,7 @@ public struct PlayerView: View {
                 VStack(spacing: 0) {
                     Group {
                         if chromeShown {
-                            topBar(showsHairline: geometry.topOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
+                            topBar(showsHairline: geometry.topOverlay == 0 && !glowActive).padding(.horizontal, SumiTheme.spaceLg)
                                 .chromeLegibility()
                                 .transition(barTransition(from: .top))
                                 .chromeHoverPin(isOver: $controller.isPointerOverTopBar, controller: controller)
@@ -677,7 +677,7 @@ public struct PlayerView: View {
 
                     Group {
                         if chromeShown {
-                            PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0 && glowFrame == nil).padding(.horizontal, SumiTheme.spaceLg)
+                            PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0 && !glowActive).padding(.horizontal, SumiTheme.spaceLg)
                                 .chromeLegibility()
                                 .transition(barTransition(from: .bottom))
                                 .chromeHoverPin(isOver: $controller.isPointerOverBottomBar, controller: controller)
@@ -1010,11 +1010,14 @@ public struct PlayerView: View {
     /// is being looked at. `chromeLegibility` carries the contrast on the
     /// glyphs instead, so it holds over a white glow as well as a black one.
     private var chromeGround: Color {
-        glowFrame == nil ? .black : .clear
+        glowActive ? .clear : .black
     }
 
-    private var glowFrame: AmbientFrame? {
-        guard ambientGlowEnabled, !reduceTransparency else { return nil }
+    /// Whether the glow is drawn at all. A yes/no that changes about once
+    /// per episode; the frame itself is read only inside `AmbientGlowLayer`,
+    /// see `PlayerController.ambientFrame` for what reading it here cost.
+    private var glowActive: Bool {
+        guard ambientGlowEnabled, !reduceTransparency else { return false }
         // Not while the picture is turned on its side. The glow samples the
         // frame's edges and paints each one into the letterbox bar next to
         // it, and sideways mode rotates the picture inside the window with a
@@ -1023,14 +1026,14 @@ public struct PlayerView: View {
         // and the bars they are meant to fill are on the other axis. There
         // is no orientation to correct for either: the sampler reads the
         // rendered frame, which mpv has already rotated.
-        guard controller.sidewaysState == 0 else { return nil }
+        guard controller.sidewaysState == 0 else { return false }
         #if os(macOS)
         // On in a window too since 2026-09-07: the objection to it there
         // (a distraction in thin bars) was the blurred-image version's
         // flicker; with the gradient layers the owner asked for it always on.
-        if !ambientGlowWindowed, !FullScreenState.shared.isFullScreen { return nil }
+        if !ambientGlowWindowed, !FullScreenState.shared.isFullScreen { return false }
         #endif
-        return controller.ambientFrame
+        return controller.hasAmbientFrame
     }
 
     /// The still the fallback picture is taken from: the playing episode's,
@@ -1053,11 +1056,10 @@ public struct PlayerView: View {
     /// unlit.
     @ViewBuilder
     private func ambientGlowLayer(geometry: ChromeGeometry, windowSize: CGSize) -> some View {
-        if stageReady, let frame = glowFrame, windowSize.width > 0, windowSize.height > 0 {
-            AmbientGlowView(
-                frame: frame,
+        if stageReady, glowActive, windowSize.width > 0, windowSize.height > 0 {
+            AmbientGlowLayer(
+                controller: controller,
                 video: geometry.videoRect,
-                contentInset: controller.ambientContentInset,
                 windowSize: windowSize,
                 reduceMotion: reduceMotion
             )
@@ -2450,5 +2452,28 @@ extension View {
         #else
         self
         #endif
+    }
+}
+
+/// The one view that reads `PlayerController.ambientFrame`, so the frame
+/// replaced up to 15 times a second re-evaluates this and nothing else. It
+/// was read in `PlayerView`'s own body, which then rebuilt the whole player
+/// chrome on every glow sample.
+private struct AmbientGlowLayer: View {
+    let controller: PlayerController
+    let video: CGRect
+    let windowSize: CGSize
+    let reduceMotion: Bool
+
+    var body: some View {
+        if let frame = controller.ambientFrame {
+            AmbientGlowView(
+                frame: frame,
+                video: video,
+                contentInset: controller.ambientContentInset,
+                windowSize: windowSize,
+                reduceMotion: reduceMotion
+            )
+        }
     }
 }

@@ -460,7 +460,21 @@ public final class PlayerController {
         case thumbnail
         case frame
     }
-    public private(set) var ambientFrame: AmbientFrame?
+    /// Replaced up to 15 times a second while the glow samples. Read it
+    /// only from the view that draws the glow: every view that reads it in
+    /// its body is re-evaluated at that rate, and the player view read it
+    /// (for a yes/no) five times, so the whole chrome, its geometry and its
+    /// menus rebuilt with every sample. Anything that only needs to know
+    /// whether there is a glow reads `hasAmbientFrame`.
+    public private(set) var ambientFrame: AmbientFrame? {
+        didSet {
+            let has = ambientFrame != nil
+            if has != hasAmbientFrame { hasAmbientFrame = has }
+        }
+    }
+    /// Whether `ambientFrame` is set. Changes once per episode, not per
+    /// sample, which is why the chrome reads this and not the frame.
+    public private(set) var hasAmbientFrame = false
     public private(set) var ambientSource: AmbientSource = .none
     /// Black bars burned into the frame itself, which the container never
     /// reports — see `AmbientContentInset`. The glow rect is the video rect
@@ -486,11 +500,15 @@ public final class PlayerController {
     public func setAmbientFrame(_ image: CGImage, inset: AmbientContentInset = .zero) {
         ambientFrameCount += 1
         ambientFrame = AmbientFrame(id: ambientFrameCount, image: image)
-        ambientContentInset = inset
-        if chromeInsetHold.offer(inset, at: CACurrentMediaTime()) {
+        // Assigned only on a change: `@Observable` announces every set,
+        // equal value or not, and the chrome reads both of these, so an
+        // unconditional write here re-evaluated it on every sample as surely
+        // as reading the frame did.
+        if ambientContentInset != inset { ambientContentInset = inset }
+        if chromeInsetHold.offer(inset, at: CACurrentMediaTime()), chromeContentInset != chromeInsetHold.current {
             chromeContentInset = chromeInsetHold.current
         }
-        ambientSource = .frame
+        if ambientSource != .frame { ambientSource = .frame }
     }
 
     /// Set by the player from the playing episode's still, once per episode.

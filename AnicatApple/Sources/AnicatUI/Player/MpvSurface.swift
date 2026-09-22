@@ -843,6 +843,10 @@ public struct MpvSurface {
             // whose tail is not downloaded, so it is a backstop
             // for the position rules, not a replacement.
             mpv_observe_property(handle, 11, "eof-reached", MPV_FORMAT_FLAG)
+            // The ASS header of whichever subtitle track is showing, so a
+            // style's sizes can be put into that file's own units: changes
+            // with every file and every track switch.
+            mpv_observe_property(handle, 12, "sub-ass-extradata", MPV_FORMAT_NONE)
             // Displayed size — what the overlay chrome needs to know where
             // the letterboxed video rect actually sits, as opposed to the
             // window's own size.
@@ -1239,7 +1243,7 @@ public struct MpvSurface {
         /// error in the middle of an episode.
         func setSubtitleStyle(_ style: SubtitleStyle) {
             guard let mpv = mpv else { return }
-            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides)
+            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides(playResY: scriptHeight))
             for (name, value) in style.textOptions {
                 mpv_set_property_string(mpv, name, value)
             }
@@ -1506,6 +1510,15 @@ public struct MpvSurface {
         var lastCacheStateRead: CFTimeInterval = 0
         /// When `paused-for-cache` last went true, nil while playing.
         var cacheStallBegan: CFTimeInterval?
+        /// The current ASS track's script height (PlayResY), which a
+        /// subtitle style's sizes and widths are scaled into. Written from
+        /// the event loop, read from the main actor's style callback.
+        private let scriptHeightLock = NSLock()
+        private var _scriptHeight: Double = 360
+        var scriptHeight: Double {
+            get { scriptHeightLock.lock(); defer { scriptHeightLock.unlock() }; return _scriptHeight }
+            set { scriptHeightLock.lock(); _scriptHeight = newValue; scriptHeightLock.unlock() }
+        }
 
         /// mpv's `demuxer-cache-state/seekable-ranges` as spans in seconds.
         func cachedSeekableRanges() -> [BufferedSpan] {
@@ -1911,6 +1924,16 @@ public struct MpvSurface {
                             }
                             await MainActor.run {
                                 self.controller.isBuffering = buffering
+                            }
+                        } else if name == "sub-ass-extradata" {
+                            // A plain-text track has no header; the style
+                            // then goes through the `sub-*` options and the
+                            // script height does not matter.
+                            let height = self.stringProperty("sub-ass-extradata")
+                                .map(SubtitleStyle.playResY(fromHeader:)) ?? 360
+                            if height != self.scriptHeight {
+                                self.scriptHeight = height
+                                self.setSubtitleStyle(SubtitleStyle.current)
                             }
                         } else if name == "demuxer-cache-state" {
                             // mpv fires this on every cache write, tens of

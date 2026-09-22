@@ -16,7 +16,7 @@ struct SubtitleStyleTests {
 
     @Test("The release default clears overrides and restores mpv's text defaults")
     func releaseDefault() {
-        #expect(SubtitleStyle.release.assOverrides.isEmpty)
+        #expect(SubtitleStyle.release.assOverrides().isEmpty)
         let opts = Dictionary(uniqueKeysWithValues: SubtitleStyle.release.textOptions)
         #expect(opts["sub-font"] == "sans-serif")
         #expect(opts["sub-border-style"] == "outline-and-shadow")
@@ -24,7 +24,7 @@ struct SubtitleStyleTests {
 
     @Test("A preset restyles dialogue styles by name and never touches a sign style")
     func presetsAreNamed() {
-        let overrides = SubtitleStyle.simulcast.assOverrides.split(separator: ",").map(String.init)
+        let overrides = SubtitleStyle.simulcast.assOverrides().split(separator: ",").map(String.init)
         #expect(overrides.contains("Default.Fontname=Trebuchet MS"))
         #expect(overrides.contains("Main.PrimaryColour=&H00FFFFFF"))
         // Every field is scoped to a style: a bare `Fontname=` would hit
@@ -33,22 +33,39 @@ struct SubtitleStyleTests {
         #expect(!overrides.contains { $0.hasPrefix("Sign.") || $0.hasPrefix("TS.") || $0.hasPrefix("Title.") })
     }
 
-    @Test("ASS overrides never set outline or shadow widths")
-    func noWidthsInAss() {
-        // Those are in each file's own script pixels (SubsPlease: 360-line),
-        // and mpv-unit widths written there doubled the outline.
-        for style in SubtitleStyle.allCases {
-            let fields = style.assOverrides.split(separator: ",").map { $0.split(separator: "=")[0] }
-            #expect(!fields.contains { $0.hasSuffix(".Outline") || $0.hasSuffix(".Shadow") })
+    @Test("Sizes and widths are scaled into the file's own script height")
+    func scaledToScript() {
+        func field(_ overrides: String, _ name: String) -> String? {
+            overrides.split(separator: ",").first { $0.hasPrefix("Default.\(name)=") }
+                .map { String($0.split(separator: "=")[1]) }
         }
+        // The classic values in a 360-line script: size 24, outline 2, shadow 1.
+        let at360 = SubtitleStyle.simulcast.assOverrides(playResY: 360)
+        #expect(field(at360, "Fontsize") == "24")
+        #expect(field(at360, "Outline") == "2")
+        #expect(field(at360, "Shadow") == "1")
+        // The same look in a 1080-line BD script is three times the numbers.
+        let at1080 = SubtitleStyle.simulcast.assOverrides(playResY: 1080)
+        #expect(field(at1080, "Fontsize") == "72")
+        #expect(field(at1080, "Outline") == "6")
+        // A preset with no size of its own leaves the release's.
+        #expect(field(SubtitleStyle.streaming.assOverrides(playResY: 360), "Fontsize") == nil)
+    }
+
+    @Test("Script height is read the way libass defaults it")
+    func playResY() {
+        #expect(SubtitleStyle.playResY(fromHeader: "[Script Info]\nPlayResX: 640\nPlayResY: 360\n") == 360)
+        #expect(SubtitleStyle.playResY(fromHeader: "PlayResX: 1280\n") == 1024)
+        #expect(SubtitleStyle.playResY(fromHeader: "PlayResX: 1920\n") == 1440)
+        #expect(SubtitleStyle.playResY(fromHeader: "[Script Info]\nTitle: x\n") == 288)
     }
 
     @Test("Boxed draws a box, the others an outline")
     func boxed() {
         let boxed = Dictionary(uniqueKeysWithValues: SubtitleStyle.boxed.textOptions)
         #expect(boxed["sub-border-style"] == "opaque-box")
-        #expect(SubtitleStyle.boxed.assOverrides.contains("Default.BorderStyle=3"))
-        #expect(SubtitleStyle.streaming.assOverrides.contains("Default.BorderStyle=1"))
+        #expect(SubtitleStyle.boxed.assOverrides().contains("Default.BorderStyle=3"))
+        #expect(SubtitleStyle.streaming.assOverrides().contains("Default.BorderStyle=1"))
     }
 
     @Test("An unknown stored value reads as the release default")
@@ -86,7 +103,7 @@ struct SubtitleStyleMpvTests {
         mpv_set_option_string(handle, "ao", "null")
         #expect(mpv_initialize(handle) >= 0)
         for style in SubtitleStyle.allCases {
-            let overrides = mpv_set_property_string(handle, "sub-ass-style-overrides", style.assOverrides)
+            let overrides = mpv_set_property_string(handle, "sub-ass-style-overrides", style.assOverrides(playResY: 1080))
             #expect(overrides >= 0, "\(style): sub-ass-style-overrides -> \(String(cString: mpv_error_string(overrides)))")
             for (name, value) in style.textOptions {
                 let status = mpv_set_property_string(handle, name, value)

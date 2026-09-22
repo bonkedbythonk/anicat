@@ -27,8 +27,10 @@ struct SubtitleSample: View {
     var body: some View {
         let look = style.look ?? SubtitleStyle.releaseLook
         let unit = frameHeight / 720
-        let size = Self.releaseLineHeight * unit * CGFloat(scale) / Self.lineHeightPerEm(look.font)
-        let outline = max(CGFloat(look.outlineWidth) * unit, look.boxed ? 0 : 0.6)
+        // `Look` is in 360-line units; the preview frame is laid out in 720.
+        let lineHeight = look.size.map { CGFloat($0) * 2 } ?? Self.releaseLineHeight
+        let size = lineHeight * unit * CGFloat(scale) / Self.lineHeightPerEm(look.font)
+        let outline = max(CGFloat(look.outlineWidth) * 2 * unit, look.boxed ? 0 : 0.6)
         Text(text)
             .font(fontFor(look, size: size))
             .foregroundColor(Color(argb: look.text))
@@ -37,8 +39,8 @@ struct SubtitleSample: View {
             .shadow(
                 color: Color(argb: look.shadow),
                 radius: 0,
-                x: CGFloat(look.shadowOffset) * unit,
-                y: CGFloat(look.shadowOffset) * unit
+                x: CGFloat(look.shadowOffset) * 2 * unit,
+                y: CGFloat(look.shadowOffset) * 2 * unit
             )
             .padding(.horizontal, look.boxed ? outline + 2 : 0)
             .padding(.vertical, look.boxed ? outline * 0.5 + 1 : 0)
@@ -94,8 +96,8 @@ extension SubtitleStyle {
     /// mpv's own defaults for text subtitles, which is what "Release
     /// default" looks like on a release that brings no styling of its own.
     static let releaseLook = Look(
-        font: "sans-serif", bold: false, text: 0xFFFFFFFF, outline: 0xFF000000,
-        outlineWidth: 3, shadow: 0x00000000, shadowOffset: 0, boxed: false
+        font: "sans-serif", size: nil, bold: false, text: 0xFFFFFFFF, outline: 0xFF000000,
+        outlineWidth: 1.3, shadow: 0x00000000, shadowOffset: 0, boxed: false
     )
 }
 

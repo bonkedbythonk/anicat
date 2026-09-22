@@ -1901,7 +1901,25 @@ public struct MpvSurface {
                             await MainActor.run {
                                 guard !self.controller.awaitingNewFile else { return }
                                 if !self.controller.isScrubbing {
-                                    self.controller.currentTime = pos
+                                    // mpv reports time-pos on every video
+                                    // frame and `currentTime` is observed:
+                                    // written each time, the bottom bar (time
+                                    // label, scrubber, and every button in
+                                    // the same body) was rebuilt 24+ times a
+                                    // second whenever the controls were up.
+                                    // Visible controls cost 12.4 CPU points
+                                    // (release, fullscreen, 47.3% up vs 34.9%
+                                    // hidden, 2026-09-23), and a `sample`
+                                    // put PlayerBottomBar.body at the top of
+                                    // the app's own frames. A quarter second
+                                    // is finer than the scrubber (about a
+                                    // point a second) or the seconds label
+                                    // can show, and a seek jumps further and
+                                    // lands at once. The exact position still
+                                    // goes to `onPositionChange` every time.
+                                    if abs(pos - self.controller.currentTime) >= 0.25 {
+                                        self.controller.currentTime = pos
+                                    }
                                     self.controller.checkIntroStatus()
                                     self.controller.onPositionChange?(pos, self.controller.duration)
                                 }

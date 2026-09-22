@@ -150,3 +150,40 @@ test("with a token set, only requests carrying it are served", async () => {
   );
   assert.equal(app.status, 200);
 });
+
+test("a caller over the per-IP limit gets 429 with Retry-After, and search has its own budget", async () => {
+  const seen = [];
+  const limiter = (allow) => ({
+    async limit({ key }) {
+      seen.push(key);
+      return { success: allow };
+    },
+  });
+  const upstream = globalThis.fetch;
+  globalThis.fetch = async () => new Response("{}", { status: 200 });
+  try {
+    const headers = { "cf-connecting-ip": "203.0.113.9" };
+    const blocked = await worker.fetch(
+      new Request("https://p.example/3/search/movie?query=x", { headers }),
+      { TMDB_KEY: "k".repeat(32), SEARCH_LIMIT: limiter(false), REQUEST_LIMIT: limiter(true) },
+    );
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.headers.get("retry-after"), "60");
+
+    const allowed = await worker.fetch(
+      new Request("https://p.example/3/trending/movie/week", { headers }),
+      { TMDB_KEY: "k".repeat(32), SEARCH_LIMIT: limiter(false), REQUEST_LIMIT: limiter(true) },
+    );
+    assert.equal(allowed.status, 200);
+    assert.deepEqual(seen, ["search:203.0.113.9", "any:203.0.113.9"]);
+
+    // No bindings: no limit, not an outage.
+    const unbound = await worker.fetch(
+      new Request("https://p.example/3/search/movie?query=x", { headers }),
+      { TMDB_KEY: "k".repeat(32) },
+    );
+    assert.equal(unbound.status, 200);
+  } finally {
+    globalThis.fetch = upstream;
+  }
+});

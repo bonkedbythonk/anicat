@@ -11,3 +11,22 @@ compatibility_date = "2026-09-08"
 # six hours to a day (see `cacheSeconds` in worker.js), so a row that a
 # thousand installs open is a handful of requests to TMDB, not a thousand.
 workers_dev = true
+
+# Per-IP request limits (worker.js). Search is the path that reaches TMDB
+# most often, so it has its own, tighter budget. `period` may only be 10 or
+# 60 seconds; the counts are per Cloudflare location and approximate.
+[[ratelimits]]
+name = "SEARCH_LIMIT"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 60
+  period = 60
+
+[[ratelimits]]
+name = "REQUEST_LIMIT"
+namespace_id = "1002"
+
+  [ratelimits.simple]
+  limit = 300
+  period = 60

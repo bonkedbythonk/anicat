@@ -85,6 +85,32 @@ export default {
       return deny(404, "Not a proxied TMDB endpoint.");
     }
 
+    // Per-IP limits, before anything reaches TMDB. The URL is public (it is
+    // in every build and in this repo), and until this there was nothing
+    // between a script that found it and the one TMDB key every install
+    // shares. Search is limited hardest: it is cached for ten minutes where
+    // a row is cached for hours, so it is the path that turns requests into
+    // upstream calls. The limits are generous for a person (a home screen is
+    // eight rows, a cinema search two requests) and approximate by design:
+    // Cloudflare counts per location and eventually, which is enough to stop
+    // a loop and not meant as accounting. Absent bindings (the tests, or a
+    // deploy without them) mean no limit rather than an outage.
+    const ip = request.headers.get("cf-connecting-ip") || "unknown";
+    const isSearch = url.pathname.startsWith("/3/search/");
+    const limiter = isSearch ? env.SEARCH_LIMIT : env.REQUEST_LIMIT;
+    if (limiter) {
+      const { success } = await limiter.limit({ key: `${isSearch ? "search" : "any"}:${ip}` });
+      if (!success) {
+        // The app's TMDB client parks every caller for the Retry-After it
+        // names (catalog/tmdb/client.rs), so this slows it rather than
+        // breaking a page.
+        return new Response(JSON.stringify({ status_message: "Too many requests." }), {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "60" },
+        });
+      }
+    }
+
     // The app sends `x-anicat-client`; nothing else does. It is not a secret
     // -- it ships in a public repo and inside every build -- so it proves
     // nothing about who is calling. What it does is separate traffic that

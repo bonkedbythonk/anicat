@@ -19,6 +19,11 @@ extension AppModel {
     /// How far ahead of the playhead the playing file has to be on disk
     /// before a second episode may be pulled through the same swarm.
     static let skipBootstrapLookaheadSeconds: Double = 120
+    /// The second opening window, searched only when the head missed: it
+    /// overlaps the head by the longest segment the matcher accepts, so an
+    /// opening straddling the 8-minute mark is whole in one of the two.
+    static let skipLateOpeningStart: Double = 300
+    static let skipLateOpeningLength: Double = 480
 
     /// Runs once the episode's other sources have answered. Only the opening
     /// is searched here, from a stored reference: the ending waits for the
@@ -133,9 +138,14 @@ extension AppModel {
                     self.playerController.skipDetectionStatus = "Resumed past the opening; not searching for it"
                     return
                 }
-                switch await self.findStored(kind: "op", catalogId: catalogId, episode: episode, url: url,
-                                             start: 0, length: Self.skipHeadSeconds, preferDub: preferDub,
-                                             announceMiss: neighbour == nil) {
+                var outcome = await self.findStored(kind: "op", catalogId: catalogId, episode: episode, url: url,
+                                                    start: 0, length: Self.skipHeadSeconds, preferDub: preferDub,
+                                                    announceMiss: false)
+                if outcome == .missed, !Task.isCancelled {
+                    outcome = await self.findStoredLateOpening(catalogId: catalogId, episode: episode, url: url,
+                                                               preferDub: preferDub, announceMiss: neighbour == nil)
+                }
+                switch outcome {
                 case .found, .failed: return
                 case .missed: storedMissed = true
                 }
@@ -412,6 +422,42 @@ extension AppModel {
     }
 
     enum StoredSearch { case found, missed, failed }
+
+    /// The stored opening searched for past the head window. Watari-kun
+    /// ep 18 missed both the stored opening and the comparison with ep 19,
+    /// both of which read only the first 8 minutes, in a show whose ep 16
+    /// opening started at 5:39 [GUESS: a cold open past ~7:45]. Only a file
+    /// already on disk over that stretch is read: at this point in playback
+    /// it runs up to 13 minutes ahead of the playhead, and pulling that
+    /// through a live swarm is what the lookahead gate exists to prevent.
+    private func findStoredLateOpening(catalogId: Int64, episode: Int64, url: String,
+                                       preferDub: Bool, announceMiss: Bool) async -> StoredSearch {
+        let start = Self.skipLateOpeningStart
+        let end = start + Self.skipLateOpeningLength
+        let duration = playerController.duration
+        let reason: String?
+        if duration <= end {
+            reason = "the episode is only \(Int(duration))s"
+        } else if playerController.currentTime >= end - 15 {
+            // 15s is `skip::MIN_SEGMENT_SECONDS`: less of the window than
+            // that left ahead cannot hold a match worth skipping.
+            reason = "the playhead is past \(Int(end))s"
+        } else {
+            let buffered = playerController.torrentBufferedFractions
+            let covered = buffered.isEmpty
+                || buffered.contains(where: { $0.start <= start / duration && $0.end >= end / duration })
+            reason = covered ? nil : "\(Int(start))-\(Int(end))s is not on disk yet"
+        }
+        if let reason {
+            print("[skipdetect] late op search for \(catalogId) ep \(episode) skipped: \(reason)")
+            if announceMiss { apply(nil, kind: "op", catalogId: catalogId, episode: episode, source: "") }
+            return .missed
+        }
+        print("[skipdetect] stored op not in ep \(episode)'s first \(Int(Self.skipHeadSeconds))s; searching \(Int(start))-\(Int(end))s")
+        return await findStored(kind: "op", catalogId: catalogId, episode: episode, url: url,
+                                start: start, length: Self.skipLateOpeningLength, preferDub: preferDub,
+                                announceMiss: announceMiss)
+    }
 
     /// `announceMiss: false` when a caller falls back on a miss: "not found"
     /// followed minutes later by a skip window reads as a wrong answer.

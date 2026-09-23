@@ -3324,6 +3324,28 @@ mod tests {
         }
     }
 
+    /// Live. The app's "dub is out" alert (`AppModel+DubAlerts.swift`) asks
+    /// the picker's search -- which runs with `prefer_dub: false` -- whether
+    /// any release of the next episode is labelled a dub. That only works if
+    /// weekly dub releases come back from that search at all, under AniList's
+    /// titles and an `S03E11` numbering, and if `is_dub_release` reads their
+    /// names. Both shows had a weekly English dub on Nyaa in September 2026.
+    #[tokio::test]
+    #[ignore]
+    async fn live_weekly_dub_releases_are_found_and_labelled() {
+        let cases: [(&[&str], i64); 2] = [
+            (&["Mushoku Tensei III: Isekai Ittara Honki Dasu", "Mushoku Tensei: Jobless Reincarnation Season 3"], 11),
+            (&["Mairimashita! Iruma-kun 4th Season", "Welcome to Demon School! Iruma-kun Season 4"], 23),
+        ];
+        for (titles, episode) in cases {
+            let titles: Vec<String> = titles.iter().map(|t| t.to_string()).collect();
+            let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: None, aired_episodes: None }, search::Breadth::Full).await;
+            let dubs: Vec<&str> = cands.iter().filter(|c| search::is_dub_release(&search::normalize(&c.name))).map(|c| c.name.as_str()).collect();
+            println!("{} ep {}: {} candidates, {} dub: {:?}", titles[0], episode, cands.len(), dubs.len(), dubs);
+            assert!(!dubs.is_empty(), "no dub release found for {} ep {}", titles[0], episode);
+        }
+    }
+
     /// Live. `cargo test --lib torrent -- --ignored --nocapture`
     ///
     /// The play path stops querying title variants once it has enough healthy

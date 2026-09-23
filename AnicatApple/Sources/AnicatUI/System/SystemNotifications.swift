@@ -206,6 +206,24 @@ public final class SystemNotifications: NSObject, UNUserNotificationCenterDelega
         )
     }
 
+    /// The English dub of an episode whose Japanese release was announced
+    /// (or not) long before. Its own once-only key and identifier: sharing
+    /// the airing alert's `anilist:ep:<id>:<n>` would find it already spent,
+    /// and sharing the identifier would replace that banner in place.
+    public func notifyDubOut(catalogId: Int64, title: String, episode: Int, coverURL: URL?) async {
+        guard Self.isAvailable, Self.areNewEpisodeNotificationsEnabled else { return }
+        guard await ensureAuthorized() else { return }
+        let key = "anilist:dub:\(catalogId):\(episode)"
+        guard markOnce(key: Self.notifiedEpisodesKey, entry: key) else { return }
+        await post(
+            identifier: "dub-anilist-\(catalogId)-\(episode)",
+            title: title,
+            body: "The English dub of episode \(episode) is out.",
+            coverURL: coverURL,
+            link: .play(id: catalogId, episode: episode, catalog: .anilist)
+        )
+    }
+
     /// `catalog` is not optional-with-a-default on purpose: the tap replays
     /// this link through `playFromShelf`, whose own catalog defaulted to
     /// AniList, so a finished film announced itself and then played whatever

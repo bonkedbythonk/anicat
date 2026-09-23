@@ -26,7 +26,7 @@ struct SharingTabSection: View {
         SettingsCard(title: "Notifications") {
             SettingField(
                 label: "New Episode Alerts",
-                description: "A local notification when an episode of something you are watching airs. Each episode is announced once, whether or not the app was running when it aired."
+                description: "A local notification when an episode of something you are watching airs, and, if you watch dubbed, when its English dub is out. Each episode is announced once, whether or not the app was running when it aired."
             ) {
                 SumiSwitch(isOn: $notifyNewEpisodes)
             }

@@ -1329,6 +1329,15 @@ public final class AppModel {
     /// downloads that have reached `.done`.
     var lastKnownCompletedDownloadIds: Set<String>?
 
+    /// The hourly dub pass (`AppModel+DubAlerts.swift`), started once.
+    @ObservationIgnored var dubCheckLoopTask: Task<Void, Never>?
+    /// One pass at a time: `refreshAll` fires at launch, on reachability and
+    /// on every airing rollover, and the loop on its own clock besides.
+    @ObservationIgnored var isCheckingDubs = false
+    /// When each `<catalogId>:<episode>` was last searched for a dub, so a
+    /// burst of refreshes does not search the same episode again.
+    @ObservationIgnored var dubLastChecked: [String: Date] = [:]
+
     // MARK: - Syosetu novel reading
     //
     // Direct-URL only: the viewer pastes a `ncode.syosetu.com/nXXXXXX/` link

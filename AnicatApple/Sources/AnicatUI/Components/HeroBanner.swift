@@ -27,8 +27,9 @@ public enum HeroBanner {
         public let prequel: Relation?
         public let sequel: Relation?
         /// `CURRENT`/`PLANNING`/`COMPLETED`/`DROPPED`/`PAUSED`/`REPEATING`, or
-        /// `nil` when this title isn't on the signed-in user's list.
-        public let listStatus: String?
+        /// `nil` when this title isn't on the signed-in user's list. `var` so
+        /// a pick shows before AniList has answered (`updateListEntry`).
+        public var listStatus: String?
         public let userScore: Double?
         /// The list entry's own id. `DeleteMediaListEntry` is keyed on this,
         /// not on `id` (the AniList media id).

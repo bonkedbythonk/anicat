@@ -556,8 +556,18 @@ extension AppModel {
     /// shown is what AniList actually saved.
     public func updateListEntry(status: String? = nil, score: Double? = nil, progress: Int64? = nil) async {
         guard let engine, let details = selectedMediaDetails else { return }
+        // Shown now, saved after. The save goes through the AniList client's
+        // rate limiter, which after a 429 holds every request for up to a
+        // minute: the owner picked a status, the menu stayed on "Add to
+        // List" for that minute, and it read as broken ("i cant add things
+        // to my list"; log: 429 at 21:04:17, then saves waiting 55 s and
+        // 10 s). A failure below puts the old status back.
+        let previousStatus = details.listStatus
+        if let status { selectedMediaDetails?.listStatus = status }
+        let began = Date()
         do {
             try await engine.updateListEntry(catalogId: details.id, status: status, score: score, progress: progress)
+            AppLog.write("[list] \(details.id) status=\(status ?? "-") score=\(score.map { "\($0)" } ?? "-") progress=\(progress.map { "\($0)" } ?? "-") saved in \(String(format: "%.1f", Date().timeIntervalSince(began)))s")
             await recordAniListSuccess()
             // Off the Up Next shelf at once when the title leaves the
             // watching list; the background re-read below confirms it.
@@ -579,6 +589,10 @@ extension AppModel {
             // "reopened the same title I already just saw", not this.
             await loadDetail(id: details.id, isManga: currentDetailIsManga(), forceRefresh: true)
         } catch {
+            AppLog.write("[list] \(details.id) save failed after \(String(format: "%.1f", Date().timeIntervalSince(began)))s: \(error.localizedDescription)")
+            if status != nil, selectedMediaDetails?.id == details.id {
+                selectedMediaDetails?.listStatus = previousStatus
+            }
             await recordAniListFailure(error)
             errorMessage = "Could not update AniList: \(error.localizedDescription)"
         }

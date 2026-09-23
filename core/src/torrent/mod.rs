@@ -423,6 +423,11 @@ pub struct TorrentManager {
     /// no queue to resume, only a status the episode row polls while it's
     /// open.
     downloads: tokio::sync::Mutex<HashMap<(usize, usize), EpisodeDownloadStatus>>,
+    /// Torrents a download is still fetching, with how many downloads each.
+    /// A std mutex beside the tokio one above because the places that must
+    /// spare these (`cleanup_protected`, `pause_all`) are sync or hold no
+    /// await point to spend on it. See `spawn_episode_download`.
+    downloading: std::sync::Mutex<HashMap<usize, u32>>,
     /// See `ResolveProgress`. Each entry carries how many resolves are
     /// writing it. A std mutex: written from inside the racing candidate
     /// futures and read from a synchronous FFI call, neither of which may
@@ -442,6 +447,27 @@ pub enum EpisodeDownloadStatus {
 /// How many files stay selected inside one torrent: the one playing, and the
 /// one preloaded behind it.
 const SELECTED_FILES_KEPT: usize = 2;
+
+/// Where finished downloads land: the Mac's own Downloads folder, where they
+/// are the viewer's files, and the app's Documents on a phone. On iOS
+/// `dirs::download_dir()` answers `$HOME/Downloads`, the container's root,
+/// which the sandbox does not let an app write -- only Documents, Library and
+/// tmp -- so every phone download reached 100% and then failed at the copy,
+/// with no file anywhere (owner, 2026-09-23: Clannad 01 in 8 s, then a failure
+/// mark).
+pub(crate) fn downloads_root() -> PathBuf {
+    #[cfg(target_os = "ios")]
+    let base = dirs::document_dir();
+    #[cfg(not(target_os = "ios"))]
+    let base = dirs::download_dir();
+    base.unwrap_or_else(std::env::temp_dir).join("Anicat")
+}
+
+/// The torrents `pause_all` may pause: all of them but those a download is
+/// still fetching. A pure function so the rule is tested without a session.
+fn pausable_torrents(all: &[usize], downloading: &HashSet<usize>) -> HashSet<usize> {
+    all.iter().copied().filter(|id| !downloading.contains(id)).collect()
+}
 
 /// Record `file_id` as the most recently wanted file of a torrent, dropping
 /// whatever fell out of the window. Most recent last.
@@ -536,6 +562,7 @@ impl TorrentManager {
             playing_file: std::sync::Mutex::new(None),
             download_limit_bps: std::sync::atomic::AtomicU32::new(0),
             downloads: tokio::sync::Mutex::new(HashMap::new()),
+            downloading: std::sync::Mutex::new(HashMap::new()),
             progress: std::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -725,7 +752,14 @@ impl TorrentManager {
             ids.insert(t);
         }
         ids.extend(just_resolved);
+        // A download in flight is neither playing nor just resolved, and the
+        // size cap evicted it part-way.
+        ids.extend(self.downloading_ids());
         ids
+    }
+
+    fn downloading_ids(&self) -> HashSet<usize> {
+        self.downloading.lock().unwrap_or_else(|e| e.into_inner()).keys().copied().collect()
     }
 
     /// Record the file behind `(media, episode)` as the one a player is now
@@ -860,6 +894,7 @@ impl TorrentManager {
             .unwrap_or_else(|e| e.into_inner())
             .map(|(t, _)| t)
             .into_iter()
+            .chain(self.downloading_ids())
             .collect();
         let session = self.session.get().cloned();
         cleanup_cache_to(&self.cache_dir, session.as_ref(), &protected, 0, false).await;
@@ -1566,13 +1601,22 @@ impl TorrentManager {
         let handles = std::sync::Mutex::new(Vec::new());
         session.with_torrents(|it| {
             let mut hs = handles.lock().unwrap();
-            for (_, h) in it {
-                hs.push(h.clone());
+            for (id, h) in it {
+                hs.push((id, h.clone()));
             }
         });
         let handles = handles.into_inner().unwrap();
-        for h in handles {
-            let _ = session.pause(&h).await;
+        // Not a torrent a download is fetching: closing the player paused
+        // every torrent in the session, the download's included, and nothing
+        // ever resumed it, so a download started before or during a play sat
+        // at its last percent until the poll gave up (owner, 2026-09-23:
+        // "downloading takes absolutely ages").
+        let ids: Vec<usize> = handles.iter().map(|(id, _)| *id).collect();
+        let pausable = pausable_torrents(&ids, &self.downloading_ids());
+        for (id, h) in handles {
+            if pausable.contains(&id) {
+                let _ = session.pause(&h).await;
+            }
         }
         cleanup_cache(&self.cache_dir, Some(&session), &self.cleanup_protected(None)).await;
     }
@@ -1695,6 +1739,22 @@ impl TorrentManager {
                 }
                 downloads.insert((torrent_id, file_id), EpisodeDownloadStatus::Downloading { percent: 0.0 });
             }
+            // Spares the torrent from `pause_all` and every cache sweep for as
+            // long as this task runs, whichever way it returns.
+            struct Downloading(Arc<TorrentManager>, usize);
+            impl Drop for Downloading {
+                fn drop(&mut self) {
+                    let mut map = self.0.downloading.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(n) = map.get_mut(&self.1) {
+                        *n -= 1;
+                        if *n == 0 {
+                            map.remove(&self.1);
+                        }
+                    }
+                }
+            }
+            *mgr.downloading.lock().unwrap_or_else(|e| e.into_inner()).entry(torrent_id).or_insert(0) += 1;
+            let _downloading = Downloading(mgr.clone(), torrent_id);
 
             async fn fail(mgr: &TorrentManager, torrent_id: usize, file_id: usize, msg: String) {
                 mgr.downloads.lock().await.insert(
@@ -1731,16 +1791,29 @@ impl TorrentManager {
             let source_path = output_folder.join(&relative_filename);
 
             const POLL: std::time::Duration = std::time::Duration::from_secs(1);
-            // Bounded the same way spawn_stall_logger is: a dead swarm must
-            // eventually report failure rather than leave the row spinning
-            // forever. 40 minutes is generous for a 1080p episode even on a
-            // slow swarm — the pre-buffer gate elsewhere is seconds-scale
-            // because it only proves the swarm is *delivering*, but this has
-            // to prove the whole file landed.
-            const MAX_SAMPLES: u32 = 2400;
+            // A dead swarm must still end in a failure rather than a row
+            // spinning forever, but the bound is time without progress, not
+            // time in total: it was 40 minutes flat, and a 1.4 GB episode at
+            // 500 KB/s takes 47, so a slow and perfectly live download failed
+            // exactly when it was taking longest.
+            const STALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(600);
+            // There was no line at all about a download's speed, so "it takes
+            // ages" had nothing to measure against.
+            const LOG_EVERY_TICKS: u64 = 30;
+            let started = std::time::Instant::now();
+            let mut last_done = 0u64;
+            let mut last_progress = std::time::Instant::now();
+            let mut tick = 0u64;
             let mut finished = false;
-            for _ in 0..MAX_SAMPLES {
+            let mut stalled = false;
+            loop {
                 mgr.ensure_selected(&session, torrent_id, file_id).await;
+                // Belt to `pause_all`'s braces: whatever else pauses the
+                // torrent, the download resumes it.
+                if matches!(handle.stats().state, librqbit::TorrentStatsState::Paused) {
+                    log::info!("[downloads] torrent {torrent_id} was paused; resuming it");
+                    let _ = session.unpause(&handle).await;
+                }
                 // Hashed pieces, never the length on disk: librqbit
                 // `set_len`s every file to its full size while the torrent
                 // initializes (`ensure_file_length` in `initializing.rs`),
@@ -1761,21 +1834,47 @@ impl TorrentManager {
                     finished = true;
                     break;
                 }
+                if done > last_done {
+                    last_done = done;
+                    last_progress = std::time::Instant::now();
+                } else if last_progress.elapsed() >= STALL_LIMIT {
+                    stalled = true;
+                    break;
+                }
                 if session.get(torrent_id.into()).is_none() {
                     break;
+                }
+                tick += 1;
+                if tick.is_multiple_of(LOG_EVERY_TICKS) {
+                    let stats = handle.stats();
+                    let live = stats.live.as_ref();
+                    log::info!(
+                        "[downloads] {} {:.1}% of {} MB, {:.2} MiB/s, {} live peers, {}, {}s in",
+                        display_title,
+                        if expected_len > 0 { done as f64 / expected_len as f64 * 100.0 } else { 0.0 },
+                        expected_len / 1_048_576,
+                        live.map(|l| l.download_speed.mbps).unwrap_or(0.0),
+                        live.map(|l| l.snapshot.peer_stats.live).unwrap_or(0),
+                        stats.state,
+                        started.elapsed().as_secs(),
+                    );
                 }
                 tokio::time::sleep(POLL).await;
             }
 
             if !finished {
-                fail(&mgr, torrent_id, file_id, "download did not complete (swarm stalled or torrent was removed)".into()).await;
+                let msg = if stalled {
+                    "download stalled: nothing arrived for 10 minutes"
+                } else {
+                    "download did not complete (the torrent was removed)"
+                };
+                log::info!("[downloads] {display_title} failed after {}s: {msg}", started.elapsed().as_secs());
+                fail(&mgr, torrent_id, file_id, msg.into()).await;
                 return;
             }
+            log::info!("[downloads] {display_title} finished in {}s", started.elapsed().as_secs());
 
-            let dest_dir = dirs::download_dir()
-                .unwrap_or_else(std::env::temp_dir)
-                .join("Anicat")
-                .join(sanitize_path_component(&display_title));
+            let dest_dir = downloads_root().join(sanitize_path_component(&display_title));
             let file_name = relative_filename
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -1801,7 +1900,12 @@ impl TorrentManager {
                         EpisodeDownloadStatus::Done { path: dest_path.to_string_lossy().to_string() },
                     );
                 }
-                Ok(Err(e)) => fail(&mgr, torrent_id, file_id, format!("could not copy file to Downloads: {e}")).await,
+                Ok(Err(e)) => {
+                    // The only report of this used to be a tooltip, which a
+                    // phone never shows.
+                    log::info!("[downloads] {display_title} could not be copied to {}: {e}", dest_path.display());
+                    fail(&mgr, torrent_id, file_id, format!("could not copy file to Downloads: {e}")).await
+                }
                 Err(e) => fail(&mgr, torrent_id, file_id, format!("copy task panicked: {e}")).await,
             }
         });
@@ -2973,6 +3077,16 @@ mod tests {
     /// no lookup is needed. A Gun Gale Online pack for Sword Art Online II is
     /// refused; a combined pack carrying the first season's id is not; a
     /// franchise that could not be established lets everything through.
+    /// Closing the player paused the download's torrent with the rest, and
+    /// nothing resumed it.
+    #[test]
+    fn closing_the_player_never_pauses_a_download() {
+        let downloading: HashSet<usize> = [2].into_iter().collect();
+        let pausable = pausable_torrents(&[0, 1, 2, 3], &downloading);
+        assert_eq!(pausable, [0, 1, 3].into_iter().collect());
+        assert_eq!(pausable_torrents(&[0, 1], &HashSet::new()), [0, 1].into_iter().collect());
+    }
+
     #[tokio::test]
     async fn a_release_from_outside_the_franchise_is_refused_before_it_is_added() {
         let mgr = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-verify-test"));

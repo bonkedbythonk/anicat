@@ -1722,9 +1722,7 @@ impl AnicatEngine {
     /// Returns how many were adopted. Idempotent: an episode already indexed
     /// is left alone, so running it every launch costs a directory walk.
     pub fn scan_downloads_folder(&self, hints: Vec<FfiTitleHint>) -> FfiResult<u32> {
-        let root = dirs::download_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("Anicat");
+        let root = crate::torrent::downloads_root();
         let known: Vec<(i64, i64)> = self
             .registry
             .downloaded_episodes()
@@ -3395,7 +3393,7 @@ impl AnicatEngine {
         // Beside the downloaded episodes, in the user's own Downloads folder:
         // the point of an export is that it can be copied onto a device, and
         // nothing inside the app container can be.
-        let dir = dirs::download_dir().unwrap_or_else(std::env::temp_dir).join("Anicat");
+        let dir = crate::torrent::downloads_root();
         std::fs::create_dir_all(&dir).map_err(|e| AnicatError::Storage { msg: e.to_string() })?;
         let path = dir.join(format!("{}.epub", safe_filename(&stored.full_title())));
         std::fs::write(&path, &bytes).map_err(|e| AnicatError::Storage { msg: e.to_string() })?;

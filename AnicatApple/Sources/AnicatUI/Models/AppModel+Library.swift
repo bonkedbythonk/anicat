@@ -986,7 +986,7 @@ extension AppModel {
         // picking it clears the results instead of searching.
         let hasActiveFilter = filters.map {
             $0.genre != nil || $0.year != nil || $0.season != nil || $0.format != nil
-                || $0.minScore != nil || $0.status != nil || $0.sort != nil
+                || $0.minScore != nil || $0.status != nil || $0.sort != nil || $0.country != nil
         } ?? false
         guard let engine, !trimmedQuery.isEmpty || hasActiveFilter else {
             activeSearchTask?.cancel()

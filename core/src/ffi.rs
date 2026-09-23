@@ -1219,21 +1219,7 @@ impl AnicatEngine {
         page: Option<i32>,
     ) -> FfiResult<Vec<MediaSummary>> {
         let page_num = page.unwrap_or(1);
-        let page_str = page_num.to_string();
-        let year_str = filters.as_ref().and_then(|f| f.year).map(|y| y.to_string()).unwrap_or_default();
-        let min_score_str = filters.as_ref().and_then(|f| f.min_score).map(|s| s.to_string()).unwrap_or_default();
-        let cache_key = AniListCache::key("search_media", &[
-            ("q", query.as_deref().unwrap_or("")),
-            ("page", &page_str),
-            ("type", media_type.as_deref().unwrap_or("")),
-            ("genre", filters.as_ref().and_then(|f| f.genre.as_deref()).unwrap_or("")),
-            ("year", &year_str),
-            ("season", filters.as_ref().and_then(|f| f.season.as_deref()).unwrap_or("")),
-            ("format", filters.as_ref().and_then(|f| f.format.as_deref()).unwrap_or("")),
-            ("min", &min_score_str),
-            ("status", filters.as_ref().and_then(|f| f.status.as_deref()).unwrap_or("")),
-            ("sort", filters.as_ref().and_then(|f| f.sort.as_deref()).unwrap_or("")),
-        ]);
+        let cache_key = search_cache_key(query.as_deref(), media_type.as_deref(), filters.as_ref(), page_num);
         if let Some(hit) = self.catalogs.cache.get(&cache_key) {
             if let Ok(items) = serde_json::from_value::<Vec<anilist::types::MediaItem>>(hit) {
                 return Ok(items.iter().map(summarize).collect());
@@ -4687,6 +4673,29 @@ fn is_mangakatana_id(id: &str) -> bool {
     id.starts_with("http")
 }
 
+/// Every filter `build_search_variables` sends has to be in here too. The
+/// country filter was not: "Korea" answered from the cache entry of the same
+/// search without it, and the owner saw the unfiltered list ("the filter u
+/// built earlier doesnt work").
+fn search_cache_key(query: Option<&str>, media_type: Option<&str>, filters: Option<&SearchFilters>, page: i32) -> String {
+    let page_str = page.to_string();
+    let year_str = filters.and_then(|f| f.year).map(|y| y.to_string()).unwrap_or_default();
+    let min_score_str = filters.and_then(|f| f.min_score).map(|s| s.to_string()).unwrap_or_default();
+    AniListCache::key("search_media", &[
+        ("q", query.unwrap_or("")),
+        ("page", &page_str),
+        ("type", media_type.unwrap_or("")),
+        ("genre", filters.and_then(|f| f.genre.as_deref()).unwrap_or("")),
+        ("year", &year_str),
+        ("season", filters.and_then(|f| f.season.as_deref()).unwrap_or("")),
+        ("format", filters.and_then(|f| f.format.as_deref()).unwrap_or("")),
+        ("min", &min_score_str),
+        ("status", filters.and_then(|f| f.status.as_deref()).unwrap_or("")),
+        ("sort", filters.and_then(|f| f.sort.as_deref()).unwrap_or("")),
+        ("country", filters.and_then(|f| f.country.as_deref()).unwrap_or("")),
+    ])
+}
+
 fn build_search_variables(
     query: Option<&str>,
     media_type: Option<&str>,
@@ -5683,6 +5692,25 @@ mod tests {
         assert_eq!(vars.get("countryOfOrigin"), Some(&serde_json::json!("KR")));
         let vars = build_search_variables(None, Some("MANGA"), Some(&SearchFilters::default()), 1);
         assert_eq!(vars.get("countryOfOrigin"), None);
+    }
+
+    #[test]
+    fn every_filter_is_part_of_the_search_cache_key() {
+        let base = SearchFilters::default();
+        let key = |f: &SearchFilters| search_cache_key(None, Some("MANGA"), Some(f), 1);
+        let variants = [
+            SearchFilters { genre: Some("Action".into()), ..base.clone() },
+            SearchFilters { year: Some(2024), ..base.clone() },
+            SearchFilters { season: Some("WINTER".into()), ..base.clone() },
+            SearchFilters { format: Some("MANGA".into()), ..base.clone() },
+            SearchFilters { min_score: Some(80), ..base.clone() },
+            SearchFilters { status: Some("RELEASING".into()), ..base.clone() },
+            SearchFilters { sort: Some("SCORE_DESC".into()), ..base.clone() },
+            SearchFilters { country: Some("KR".into()), ..base.clone() },
+        ];
+        for v in &variants {
+            assert_ne!(key(v), key(&base), "{v:?} shares the unfiltered cache entry");
+        }
     }
 
     #[test]

@@ -482,3 +482,26 @@ fn a_season_by_episode_pack_is_read_by_the_number_after_the_x() {
     assert_eq!(choose(&files, release, entry(), 4), Err(SelectError::NotFound));
     assert_eq!(search::filename_episode("Show 1920x1080 - 05.mkv"), Some(5));
 }
+
+/// Coalgirls' Valkyria Chronicles BD, file names verbatim from its .torrent:
+/// the number stands bare between the title and the tags.
+#[test]
+fn a_bare_number_before_the_tags_is_the_episode_inside_a_pack() {
+    let release = "[Coalgirls]_Valkyria_Chronicles_(1920x1080_Blu-Ray_FLAC)";
+    let files: Vec<(&str, u64)> = vec![
+        ("[Coalgirls]_Valkyria_Chronicles_(1920x1080_Blu-Ray_FLAC)/[Coalgirls]_Valkyria_Chronicles_01_(1920x1080_Blu-Ray_FLAC)_[A617F896].mkv", 540_000_000),
+        ("[Coalgirls]_Valkyria_Chronicles_(1920x1080_Blu-Ray_FLAC)/[Coalgirls]_Valkyria_Chronicles_02_(1920x1080_Blu-Ray_FLAC)_[47576D40].mkv", 560_000_000),
+        ("[Coalgirls]_Valkyria_Chronicles_(1920x1080_Blu-Ray_FLAC)/[Coalgirls]_Valkyria_Chronicles_12_(1920x1080_Blu-Ray_FLAC)_[DB4DA78E].mkv", 550_000_000),
+    ];
+    let entry = || (
+        vec!["Senjou no Valkyria".to_string(), "Valkyria Chronicles".to_string()],
+        EntryHint { kind: EntryKind::Tv, season: Some(1), season_at_least: None },
+        Some(26),
+    );
+    assert!(choose(&files, release, entry(), 1).unwrap().contains("_01_"));
+    assert!(choose(&files, release, entry(), 12).unwrap().contains("_12_"));
+    assert_eq!(choose(&files, release, entry(), 5), Err(SelectError::NotFound));
+    // One digit stays the title's own.
+    assert_eq!(bare_numbered("Kaiju No. 8 (1080p)"), None);
+    assert_eq!(bare_numbered("Senjou no Valkyria 3 [BD]"), None);
+}

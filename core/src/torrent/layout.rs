@@ -188,7 +188,20 @@ fn episode_of(path: &str, basename: &str) -> Option<i64> {
     if !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit()) && stem.len() <= 4 {
         return stem.parse().ok();
     }
-    search::filename_episode(path)
+    search::filename_episode(path).or_else(|| bare_numbered(stem))
+}
+
+/// "[Coalgirls]_Valkyria_Chronicles_01_(1920x1080_Blu-Ray_FLAC)_[A617F896]":
+/// the number with no dash or `E` before it, which older BD packs use. Every
+/// file of that 15-seeder pack read as episode-less and the resolve reported
+/// "episode 1 not found inside torrent" (2026-09-23). Only for files inside a
+/// torrent, never release names, and only two or three digits right before a
+/// bracket or the end: one digit is a title's own ("Kaiju No. 8", "Valkyria
+/// 3"), and a title number is never the last thing before the tags.
+fn bare_numbered(stem: &str) -> Option<i64> {
+    let spaced = stem.replace('_', " ");
+    let re = regex_lite::Regex::new(r"\s(\d{2,3})(?:[vV]\d)?\s*(?:[(\[]|$)").unwrap();
+    re.captures_iter(&spaced).last().and_then(|c| c[1].parse().ok())
 }
 
 /// Read what every file states about itself.

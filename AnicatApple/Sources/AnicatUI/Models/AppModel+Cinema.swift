@@ -117,9 +117,16 @@ extension AppModel {
     /// Cinema has no Home: it was the same shelves Films and Series draw,
     /// under a resume queue that now heads the Watching page. A restored
     /// or keyed `.upNext` lands on Films.
+    ///
+    /// Mac only. The phone's Up Next has a Films & TV page of its own, and
+    /// `.manga` is the phone's Read tab: switching to Films & TV on Up Next,
+    /// or launching in it, jumped to Read (owner, 2026-09-23). The same
+    /// mistake as the `setAppMode` line above, reached through the task.
     func redirectHomeInCinema() {
+        #if os(macOS)
         guard appMode == .cinema, currentNavSection == .upNext else { return }
         currentNavSection = .manga
+        #endif
     }
 
     /// Fills the cinema home rows.

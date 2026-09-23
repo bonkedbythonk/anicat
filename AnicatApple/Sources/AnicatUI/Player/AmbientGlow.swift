@@ -454,14 +454,20 @@ extension AmbientGlow {
     /// picture, which errs towards a hairline rather than towards glow
     /// drawn over the frame.
     static let minimumBoundaryContrast = 40.0
-    /// A row is judged on this much of each end of it, never on its middle.
-    /// The sampler reads the composited drawable, and mpv draws subtitles
-    /// at the bottom of the *picture* -- which, for a 2.35:1 scene inside a
-    /// 16:9 file, is the burned-in bar. Scanning the whole row, every line
-    /// of dialogue turned the bar into picture: the bottom band collapsed
+    /// A bottom row is judged on this much of each end of it, never on its
+    /// middle. The sampler reads the composited drawable, and mpv draws
+    /// subtitles at the bottom of the *picture* -- which, for a 2.35:1 scene
+    /// inside a 16:9 file, is the burned-in bar. Scanning the whole row, every
+    /// line of dialogue turned the bar into picture: the bottom band collapsed
     /// to the window's own letterbox while the line showed and snapped back
     /// when it cleared. Subtitles are centred; a fifth of the width at each
     /// end is clear of a two-line wrap at mpv's default margins.
+    ///
+    /// Top rows are read across their whole width. Judged on the ends too, a
+    /// binocular mask (Valkyria Chronicles episode 2 at 8:39) passed as bar
+    /// top and bottom, 0.055 and 0.062, and the glow painted over the picture
+    /// and the line of dialogue. Nothing draws dialogue at the top, so the
+    /// top can be strict, and `centredBars` then drops the unmatched bottom.
     static let rowEndFraction = 0.2
 
     /// The bars burned into `bytes`, a packed 32-bit thumbnail, as
@@ -481,8 +487,9 @@ extension AmbientGlow {
         // The columns a row is read on: `rowEndFraction` of each end, and
         // at least one column per end so a very narrow probe still scans.
         let endColumns = max(1, Int(Double(width) * rowEndFraction))
-        let rowColumns = Array(0..<min(endColumns, width)) + Array(max(endColumns, width - endColumns)..<width)
-        func rowIsBar(_ y: Int) -> Bool {
+        let rowEnds = Array(0..<min(endColumns, width)) + Array(max(endColumns, width - endColumns)..<width)
+        let wholeRow = Array(0..<width)
+        func rowIsBar(_ y: Int, _ rowColumns: [Int]) -> Bool {
             let base = y * stride
             for x in rowColumns {
                 let p = base + x * 4
@@ -498,7 +505,7 @@ extension AmbientGlow {
             }
             return true
         }
-        func rowLevel(_ y: Int) -> Double {
+        func rowLevel(_ y: Int, _ rowColumns: [Int]) -> Double {
             let base = y * stride
             var total = 0
             for x in rowColumns {
@@ -522,9 +529,9 @@ extension AmbientGlow {
         let maxRows = Int(Double(height) * maxInsetFraction)
         let maxColumns = Int(Double(width) * maxInsetFraction)
         var top = 0
-        while top < maxRows, rowIsBar(top) { top += 1 }
+        while top < maxRows, rowIsBar(top, wholeRow) { top += 1 }
         var bottom = 0
-        while bottom < maxRows, rowIsBar(height - 1 - bottom) { bottom += 1 }
+        while bottom < maxRows, rowIsBar(height - 1 - bottom, rowEnds) { bottom += 1 }
         var left = 0
         while left < maxColumns, columnIsBar(left) { left += 1 }
         var right = 0
@@ -534,8 +541,8 @@ extension AmbientGlow {
         if maxRows > 0, top == maxRows, bottom == maxRows { return nil }
         if maxColumns > 0, left == maxColumns, right == maxColumns { return nil }
         return AmbientContentInset(
-            top: refined(top, of: height, level: { rowLevel($0) }) / Double(height),
-            bottom: refined(bottom, of: height, level: { rowLevel(height - 1 - $0) }) / Double(height),
+            top: refined(top, of: height, level: { rowLevel($0, wholeRow) }) / Double(height),
+            bottom: refined(bottom, of: height, level: { rowLevel(height - 1 - $0, rowEnds) }) / Double(height),
             left: refined(left, of: width, level: { columnLevel($0) }) / Double(width),
             right: refined(right, of: width, level: { columnLevel(width - 1 - $0) }) / Double(width)
         )

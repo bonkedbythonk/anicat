@@ -206,6 +206,24 @@ struct AmbientGlowTests {
         #expect(inset.top == Double(barRows) / Double(height))
     }
 
+    /// Valkyria Chronicles episode 2 at 8:39, a view through binoculars: the
+    /// mask is black at both ends of the top and bottom rows and down the
+    /// middle, with the two lenses lit in between. Judged on the row ends
+    /// alone it read as 0.055 top and 0.062 bottom, matched closely enough
+    /// to pass as letterbox, and the glow painted over the picture and the
+    /// subtitle.
+    @Test("A vignette dark only at the row ends is not a letterbox")
+    func vignetteIsNotABar() throws {
+        let maskRows = 3, height = 36, width = 64
+        let (bytes, stride) = frame(width: width, height: height) { x, y in
+            let inMask = y < maskRows || y >= height - maskRows
+            let underLens = (x >= 16 && x < 24) || (x >= 40 && x < 48)
+            return inMask && !underLens ? (0, 0, 0) : (90, 160, 90)
+        }
+        let inset = try #require(AmbientGlow.contentInset(bytes: bytes, width: width, height: height, stride: stride))
+        #expect(AmbientGlow.centredBars(inset).isZero)
+    }
+
     @Test("Dark picture on one side of an axis is not a bar")
     func unmatchedBarsAreDropped() {
         let shot = AmbientGlow.centredBars(AmbientContentInset(top: 0.20, bottom: 0, left: 0, right: 0.16))

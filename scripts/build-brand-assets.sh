@@ -8,7 +8,7 @@
 # comment in project.yml claimed they could not drift. One vector and one
 # script that writes both is what actually stops it.
 #
-# Colours are Ink & Index (DESIGN.md): Aizome Indigo on washi paper for the
+# Colours are Ink & Index: Aizome Indigo on washi paper for the
 # light side, the dark-mode indigo on sumi ink for the dark side. No other
 # colour belongs in the mark (the One Accent Rule).
 #

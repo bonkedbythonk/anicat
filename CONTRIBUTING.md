@@ -2,8 +2,6 @@
 
 Thanks for wanting to help. Anicat is maintained by one person, so the most
 useful contributions are clear bug reports and small, focused pull requests.
-Everyone taking part is expected to follow the
-[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting a bug
 
@@ -19,12 +17,14 @@ fixable:
   refuses requests from signed-out users. Check
   [AniList's status](https://anilist.co) before reporting.
 
-Reports from the [nightly build](README.md#nightly-builds) are especially
+Reports from the nightly build (install line in the README, under "Other
+ways to install") are especially
 welcome: they are how bugs get caught before a version reaches everyone. A
 nightly's version ends in `-nightly.` and a timestamp; put the whole thing in
 the report.
 
-Security problems do not go in public issues; see [SECURITY.md](SECURITY.md).
+Security problems do not go in public issues; use GitHub's
+[private advisory form](https://github.com/bonkedbythonk/anicat/security/advisories/new).
 
 ## Suggesting a feature
 
@@ -36,13 +36,28 @@ or to share where content can be found will be closed.
 
 The app is a Swift package (`AnicatApple/`, SwiftUI with libmpv in-process)
 over a Rust engine (`core/`), joined by UniFFI. `ARCHITECTURE.md` has the full
-picture. Build prerequisites and commands are in the README under
-[Building from Source](README.md#building-from-source). In short:
+picture.
+
+You need macOS 15 on Apple silicon with Xcode's command line tools (Swift 6),
+and [Rust](https://rustup.rs/) stable with the Apple targets:
+
+```bash
+rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-tvos aarch64-apple-tvos-sim
+```
+
+No mpv install: libmpv and FFmpeg come from [MPVKit](https://github.com/mpvkit/MPVKit)
+as SwiftPM binaries (about 1.7 GB on first resolve).
 
 ```bash
 bash scripts/build-xcframework.sh   # after cloning, and after any change to core/src/ffi.rs
 cd AnicatApple && swift build --product Anicat
+bash dev-run.sh                     # copies the binary into dist/Anicat.app and opens it
 ```
+
+`scripts/package-anicat-macos-app.sh release` builds a standalone `.app` in
+`AnicatApple/dist/`. The iPhone and Apple TV apps are not released; build
+them from Xcode after `cd AnicatApple && xcodegen generate` (needs a full
+Xcode and [xcodegen](https://github.com/yonaskolb/XcodeGen)).
 
 Stale bindings link fine and then call the wrong symbols at runtime, so rerun
 `build-xcframework.sh` whenever `core/src/ffi.rs` or a type it exports changes.

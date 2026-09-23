@@ -58,4 +58,4 @@ verifiable in the source: the hosts are literals in `core/src/` and
 ## Questions
 
 Open an issue on the repository. Security matters go through GitHub's
-private advisory form; see [SECURITY.md](SECURITY.md).
+[private advisory form](https://github.com/bonkedbythonk/anicat/security/advisories/new).

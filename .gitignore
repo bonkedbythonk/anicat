@@ -127,11 +127,6 @@ docs/*
 
 mpv-shot*.jpg
 
-# Editor/tooling artifacts
-
-# Local impeccable config and hook cache
-.impeccable/
-
 # Native Apple refactor (core/ + AnicatApple/)
 core/target/
 AnicatApple/.build/

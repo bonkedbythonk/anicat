@@ -1,6 +1,6 @@
 # Screenshots
 
-The [README](../README.md#screenshots) has the short version: the home
+The [README](../README.md) has the short version: the home
 screen, a detail page, the player, manga and films. These are the rest.
 
 Every shot is from a build run with `ANICAT_SCREENSHOT_MODE=1`, which swaps

@@ -12,7 +12,7 @@ struct ServerPickerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("STREAM SERVERS")
+            Text("Stream servers")
                 .sumiTabularMono(size: 10.5, weight: .semibold)
                 .foregroundColor(SumiTheme.muted)
                 .padding(.horizontal, 14)

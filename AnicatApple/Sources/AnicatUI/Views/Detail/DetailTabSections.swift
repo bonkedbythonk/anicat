@@ -106,7 +106,7 @@ struct RelatedTabSection: View {
 
                 if !mainRels.isEmpty || prequel != nil || sequel != nil {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("SEASONS & ADAPTATIONS")
+                        Text("Seasons & adaptations")
                             .sumiTabularMono(size: 11)
                             .foregroundColor(SumiTheme.indigo)
 
@@ -122,10 +122,10 @@ struct RelatedTabSection: View {
                         } else if prequel != nil || sequel != nil {
                             HStack(spacing: 12) {
                                 if let prequel {
-                                    MediaDetailView.RelationCardView(relation: prequel, label: "PREVIOUS SEASON", leading: true, onSelect: onSelectRelation)
+                                    MediaDetailView.RelationCardView(relation: prequel, label: "Previous season", leading: true, onSelect: onSelectRelation)
                                 }
                                 if let sequel {
-                                    MediaDetailView.RelationCardView(relation: sequel, label: "NEXT SEASON", leading: false, onSelect: onSelectRelation)
+                                    MediaDetailView.RelationCardView(relation: sequel, label: "Next season", leading: false, onSelect: onSelectRelation)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -135,7 +135,7 @@ struct RelatedTabSection: View {
 
                 if !otherRels.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("OTHER RELATIONS")
+                        Text("Other relations")
                             .sumiTabularMono(size: 11)
                             .foregroundColor(SumiTheme.muted)
 
@@ -182,7 +182,7 @@ struct RecommendationsTabSection: View {
             SumiEmptyState(headline: "No Additional Content", detail: "No community recommendations found.")
         } else {
             VStack(alignment: .leading, spacing: 14) {
-                Text("RECOMMENDATIONS")
+                Text("Recommendations")
                     .sumiTabularMono(size: 11)
                     .foregroundColor(SumiTheme.indigo)
 

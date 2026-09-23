@@ -84,7 +84,7 @@ struct CinemaDetailsTabSection: View {
         ) {
             ForEach(facts, id: \.0) { label, value in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(label.uppercased())
+                    Text(label)
                         .sumiTabularMono(size: 9.5, weight: .bold)
                         .foregroundColor(SumiTheme.muted)
                     Text(value)
@@ -101,7 +101,7 @@ struct CinemaDetailsTabSection: View {
 
     private var seasons: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("SEASONS")
+            Text("Seasons")
                 .sumiTabularMono(size: 9.5, weight: .bold)
                 .foregroundColor(SumiTheme.muted)
 
@@ -133,7 +133,7 @@ struct CinemaDetailsTabSection: View {
 
     private var stills: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("STILLS")
+            Text("Stills")
                 .sumiTabularMono(size: 9.5, weight: .bold)
                 .foregroundColor(SumiTheme.muted)
 
@@ -150,7 +150,6 @@ struct CinemaDetailsTabSection: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: 8).stroke(SumiTheme.border, lineWidth: 1)
                         )
-                        .sumiShelfEdge()
                     }
                 }
                 .padding(.vertical, 2)

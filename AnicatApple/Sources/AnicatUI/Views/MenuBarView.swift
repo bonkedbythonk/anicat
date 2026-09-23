@@ -105,7 +105,7 @@ public struct MenuBarView: View {
             onSetSleepTimer(choice)
         } label: {
             Text(label)
-                .font(.sumiSans(size: 10.5, weight: armed ? .semibold : .regular))
+                .font(.system(size: 10.5, weight: armed ? .semibold : .regular))
                 .foregroundColor(armed ? SumiTheme.background : SumiTheme.muted)
                 .padding(.horizontal, 8)
                 .frame(height: 22)
@@ -130,7 +130,7 @@ public struct MenuBarView: View {
                         .foregroundColor(SumiTheme.indigo)
                 }
                 Text("Anicat")
-                    .font(.sumiSans(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
 
                 Spacer()
@@ -141,7 +141,7 @@ public struct MenuBarView: View {
             if let title = lastWatchedTitle, let ep = lastWatchedEpisode {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(nowPlaying == nil ? "Continue watching" : "Now playing")
-                        .sumiLabelCaps()
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(SumiTheme.muted.opacity(0.8))
 
                     Button(action: {
@@ -166,7 +166,7 @@ public struct MenuBarView: View {
                                     .foregroundColor(SumiTheme.foreground)
                                     .lineLimit(1)
                                 Text("Episode \(ep)")
-                                    .font(.sumiSans(size: 10.5))
+                                    .font(.system(size: 10.5))
                                     .foregroundColor(SumiTheme.muted)
                             }
 
@@ -195,7 +195,7 @@ public struct MenuBarView: View {
             if !upNext.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Up next")
-                        .sumiLabelCaps()
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(SumiTheme.muted.opacity(0.8))
 
                     ForEach(upNext) { item in
@@ -216,7 +216,7 @@ public struct MenuBarView: View {
                                         .font(.system(size: 12))
                                         .foregroundColor(SumiTheme.foreground)
                                         .lineLimit(1)
-                                    Text("EP \(item.episodeNumber)")
+                                    Text("Ep \(item.episodeNumber)")
                                         .sumiTabularMono(size: 9.5)
                                         .foregroundColor(SumiTheme.muted)
                                 }
@@ -241,12 +241,12 @@ public struct MenuBarView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         Text("Sleep timer")
-                            .sumiLabelCaps()
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(SumiTheme.muted.opacity(0.8))
                         Spacer(minLength: 4)
                         if let caption = sleepTimerCaption {
                             Text(caption)
-                                .font(.sumiSans(size: 10.5, weight: .medium))
+                                .font(.system(size: 10.5, weight: .medium))
                                 .foregroundColor(SumiTheme.indigo)
                         }
                     }
@@ -265,7 +265,7 @@ public struct MenuBarView: View {
             if !airingItems.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Airing today")
-                        .sumiLabelCaps()
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(SumiTheme.muted.opacity(0.8))
 
                     // Capped, and scrolled rather than grown: a heavy season
@@ -285,7 +285,7 @@ public struct MenuBarView: View {
                                                 .font(.system(size: 12))
                                                 .foregroundColor(SumiTheme.foreground)
                                                 .lineLimit(1)
-                                            Text("EP \(item.episodeNumber)")
+                                            Text("Ep \(item.episodeNumber)")
                                                 .sumiTabularMono(size: 9.5)
                                                 .foregroundColor(SumiTheme.muted)
                                         }

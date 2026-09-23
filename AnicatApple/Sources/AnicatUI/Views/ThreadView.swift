@@ -59,9 +59,11 @@ struct ThreadView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if !thread.categories.isEmpty {
-                HStack(spacing: 6) {
+                HStack(spacing: 12) {
                     ForEach(thread.categories, id: \.self) { category in
-                        StatusBadge(.format(category))
+                        Text(category)
+                            .sumiTabularMono(size: 10.5, weight: .semibold)
+                            .foregroundColor(SumiTheme.indigo)
                     }
                 }
             }
@@ -89,17 +91,9 @@ struct ThreadView: View {
                     .foregroundColor(SumiTheme.muted)
 
                 if thread.isLocked {
-                    HStack(spacing: 4) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 9))
-                        Text("Locked")
-                    }
-                    .sumiTabularMono(size: 10, weight: .medium)
-                    .foregroundColor(SumiTheme.warning)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(SumiTheme.warning.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    Text("Locked")
+                        .sumiTabularMono(size: 10, weight: .semibold)
+                        .foregroundColor(SumiTheme.warning)
                 }
 
                 Spacer(minLength: 0)

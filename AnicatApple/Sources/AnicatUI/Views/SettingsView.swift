@@ -26,14 +26,13 @@ public struct SettingsView: View {
     @State private var searchQuery = ""
     @Namespace private var settingsNavNamespace
 
-    // Maintenance card's "Copy Debug Report" feedback also renders in
+    // Maintenance card's "Copy debug report" feedback also renders in
     // `headerSection` above the tab rail, so it stays here rather than
     // moving into `MaintenanceTabSection` with the rest of that tab's state.
     @State private var copyFeedback: String? = nil
 
     enum MaintenanceActionState {
         case idle
-        case confirming
         case working
         case done
     }
@@ -148,46 +147,46 @@ public struct SettingsView: View {
 
     static let searchIndex: [IndexEntry] = [
         .init(label: "Theme", card: "Appearance", tab: .general),
-        .init(label: "Follow System Appearance", card: "Appearance", tab: .general),
+        .init(label: "Follow system appearance", card: "Appearance", tab: .general),
         .init(label: "Appearance", card: "Appearance", tab: .general),
-        .init(label: "Poster Accent", card: "Appearance", tab: .general),
-        .init(label: "Time Format", card: "Appearance", tab: .general),
-        .init(label: "Keyboard shortcuts cheat sheet", card: "Keyboard Shortcuts", tab: .general),
+        .init(label: "Poster accent", card: "Appearance", tab: .general),
+        .init(label: "Time format", card: "Appearance", tab: .general),
+        .init(label: "Keyboard shortcuts cheat sheet", card: "Keyboard shortcuts", tab: .general),
 
         .init(label: "Sub/Dub", card: "What plays", tab: .playback),
-        .init(label: "Auto-Skip Intros", card: "What plays", tab: .playback),
+        .init(label: "Auto-skip intros", card: "What plays", tab: .playback),
         .init(label: "Play the next episode", card: "What plays", tab: .playback),
         .init(label: "Next episode card", card: "What plays", tab: .playback),
-        .init(label: "GPU Upscaling", card: "Video", tab: .playback),
-        .init(label: "Subtitle Size", card: "Subtitles", tab: .playback),
-        .init(label: "Subtitle Style", card: "Subtitles", tab: .playback),
-        .init(label: "Hardware Decoding", card: "Video", tab: .playback),
-        .init(label: "Ambient Glow", card: "Video", tab: .playback),
+        .init(label: "GPU upscaling", card: "Video", tab: .playback),
+        .init(label: "Subtitle size", card: "Subtitles", tab: .playback),
+        .init(label: "Subtitle style", card: "Subtitles", tab: .playback),
+        .init(label: "Hardware decoding", card: "Video", tab: .playback),
+        .init(label: "Ambient glow", card: "Video", tab: .playback),
         .init(label: "Glow in windowed mode", card: "Video", tab: .playback),
         .init(label: "Dim keyboard backlight", card: "While watching", tab: .playback),
-        .init(label: "Night Hours", card: "While watching", tab: .playback),
-        .init(label: "Interface Sounds", card: "Sound & haptics", tab: .playback),
-        .init(label: "Sound Volume", card: "Sound & haptics", tab: .playback),
-        .init(label: "Haptic Feedback", card: "Sound & haptics", tab: .playback),
+        .init(label: "Night hours", card: "While watching", tab: .playback),
+        .init(label: "Interface sounds", card: "Sound & haptics", tab: .playback),
+        .init(label: "Sound volume", card: "Sound & haptics", tab: .playback),
+        .init(label: "Haptic feedback", card: "Sound & haptics", tab: .playback),
 
-        .init(label: "New Episode Alerts", card: "Notifications", tab: .sharing),
-        .init(label: "Discord Rich Presence", card: "Presence", tab: .sharing),
-        .init(label: "Show on Profile", card: "Presence", tab: .sharing),
+        .init(label: "New episode alerts", card: "Notifications", tab: .sharing),
+        .init(label: "Discord presence", card: "Presence", tab: .sharing),
+        .init(label: "Show on profile", card: "Presence", tab: .sharing),
         .init(label: "Paired iPhones", card: "Devices", tab: .sharing),
 
         .init(label: "AniList account", card: "AniList", tab: .accounts),
-        .init(label: "API Token", card: "AniList", tab: .accounts),
+        .init(label: "API token", card: "AniList", tab: .accounts),
         .init(label: "Your own TMDB key", card: "Cinema (TMDB)", tab: .accounts),
 
-        .init(label: "Official volumes", card: "Light Novel Sources", tab: .advanced),
+        .init(label: "Official volumes", card: "Light novel sources", tab: .advanced),
         .init(label: "Offline manga limit", card: "Storage", tab: .advanced),
         .init(label: "Streamed video cache", card: "Storage", tab: .advanced),
         .init(label: "Current version", card: "Updates", tab: .advanced),
         .init(label: "Acknowledgements", card: "Licenses", tab: .advanced),
-        .init(label: "Copy Debug Report", card: "Logs & Debugging", tab: .advanced),
-        .init(label: "Reveal Log File", card: "Logs & Debugging", tab: .advanced),
-        .init(label: "Clear Local Registry", card: "System Maintenance", tab: .advanced),
-        .init(label: "Reset Onboarding", card: "System Maintenance", tab: .advanced),
+        .init(label: "Copy debug report", card: "Logs & debugging", tab: .advanced),
+        .init(label: "Reveal log file", card: "Logs & debugging", tab: .advanced),
+        .init(label: "Clear local registry", card: "System maintenance", tab: .advanced),
+        .init(label: "Reset onboarding", card: "System maintenance", tab: .advanced),
     ]
 
     private var searchResults: some View {
@@ -239,16 +238,10 @@ public struct SettingsView: View {
     // MARK: - Header
     private var headerSection: some View {
         HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Settings")
-                    .font(.sumiHeading(size: 22, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundColor(SumiTheme.foreground)
-
-                Text("Configure playback, appearance, and account")
-                    .font(.system(size: 13))
-                    .foregroundColor(SumiTheme.muted)
-            }
+            Text("Settings")
+                .font(.sumiHeading(size: 22, weight: .semibold))
+                .tracking(-0.3)
+                .foregroundColor(SumiTheme.foreground)
 
             Spacer()
 

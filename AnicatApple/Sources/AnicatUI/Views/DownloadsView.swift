@@ -227,13 +227,13 @@ public struct DownloadsView: View {
                     // in reasonable time" -- while the debug build compiled
                     // it fine, so it only ever failed at packaging time.
                     let isNovel = chapter.kind == .novel
-                    let heading = isNovel ? chapter.chapterNumber : "CH " + chapter.chapterNumber
+                    let heading = isNovel ? chapter.chapterNumber : "Ch " + chapter.chapterNumber
                     let unit = isNovel ? "chapters" : "pages"
                     let detail = "\(chapter.pageCount) " + unit + " · " + Self.size(chapter.bytes)
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
                             // A novel row's "number" is the volume's name, so
-                            // prefixing it with CH would read "CH Volume 1".
+                            // prefixing it with Ch would read "Ch Volume 1".
                             Text(heading)
                                 .font(.system(size: 13.5, weight: .medium))
                                 .foregroundColor(SumiTheme.foreground)
@@ -346,16 +346,14 @@ private struct DownloadRow: View {
         .padding(10)
         .background(SumiTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        // Leaving the row and coming back should not still be one click away
-        // from deleting it.
-        .sumiOnHover { inside in if !inside { removeConfirming = false } }
-        // No hover on a phone, so the armed state timed out never: a
-        // Remove tapped once and forgotten was still one tap from deleting
-        // the file an hour later.
-        .task(id: removeConfirming) {
-            guard removeConfirming else { return }
-            try? await Task.sleep(for: .seconds(4))
-            if !Task.isCancelled { removeConfirming = false }
+        .confirmationDialog(
+            "Remove \(item.title) episode \(item.episode)?",
+            isPresented: $removeConfirming,
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) { onRemove?(item) }
+        } message: {
+            Text("The downloaded file is deleted to free the space.")
         }
     }
 
@@ -374,39 +372,20 @@ private struct DownloadRow: View {
             }
             #endif
 
-            if let onRemove, isRemovable {
-                // Two-step confirm, same shape as Settings' maintenance
-                // buttons: the label becomes the question rather than a sheet
-                // interrupting a page that is otherwise all one-click rows.
+            if onRemove != nil, isRemovable {
                 Button {
-                    if removeConfirming {
-                        onRemove(item)
-                        removeConfirming = false
-                    } else {
-                        removeConfirming = true
-                    }
+                    removeConfirming = true
                 } label: {
-                    Group {
-                        if removeConfirming {
-                            Text("Remove?")
-                                .font(.system(size: 11, weight: .semibold))
-                        } else {
-                            Image(systemName: "trash")
-                                .font(.system(size: 11.5))
-                        }
-                    }
-                    .foregroundColor(SumiTheme.dangerLight)
-                    .frame(height: 24)
-                    .padding(.horizontal, removeConfirming ? 8 : 6)
-                    .background(removeConfirming ? SumiTheme.danger.opacity(0.18) : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                    .contentShape(Rectangle())
+                    Image(systemName: "trash")
+                        .font(.system(size: 11.5))
+                        .foregroundColor(SumiTheme.dangerLight)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help(removeConfirming ? "Click again to remove this row" : "Remove from the list")
+                .help("Remove from the list")
             }
         }
-        .animation(.snappy, value: removeConfirming)
     }
 
     private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {

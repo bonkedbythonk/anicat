@@ -31,6 +31,12 @@ public struct UpNextQueueView: View {
         /// from); the cover stands in. Optional for the `HomeCache` reason.
         public let bannerURL: URL?
 
+        /// Three nouns, not two: cinema's queue passes "FILM" as well as "EP".
+        var countLabel: String {
+            let noun = unit == "CH" ? "Chapter" : unit == "FILM" ? "Film" : "Episode"
+            return "\(noun) \(nextEpisodeOrChapter)\(totalCount > 0 ? " of \(totalCount)" : "")"
+        }
+
         public init(
             id: Int64,
             title: String,
@@ -187,18 +193,13 @@ public struct UpNextQueueView: View {
 
     /// The queue's first row as a wide card: the banner behind, the still,
     /// the title at heading size, the meta line, the progress capsule and
-    /// the Resume pill. Same callbacks and the same still-to-video morph as
+    /// the Resume button. Same callbacks and the same still-to-video morph as
     /// a plain row, so playing from it looks like playing from any row.
     private struct SpotlightRow: View {
         let entry: QueueEntry
         let morphSource: EpisodeMorphSource?
         let onSelect: () -> Void
         let onPlay: () -> Void
-
-        @State private var isHovered = false
-        @State private var isPlayHovered = false
-        @State private var ripplePressLocation: CGPoint = .zero
-        @State private var ripplePressCount = 0
 
         private static let height: CGFloat = 176
 
@@ -220,7 +221,10 @@ public struct UpNextQueueView: View {
                                 let pct = min(max(CGFloat(entry.progressPercent / 100.0), 0), 1)
                                 ZStack(alignment: .leading) {
                                     Capsule().fill(SumiTheme.foreground.opacity(0.12))
-                                    AnimatedProgressCapsule(pct: pct)
+                                    Capsule()
+                                        .fill(SumiTheme.indigo)
+                                        .scaleEffect(x: pct, y: 1, anchor: .leading)
+                                        .animation(.smooth, value: pct)
                                 }
                                 .frame(maxWidth: 360)
                                 .frame(height: 3)
@@ -240,7 +244,6 @@ public struct UpNextQueueView: View {
             .frame(minHeight: Self.height)
             .background(backdrop)
             .background(SumiTheme.card)
-            .stableHover { isHovered = $0 }
         }
 
         /// The banner, or the cover when the title has no snapshot yet,
@@ -262,8 +265,6 @@ public struct UpNextQueueView: View {
                 .overlay {
                     CachedAsyncImage(url: entry.bannerURL ?? entry.thumbnailURL, maxPixelSize: 1600) { image in
                         image.resizable().aspectRatio(contentMode: .fill)
-                            .scaleEffect(isHovered ? 1.03 : 1)
-                            .animation(.smooth(duration: 0.6), value: isHovered)
                     } placeholder: {
                         Color.clear
                     }
@@ -297,16 +298,13 @@ public struct UpNextQueueView: View {
 
         private var metaLine: some View {
             HStack(spacing: 14) {
-                Text("\(entry.unit) \(entry.nextEpisodeOrChapter)\(entry.totalCount > 0 ? " / \(entry.totalCount)" : "")")
+                Text(entry.countLabel)
                     .sumiTabularMono(size: 12)
                     .foregroundColor(SumiTheme.muted)
                 if entry.isRewatch == true {
                     Text("Rewatch")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundColor(SumiTheme.muted)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+                        .sumiTabularMono(size: 12, weight: .semibold)
+                        .foregroundColor(SumiTheme.indigo)
                 }
                 if let airingAt = entry.nextAiringAt, entry.isAwaitingEpisode {
                     Text("Airs \(AppModel.countdown(to: Date(timeIntervalSince1970: TimeInterval(airingAt))))")
@@ -326,27 +324,15 @@ public struct UpNextQueueView: View {
 
         private var playButton: some View {
             Button(action: onPlay) {
-                HStack(spacing: 7) {
-                    Image(systemName: entry.isAwaitingEpisode ? "info.circle" : (entry.unit == "CH" ? "book.fill" : "play.fill"))
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(entry.isAwaitingEpisode ? "Details" : (entry.unit == "CH" ? "Continue" : "Resume"))
-                        .font(.system(size: 13, weight: .bold))
+                if entry.isAwaitingEpisode {
+                    Text("Details").fontWeight(.semibold)
+                } else {
+                    Label(entry.unit == "CH" ? "Continue" : "Resume", systemImage: entry.unit == "CH" ? "book.fill" : "play.fill")
+                        .fontWeight(.semibold)
                 }
-                .foregroundColor(SumiTheme.background)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 11)
-                .background(isPlayHovered ? SumiTheme.indigo.opacity(0.85) : SumiTheme.indigo)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                .contentShape(Rectangle())
-                .rippleOnPress(at: ripplePressLocation, trigger: ripplePressCount)
             }
-            .buttonStyle(.sumiPressable)
-            .sumiSpatialTap { location in
-            ripplePressLocation = location
-            ripplePressCount += 1
-        }
-            .animation(.snappy, value: isPlayHovered)
-            .stableHover { isPlayHovered = $0 }
+            .sumiPrimaryButton()
+            .controlSize(.large)
         }
     }
 
@@ -360,14 +346,6 @@ public struct UpNextQueueView: View {
         let onPlay: () -> Void
 
         @State private var isHovered = false
-        @State private var isPlayHovered = false
-        /// Where the Play/Resume press landed and a counter that bumps on
-        /// each one — read by `rippleOnPress` below. Local to the button's
-        /// own bounds, not the row's: the button is small and off to the
-        /// side, and a location captured from the row would put the ripple
-        /// wherever the row itself was tapped, not where Play was.
-        @State private var ripplePressLocation: CGPoint = .zero
-        @State private var ripplePressCount = 0
 
         var body: some View {
             HStack(spacing: 16) {
@@ -418,17 +396,14 @@ public struct UpNextQueueView: View {
                             // same treatment, so "New episode out" arrived as
                             // wide-tracked monospace capitals.
                             HStack(spacing: 16) {
-                                Text("\(entry.unit) \(entry.nextEpisodeOrChapter)\(entry.totalCount > 0 ? " / \(entry.totalCount)" : "")")
+                                Text(entry.countLabel)
                                     .sumiTabularMono(size: 11.5)
                                     .foregroundColor(SumiTheme.muted)
 
                                 if entry.isRewatch == true {
                                     Text("Rewatch")
-                                        .font(.system(size: 10.5, weight: .semibold))
-                                        .foregroundColor(SumiTheme.muted)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 1)
-                                        .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+                                        .sumiTabularMono(size: 11.5, weight: .semibold)
+                                        .foregroundColor(SumiTheme.indigo)
                                 }
 
                                 if let airingAt = entry.nextAiringAt, entry.isAwaitingEpisode {
@@ -453,7 +428,10 @@ public struct UpNextQueueView: View {
                                 ZStack(alignment: .leading) {
                                     Capsule()
                                         .fill(SumiTheme.foreground.opacity(0.1))
-                                    AnimatedProgressCapsule(pct: pct)
+                                    Capsule()
+                                        .fill(SumiTheme.indigo)
+                                        .scaleEffect(x: pct, y: 1, anchor: .leading)
+                                        .animation(.smooth, value: pct)
                                 }
                                 .frame(maxWidth: 420)
                                 .frame(height: 2)
@@ -467,30 +445,9 @@ public struct UpNextQueueView: View {
                 .buttonStyle(.sumiPressable)
                 .contentShape(Rectangle())
 
-                // Dedicated Play / Resume Button
-                Button(action: onPlay) {
-                    Text(entry.isAwaitingEpisode ? "Details" : isFirst ? (entry.unit == "CH" ? "Continue" : "Resume") : (entry.unit == "CH" ? "Read" : "Play"))
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(isFirst ? SumiTheme.background : (isPlayHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(isFirst ? (isPlayHovered ? SumiTheme.indigo.opacity(0.85) : SumiTheme.indigo) : (isPlayHovered ? SumiTheme.card : Color.clear))
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(isFirst ? Color.clear : (isPlayHovered ? SumiTheme.border.opacity(0.8) : SumiTheme.border), lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
-                        .rippleOnPress(at: ripplePressLocation, trigger: ripplePressCount)
-                }
-                .buttonStyle(.sumiPressable)
-                .contentShape(Rectangle())
-                .sumiSpatialTap { location in
-            ripplePressLocation = location
-            ripplePressCount += 1
-        }
-                .animation(.snappy, value: isPlayHovered)
-                .stableHover { isPlayHovered = $0 }
+                Button(entry.isAwaitingEpisode ? "Details" : isFirst ? (entry.unit == "CH" ? "Continue" : "Resume") : (entry.unit == "CH" ? "Read" : "Play"), action: onPlay)
+                    .sumiSecondaryButton()
+                    .controlSize(.large)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -498,67 +455,6 @@ public struct UpNextQueueView: View {
             .animation(.snappy, value: isHovered)
             .stableHover { hovering in
                 isHovered = hovering
-            }
-        }
-    }
-}
-
-/// Same overshoot-then-settle treatment as `MediaCard`'s poster tick, on the
-/// row's own capsule shape. Two separate structs rather than one shared
-/// shape-agnostic helper: `Rectangle` and `Capsule` both conform to `Shape`
-/// but the fill views around them differ enough (this one has no dark
-/// track drawn by the same call) that a generic wrapper bought no real
-/// sharing, just an extra type parameter at both call sites.
-///
-/// `keyframeAnimator(initialValue:trigger:)` restarts from the literal
-/// `initialValue` argument on every retrigger rather than from wherever the
-/// interpolation currently sits, so `initialValue: pct` — already the *new*
-/// value by the time a retrigger fires — snapped the capsule straight to
-/// its target and only overshot from there. `settledPct` is held back until
-/// the animation chasing the old target has actually finished so the next
-/// restart still has a true old value to animate from; see the longer
-/// version of this note on `MediaCard.AnimatedProgressFill`.
-private struct AnimatedProgressCapsule: View {
-    let pct: CGFloat
-
-    @State private var settledPct: CGFloat = 0
-    @State private var trigger = 0
-    /// Only an increase gets the overshoot; a decrease still bumps
-    /// `trigger` so the capsule visually reaches the lower `pct`, just
-    /// along a plain settle with nothing to overshoot past.
-    @State private var isIncrease = true
-
-    var body: some View {
-        Group {
-            if MotionPolicy.reduce {
-                Capsule()
-                    .fill(SumiTheme.indigo)
-                    .scaleEffect(x: pct, y: 1, anchor: .leading)
-                    .animation(.sumi(.pop), value: pct)
-            } else {
-                Capsule()
-                    .fill(SumiTheme.indigo)
-                    .keyframeAnimator(initialValue: settledPct, trigger: trigger) { content, value in
-                        content.scaleEffect(x: value, y: 1, anchor: .leading)
-                    } keyframes: { _ in
-                        if isIncrease {
-                            CubicKeyframe(min(pct + 0.04, 1.0), duration: 0.4)
-                            SpringKeyframe(pct, duration: 0.2)
-                        } else {
-                            CubicKeyframe(pct, duration: 0.25)
-                        }
-                    }
-            }
-        }
-        .onAppear { settledPct = pct }
-        .onChange(of: pct) { oldValue, newValue in
-            guard newValue != oldValue else { return }
-            isIncrease = newValue > oldValue
-            trigger += 1
-            // Matches the keyframe track's own total duration above.
-            let settleDelay = isIncrease ? 0.6 : 0.25
-            DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) {
-                settledPct = newValue
             }
         }
     }

@@ -233,7 +233,7 @@ public struct StatsView: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(SumiTheme.foreground)
                 .contentTransition(.numericText())
-            Text(label.uppercased())
+            Text(label)
                 .sumiTabularMono(size: 10)
                 .foregroundColor(SumiTheme.muted)
         }

@@ -295,6 +295,10 @@ struct PlayerBottomBar: View {
             }
             .sumiTabularMono(size: 11.5)
             .fixedSize()
+            // The row packs at 2pt for the icons' sake, which left the
+            // duration touching the start of the bar.
+            .padding(.leading, 4)
+            .padding(.trailing, 12)
 
             // Progress bar fills the middle, between the transport cluster
             // (left) and the options cluster (right) rather than a whole

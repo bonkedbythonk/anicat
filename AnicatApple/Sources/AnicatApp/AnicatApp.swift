@@ -317,6 +317,14 @@ struct AnicatApp: App {
                 Button("Close") { NSApp.keyWindow?.performClose(nil) }
                     .keyboardShortcut("w", modifiers: .command)
             }
+            // Settings is a section of the main window, not a scene of its
+            // own; without this the app menu had no Settings item and Cmd-,
+            // did nothing.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { showSettings(model) }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
+            AppCommands(model: model)
         }
         // First launch, before any autosaved frame exists; after that the
         // autosaved frame wins, so resizing once is enough. 1440x900 read
@@ -439,31 +447,7 @@ struct MenuBarPopoverContent: View {
                 NSApp.activate(ignoringOtherApps: true)
                 AppWindow.main?.makeKeyAndOrderFront(nil)
             },
-            onOpenSettings: {
-                NSApp.activate(ignoringOtherApps: true)
-                // The actual bug this fixes: `PlayerView` used to render
-                // unconditionally over everything whenever a stream was
-                // active, regardless of `currentNavSection` — so opening
-                // Settings from the menu bar while something was playing
-                // switched the section underneath but the video stayed
-                // covering the whole window with no visible way back to
-                // the app. Minimizing (not stopping) it is what actually
-                // uncovers Settings.
-                // Same as above: the curve lives in `PlayerView`.
-                model.isPlayerMinimized = true
-                // `RootView`'s detail page renders whenever
-                // `selectedMediaDetails` is set, regardless of
-                // `currentNavSection` -- the sidebar's own click handler
-                // already clears it for exactly this reason. This entry
-                // point skipped that, so opening Settings from the menu
-                // bar while a title's detail page was open silently did
-                // nothing: the section changed underneath, but the
-                // detail page kept rendering over it.
-                model.clearPersonPages()
-                model.clearDetail()
-                model.currentNavSection = .settings
-                AppWindow.main?.makeKeyAndOrderFront(nil)
-            },
+            onOpenSettings: { showSettings(model) },
             onQuit: {
                 NSApp.terminate(nil)
             }
@@ -471,6 +455,91 @@ struct MenuBarPopoverContent: View {
     }
 }
 
+
+
+/// Settings from the menu bar popover or the app menu's Settings item.
+@MainActor
+private func showSettings(_ model: AppModel) {
+    NSApp.activate(ignoringOtherApps: true)
+    // The actual bug this fixes: `PlayerView` used to render
+    // unconditionally over everything whenever a stream was
+    // active, regardless of `currentNavSection` — so opening
+    // Settings from the menu bar while something was playing
+    // switched the section underneath but the video stayed
+    // covering the whole window with no visible way back to
+    // the app. Minimizing (not stopping) it is what actually
+    // uncovers Settings.
+    // Same as above: the curve lives in `PlayerView`.
+    model.isPlayerMinimized = true
+    // `RootView`'s detail page renders whenever
+    // `selectedMediaDetails` is set, regardless of
+    // `currentNavSection` -- the sidebar's own click handler
+    // already clears it for exactly this reason. This entry
+    // point skipped that, so opening Settings from the menu
+    // bar while a title's detail page was open silently did
+    // nothing: the section changed underneath, but the
+    // detail page kept rendering over it.
+    model.clearPersonPages()
+    model.clearDetail()
+    model.currentNavSection = .settings
+    AppWindow.main?.makeKeyAndOrderFront(nil)
+}
+
+/// The Go and Playback menus. Navigation and player keys used to exist only
+/// as bare letters caught by a key monitor, discoverable through nothing but
+/// the "?" overlay; a Mac app lists its commands in the menu bar. The bare
+/// keys still work -- these add the Command forms and a place to find them.
+private struct AppCommands: Commands {
+    let model: AppModel
+
+    var body: some Commands {
+        CommandMenu("Go") {
+            Button("Back") { model.popBackOne() }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(model.selectedMediaDetails == nil)
+            Button("Forward") { model.goForwardDetail() }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(!model.canGoForward || model.isPersonPageOpen)
+            Divider()
+            ForEach(1...9, id: \.self) { number in
+                if let section = SidebarView.NavSection.fromNumberKey(number, mode: model.appMode) {
+                    Button(section.label(for: model.appMode)) {
+                        withAnimation(.smooth) { model.navigate(to: section) }
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
+                }
+            }
+            Divider()
+            Button("Search Anything…") {
+                withAnimation(.snappy) { model.paletteOpen.toggle() }
+            }
+            .keyboardShortcut("k", modifiers: .command)
+        }
+        // No key equivalents here: a bare-key menu shortcut such as Space is
+        // matched before a focused text field sees the key, so typing a space
+        // in Search would pause the video. The keys stay on the player's own
+        // monitor; the menu is where they can be found and clicked.
+        CommandMenu("Playback") {
+            let isPlaying = model.activeStreamURL != nil
+            Button("Play/Pause") { model.playerController.togglePlayPause() }
+                .disabled(!isPlaying)
+            Button("Next Episode") { model.playerController.nextEpisode() }
+                .disabled(!isPlaying)
+            Button("Previous Episode") { model.playerController.previousEpisode() }
+                .disabled(!isPlaying)
+            Divider()
+            Button("Mute") { model.playerController.toggleMute() }
+                .disabled(!isPlaying)
+            Button("Rotate Video") { model.playerController.cycleSideways() }
+                .disabled(!isPlaying)
+        }
+        CommandGroup(replacing: .help) {
+            Button("Keyboard Shortcuts") {
+                withAnimation(.snappy) { model.shortcutsOpen = true }
+            }
+        }
+    }
+}
 
 #else
 
@@ -547,3 +616,4 @@ struct AnicatApp: App {
     }
 }
 #endif
+

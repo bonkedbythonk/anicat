@@ -261,7 +261,7 @@ private struct ScheduleDaySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: SumiTheme.spaceMd) {
-            Text(group.day.uppercased())
+            Text(group.day)
                 .sumiTabularMono(size: 13, weight: .bold)
                 .foregroundColor(SumiTheme.indigo)
                 .padding(.horizontal, SumiTheme.spaceMd)

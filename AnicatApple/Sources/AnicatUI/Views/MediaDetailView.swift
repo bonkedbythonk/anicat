@@ -369,10 +369,6 @@ public struct MediaDetailView: View {
     }
 
     @State private var selectedTab: DetailTab = .episodes
-    /// Where the Play button was pressed and how many times, for the Metal
-    /// ripple (`rippleOnPress`); same wiring as `MediaCard`.
-    @State private var playPressLocation: CGPoint = .zero
-    @State private var playPressCount = 0
     let onTabChanged: (DetailTab) -> Void
     // Backed by the same defaults key Settings writes and `AppModel` reads
     // when building a `StreamRequest`, rather than view-local state nothing
@@ -391,9 +387,6 @@ public struct MediaDetailView: View {
     /// Set from the scroll offset, but only ever as this Bool — see
     /// `ScrollPassedThreshold` for why the offset itself never lands in state.
     @State private var isHeaderCompact = false
-    /// +1 when the incoming tab sits further along the bar, -1 when it sits
-    /// behind: which way `tabTransition` slides.
-    @State private var tabSlide: CGFloat = 1
     /// The trailer plays over the banner. `trailerFromHover` separates the
     /// two ways it can be open: one that closes itself when the pointer
     /// leaves, and one the viewer asked for and has to close by hand.
@@ -401,6 +394,7 @@ public struct MediaDetailView: View {
     @State private var trailerFromHover = false
     @State private var isPosterHovered = false
     @State private var isTrailerHovered = false
+    @State private var isTrailerLinkHovered = false
     @State private var studioWorks: [StudioWorkItem] = []
     /// The confirmation that a download was queued. Nothing else on the page
     /// moved at the tap: the button became a 15pt ring on a row that may be
@@ -421,8 +415,6 @@ public struct MediaDetailView: View {
     /// same hue is drawn at 0.87 brightness on Ink and 0.54 on Paper.
     @State private var themeStore = ThemeStore.shared
     @Namespace private var detailTabNamespace
-    @Namespace private var viewModeNamespace
-    @Namespace private var audioNamespace
 
     public init(
         details: HeroBanner.Details,
@@ -620,40 +612,16 @@ public struct MediaDetailView: View {
                             Button {
                                 Platform.openExternal(watchURL)
                             } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.up.right")
-                                        .font(.system(size: 10, weight: .bold))
-                                    Text("Watch on \(TrailerPlayer.siteName(details.trailerSite))")
-                                        .sumiTabularMono(size: 11)
-                                }
-                                .foregroundColor(SumiTheme.foreground)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(SumiTheme.card)
-                                .clipShape(Capsule())
-                                .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
-                                .contentShape(Capsule())
+                                Text("Watch on \(TrailerPlayer.siteName(details.trailerSite))")
                             }
-                            .buttonStyle(.sumiPressable)
+                            .sumiSecondaryButton()
                         }
                         Button {
                             closeTrailer()
                         } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text("Close")
-                                    .sumiTabularMono(size: 11)
-                            }
-                            .foregroundColor(SumiTheme.foreground)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(SumiTheme.card)
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
-                            .contentShape(Capsule())
+                            Text("Close")
                         }
-                        .buttonStyle(.sumiPressable)
+                        .sumiSecondaryButton()
                         .sumiKeyboardShortcut(.escape, modifiers: [])
                     }
                     .frame(width: width)
@@ -666,7 +634,7 @@ public struct MediaDetailView: View {
     // MARK: - Trailer
 
     /// False for a title with no trailer, and for one whose trailer is on a
-    /// site `TrailerPlayer` cannot embed — the pill would otherwise open a
+    /// site `TrailerPlayer` cannot embed — the link would otherwise open a
     /// black rectangle.
     private var hasTrailer: Bool {
         guard let trailerId = details.trailerId else { return false }
@@ -683,7 +651,7 @@ public struct MediaDetailView: View {
     private func followTrailerHover() async {
         guard hasTrailer else { return }
         if isTrailerRegionHovered {
-            // Reduced motion leaves the pill and nothing else: video that
+            // Reduced motion leaves the link and nothing else: video that
             // starts because a pointer came to rest is precisely the
             // movement the setting asks not to be shown.
             guard isPosterHovered, !isTrailerOpen, !MotionPolicy.reduce else { return }
@@ -691,7 +659,7 @@ public struct MediaDetailView: View {
             guard !Task.isCancelled else { return }
             openTrailer(fromHover: true)
         } else {
-            // A trailer the viewer opened from the pill stays until they
+            // A trailer the viewer opened from the link stays until they
             // close it; only the one hover opened closes itself.
             guard isTrailerOpen, trailerFromHover else { return }
             try? await Task.sleep(for: .seconds(2))
@@ -1023,19 +991,10 @@ public struct MediaDetailView: View {
                 Button {
                     startingPlayback { onPlayEpisode(episode) }
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill").font(.system(size: 10))
-                        Text(compactActionLabel)
-                    }
-                    .font(.system(size: 11.5, weight: .bold))
-                    .foregroundColor(SumiTheme.background)
-                    .padding(.horizontal, 12)
-                    .frame(height: 26)
-                    .background(SumiTheme.indigo)
-                    .clipShape(Capsule())
-                    .contentShape(Capsule())
+                    Label(compactActionLabel, systemImage: "play.fill")
+                        .fontWeight(.semibold)
                 }
-                .buttonStyle(.sumiPressable)
+                .sumiPrimaryButton()
             }
         }
         .padding(.horizontal, 56)
@@ -1059,8 +1018,8 @@ public struct MediaDetailView: View {
     /// hero cannot disagree about whether there is a resume point.
     private var compactActionLabel: String {
         guard let target = resumeTarget else { return "Play" }
-        if resumeSecondsForTarget != nil { return "Resume EP \(target.number)" }
-        return "EP \(target.number)"
+        if resumeSecondsForTarget != nil { return "Resume Ep \(target.number)" }
+        return "Ep \(target.number)"
     }
 
     // MARK: - Content
@@ -1127,15 +1086,11 @@ public struct MediaDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if !details.genres.isEmpty {
-                genrePills
+                genreLine
             } else if isLoading {
-                HStack(spacing: 6) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(SumiTheme.foregroundWash)
-                            .frame(width: 54, height: 20)
-                    }
-                }
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(SumiTheme.foregroundWash)
+                    .frame(width: 180, height: 12)
             }
 
             actionBar
@@ -1182,10 +1137,10 @@ public struct MediaDetailView: View {
         if details.prequel != nil || details.sequel != nil {
             HStack(spacing: 12) {
                 if let prequel = details.prequel {
-                    relationCard(prequel, label: "PREVIOUS SEASON", leading: true)
+                    relationCard(prequel, label: "Previous season", leading: true)
                 }
                 if let sequel = details.sequel {
-                    relationCard(sequel, label: "NEXT SEASON", leading: false)
+                    relationCard(sequel, label: "Next season", leading: false)
                 }
                 Spacer(minLength: 0)
             }
@@ -1219,7 +1174,7 @@ public struct MediaDetailView: View {
                         studioPageActions.open(studio.id)
                     } label: {
                         HStack(spacing: 6) {
-                            Text("MORE FROM \(studio.name.uppercased())")
+                            Text("More from \(studio.name)")
                                 .sumiTabularMono(size: 11)
                                 .foregroundColor(SumiTheme.indigo)
                             Image(systemName: "chevron.right")
@@ -1281,64 +1236,77 @@ public struct MediaDetailView: View {
         }
     }
 
-    /// The one line of state above the title. Everything is muted mono except
-    /// the three things worth colouring: the format, the airing status, and
-    /// the counts.
+    private enum MetaPart {
+        case text(String, Color, bold: Bool)
+        case studio
+        case trailer
+    }
+
+    /// Only the parts this title has, so the separators fall between present
+    /// items: a dot drawn beside an absent year or score left "TV · · 2024".
+    private var metaParts: [MetaPart] {
+        var parts: [MetaPart] = []
+        if let format = details.format {
+            parts.append(.text(MediaCard.displayFormat(format), SumiTheme.foreground, bold: true))
+        }
+        switch details.status {
+        case "RELEASING": parts.append(.text("Airing", SumiTheme.indigo, bold: true))
+        case "FINISHED": parts.append(.text("Finished", SumiTheme.success, bold: true))
+        default: break
+        }
+        if let count = details.episodeCount, count > 0 {
+            let unit = (episodes.isEmpty && !mangaChapters.isEmpty) ? "chapter" : "episode"
+            parts.append(.text("\(count) \(unit)\(count == 1 ? "" : "s")", SumiTheme.indigo, bold: true))
+        }
+        if let year = details.year {
+            parts.append(.text(String(year), SumiTheme.muted, bold: false))
+        }
+        if !mainStudios.isEmpty || details.studio != nil {
+            parts.append(.studio)
+        }
+        if let score = details.averageScore, score > 0 {
+            parts.append(.text("\(score)%", SumiTheme.indigo, bold: true))
+        }
+        if hasTrailer {
+            parts.append(.trailer)
+        }
+        return parts
+    }
+
+    /// The one line of state above the title. Everything is muted except
+    /// the things worth colouring: the format, the airing status, the counts.
     private var metaLine: some View {
-        HStack(spacing: 12) {
-            if let format = details.format {
-                Text(format)
-                    .foregroundColor(SumiTheme.foreground)
-                    .fontWeight(.semibold)
-            } else if isLoading {
+        HStack(spacing: 0) {
+            let parts = metaParts
+            if details.format == nil && isLoading {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(SumiTheme.foregroundWash)
                     .frame(width: 44, height: 12)
+                    .padding(.trailing, 12)
                 RoundedRectangle(cornerRadius: 3)
                     .fill(SumiTheme.foregroundWash)
                     .frame(width: 52, height: 12)
             }
-
-            switch details.status {
-            case "RELEASING":
-                Text("AIRING")
-                    .foregroundColor(SumiTheme.indigo)
-                    .fontWeight(.semibold)
-            case "FINISHED":
-                Text("FINISHED")
-                    .foregroundColor(SumiTheme.success)
-                    .fontWeight(.semibold)
-            default:
-                EmptyView()
+            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                if index > 0 {
+                    Text("·")
+                        .foregroundColor(SumiTheme.muted.opacity(0.6))
+                        .padding(.horizontal, 7)
+                }
+                switch part {
+                case let .text(label, color, bold):
+                    Text(label)
+                        .foregroundColor(color)
+                        .fontWeight(bold ? .semibold : .regular)
+                case .studio:
+                    studioLine
+                case .trailer:
+                    trailerLink
+                }
             }
-
-            if let count = details.episodeCount, count > 0 {
-                let unit = (episodes.isEmpty && !mangaChapters.isEmpty) ? "CH" : "EP"
-                Text("\(count) \(unit)")
-                    .foregroundColor(SumiTheme.indigo)
-                    .fontWeight(.semibold)
-            }
-
-            if let year = details.year {
-                Text(String(year))
-                    .foregroundColor(SumiTheme.muted)
-            }
-
-            studioLine
-
-            if let score = details.averageScore, score > 0 {
-                Text("SCORE \(score)%")
-                    .foregroundColor(SumiTheme.indigo)
-                    .fontWeight(.semibold)
-            }
-
-            if hasTrailer {
-                trailerPill
-            }
-
             Spacer(minLength: 0)
         }
-        .sumiTabularMono(size: 10.5)
+        .sumiTabularMono(size: 12)
     }
 
     /// The studios, each opening its own page. Falls back to the plain
@@ -1375,7 +1343,7 @@ public struct MediaDetailView: View {
     /// The shelf's subject: one studio, so the heading can name it.
     private var shelfStudio: HeroBanner.Details.StudioRef? { mainStudios.first }
 
-    private var trailerPill: some View {
+    private var trailerLink: some View {
         Button {
             if isTrailerOpen {
                 closeTrailer()
@@ -1383,37 +1351,25 @@ public struct MediaDetailView: View {
                 openTrailer(fromHover: false)
             }
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: isTrailerOpen ? "xmark" : "play.rectangle.fill")
-                    .font(.system(size: 9))
-                Text("TRAILER")
-            }
-            .sumiTabularMono(size: 10)
-            .foregroundColor(isTrailerOpen ? SumiTheme.background : SumiTheme.indigo)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(isTrailerOpen ? SumiTheme.indigo : SumiTheme.indigo.opacity(0.12))
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(SumiTheme.indigo.opacity(0.35), lineWidth: 1))
-            .contentShape(Capsule())
+            Text(isTrailerOpen ? "Close trailer" : "Trailer")
+                .foregroundColor(SumiTheme.indigo)
+                .fontWeight(.semibold)
+                .underline(isTrailerLinkHovered, color: SumiTheme.indigo.opacity(0.6))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)
-        .animation(.sumi(.pop), value: isTrailerOpen)
+        .stableHover { isTrailerLinkHovered = $0 }
+        .animation(.sumi(.pop), value: isTrailerLinkHovered)
     }
 
-    private var genrePills: some View {
-        HStack(spacing: 6) {
-            ForEach(details.genres.prefix(6), id: \.self) { genre in
-                Text(genre)
-                    .font(.system(size: 11))
-                    .foregroundColor(SumiTheme.muted)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 3)
-                    .background(SumiTheme.foreground.opacity(0.05))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
-            }
+    /// Only called with at least one genre.
+    private var genreLine: some View {
+        let genres = details.genres.prefix(6)
+        return genres.dropFirst().reduce(Text(genres.first ?? "")) { line, genre in
+            line + Text("  /  ").foregroundColor(SumiTheme.muted.opacity(0.4)) + Text(genre)
         }
+        .font(.system(size: 12))
+        .foregroundColor(SumiTheme.muted)
     }
 
     private var actionBar: some View {
@@ -1422,29 +1378,11 @@ public struct MediaDetailView: View {
                 Button {
                     if let episode = resumeTarget { startingPlayback { onPlayEpisode(episode) } }
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "play.fill").font(.system(size: 13))
-                        Text(primaryActionLabel)
-                    }
-                    .font(.system(size: 13.5, weight: .bold))
-                    .foregroundColor(SumiTheme.background)
-                    .padding(.horizontal, 20)
-                    .frame(height: 40)
-                    .background(SumiTheme.indigo)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
-                    .rippleOnPress(at: playPressLocation, trigger: playPressCount)
-                    .shadow(color: SumiTheme.indigo.opacity(0.10), radius: 10, y: 3)
-                    .contentShape(Rectangle())
+                    Label(primaryActionLabel, systemImage: "play.fill")
+                        .fontWeight(.semibold)
                 }
-                .buttonStyle(.sumiPressable)
-                // Alongside the Button's own tap, never instead of it: the
-                // ripple wants the press point, the Button decides the play.
-                .sumiSpatialTap { location in
-                    playPressLocation = location
-                    playPressCount += 1
-                }
+                .sumiPrimaryButton()
                 .disabled(resumeTarget == nil)
-                .opacity(resumeTarget == nil ? 0.5 : 1)
 
                 // Only offered when the primary button actually says
                 // "Resume": next to "Play Episode 1" there is nothing to
@@ -1453,47 +1391,23 @@ public struct MediaDetailView: View {
                     Button {
                         startingPlayback { onPlayEpisodeFromStart(episode) }
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "gobackward").font(.system(size: 12))
-                            Text("Start over")
-                        }
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(SumiTheme.foreground)
-                        .padding(.horizontal, 16)
-                        .frame(height: 40)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
+                        Text("Start over")
                     }
-                    .buttonStyle(.sumiPressable)
+                    .sumiSecondaryButton()
                 }
             } else if let target = resumeChapter {
                 Button {
                     onReadChapter(target)
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "book.fill").font(.system(size: 13))
-                        // "Continue", not "Resume": a chapter has no saved
-                        // page offset to come back to, and the Up Next shelf
-                        // already draws the same distinction by unit.
-                        Text(isContinuingChapters
-                             ? "Continue Chapter \(target.number)"
-                             : "Read Chapter \(target.number)")
-                    }
-                    .font(.system(size: 13.5, weight: .bold))
-                    .foregroundColor(SumiTheme.background)
-                    .padding(.horizontal, 20)
-                    .frame(height: 40)
-                    .background(SumiTheme.indigo)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
-                    .shadow(color: SumiTheme.indigo.opacity(0.10), radius: 10, y: 3)
-                    .contentShape(Rectangle())
+                    // "Continue", not "Resume": a chapter has no saved
+                    // page offset to come back to, and the Up Next shelf
+                    // already draws the same distinction by unit.
+                    Label(isContinuingChapters
+                          ? "Continue Chapter \(target.number)"
+                          : "Read Chapter \(target.number)", systemImage: "book.fill")
+                        .fontWeight(.semibold)
                 }
-                .buttonStyle(.sumiPressable)
+                .sumiPrimaryButton()
 
                 // Same rule as the episode branch above: offered only when
                 // the primary button points somewhere other than chapter 1,
@@ -1502,23 +1416,9 @@ public struct MediaDetailView: View {
                     Button {
                         onReadChapter(first)
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "gobackward").font(.system(size: 12))
-                            Text("Start over")
-                        }
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(SumiTheme.foreground)
-                        .padding(.horizontal, 16)
-                        .frame(height: 40)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
+                        Text("Start over")
                     }
-                    .buttonStyle(.sumiPressable)
+                    .sumiSecondaryButton()
                 }
             }
 
@@ -1535,7 +1435,7 @@ public struct MediaDetailView: View {
                     // Called, not passed by name: a reference to the function
                     // loses its defaulted `manga:` and no longer matches
                     // `map`'s single-argument closure.
-                    Text(cinemaListStatus.map { Self.statusLabel($0) } ?? "Add to List")
+                    Text(cinemaListStatus.map { Self.statusLabel($0) } ?? "Add to list")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(SumiTheme.foreground)
                         .padding(.horizontal, 16)
@@ -1567,7 +1467,7 @@ public struct MediaDetailView: View {
                 // already draws its own disclosure caret, so this used to show
                 // two arrows stacked next to each other.
                 Text(Self.statusLabel(details.listStatus, manga: isMangaMedia))
-                    .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
                     .padding(.horizontal, 16)
                     .frame(height: 40)
@@ -1598,7 +1498,7 @@ public struct MediaDetailView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .animation(.bouncy, value: details.isFavourite)
+            .help(details.isFavourite ? "Remove from favourites" : "Add to favourites")
             }
 
             // AniList only. A TMDB title is on no AniList list and never was
@@ -1632,6 +1532,7 @@ public struct MediaDetailView: View {
 
             Spacer(minLength: 0)
         }
+        .controlSize(.extraLarge)
     }
 
     private static let listStatusOptions = ["CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "REPEATING"]
@@ -2012,21 +1913,21 @@ public struct MediaDetailView: View {
     private func tabLabel(_ tab: DetailTab) -> String {
         switch tab {
         case .episodes:
-            if episodes.isEmpty { return "EPISODES" }
-            if isSingleSitting { return "FILM" }
-            if isAwaitingSeasonBreakdown { return "EPISODES" }
+            if episodes.isEmpty { return "Episodes" }
+            if isSingleSitting { return "Film" }
+            if isAwaitingSeasonBreakdown { return "Episodes" }
             // The show-wide total read as a lie once the list under it
             // started scoping to one TMDB season: "EPISODES (37)" over six
             // rows for The Grand Tour's season 1. Count what's on screen.
-            return "EPISODES (\(episodesForSelectedSeason.count))"
-        case .manga: return mangaChapters.isEmpty ? "CHAPTERS" : "CHAPTERS (\(mangaChapters.count))"
-        case .characters: return characters.isEmpty ? "CAST & STAFF" : "CAST & STAFF (\(characters.count))"
+            return "Episodes (\(episodesForSelectedSeason.count))"
+        case .manga: return mangaChapters.isEmpty ? "Chapters" : "Chapters (\(mangaChapters.count))"
+        case .characters: return characters.isEmpty ? "Cast & staff" : "Cast & staff (\(characters.count))"
         case .related:
             let count = relations.isEmpty ? ((details.prequel != nil ? 1 : 0) + (details.sequel != nil ? 1 : 0)) : relations.count
-            return count > 0 ? "RELATED (\(count))" : "RELATED"
-        case .discussions: return discussions.isEmpty ? "DISCUSSIONS" : "DISCUSSIONS (\(discussions.count))"
-        case .details: return "DETAILS"
-        case .more: return recommendations.isEmpty ? "MORE" : "MORE (\(recommendations.count))"
+            return count > 0 ? "Related (\(count))" : "Related"
+        case .discussions: return discussions.isEmpty ? "Discussions" : "Discussions (\(discussions.count))"
+        case .details: return "Details"
+        case .more: return recommendations.isEmpty ? "More" : "More (\(recommendations.count))"
         }
     }
 
@@ -2046,15 +1947,7 @@ public struct MediaDetailView: View {
                         Button {
                             if activeTab != tab {
                                 SumiHaptics.selection()
-                                let current = availableTabs.firstIndex(of: activeTab) ?? 0
-                                let target = availableTabs.firstIndex(of: tab) ?? 0
                                 withAnimation(.snappy) {
-                                    // Written in the same transaction as the
-                                    // tab itself: the incoming view is built
-                                    // during this update and captures the
-                                    // direction then, so a separate write can
-                                    // land late and slide the wrong way.
-                                    tabSlide = target >= current ? 1 : -1
                                     selectedTab = tab
                                 }
                             }
@@ -2099,84 +1992,34 @@ public struct MediaDetailView: View {
                     // Audio toggle
                     if tracksOnAniList {
                     HStack(spacing: 6) {
-                        Text("AUDIO:")
+                        Text("Audio:")
                             .sumiTabularMono(size: 10.5, weight: .bold)
                             .foregroundColor(SumiTheme.muted)
                             .lineLimit(1)
 
-                        HStack(spacing: 2) {
+                        Picker("Audio", selection: Binding(
+                            get: { selectedAudioType },
+                            set: { storedSubDub = $0.storedValue }
+                        )) {
                             ForEach(AudioType.allCases, id: \.self) { audio in
-                                let isSelected = selectedAudioType == audio
-                                Button {
-                                    if selectedAudioType != audio {
-                                        SumiHaptics.selection()
-                                        withAnimation(.snappy) {
-                                            storedSubDub = audio.storedValue
-                                        }
-                                    }
-                                } label: {
-                                    Text(audio.rawValue)
-                                        .sumiTabularMono(size: 10.5, weight: isSelected ? .bold : .regular)
-                                        .foregroundColor(isSelected ? SumiTheme.indigo : SumiTheme.muted)
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background {
-                                            if isSelected {
-                                                RoundedRectangle(cornerRadius: 4)
-                                                    .fill(SumiTheme.indigo.opacity(0.18))
-                                                    .matchedGeometryEffect(id: "audioPill", in: audioNamespace)
-                                            }
-                                        }
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.sumiPressable)
+                                Text(audio.rawValue).tag(audio)
                             }
                         }
-                        .animation(.snappy, value: selectedAudioType)
-                        .padding(2)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1))
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .controlSize(.small)
                     }
                     .fixedSize(horizontal: true, vertical: false)
                 }
 
-                    // View Mode toggle: Cards | Compact
-                    HStack(spacing: 2) {
+                    Picker("View", selection: $selectedViewMode) {
                         ForEach(EpisodeViewMode.allCases, id: \.self) { mode in
-                            let isSelected = selectedViewMode == mode
-                            Button {
-                                if selectedViewMode != mode {
-                                    SumiHaptics.selection()
-                                    withAnimation(.snappy) {
-                                        selectedViewMode = mode
-                                    }
-                                }
-                            } label: {
-                                Text(mode.rawValue)
-                                    .font(.system(size: 10.5, weight: isSelected ? .bold : .medium))
-                                    .foregroundColor(isSelected ? SumiTheme.foreground : SumiTheme.muted)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 3)
-                                    .background {
-                                        if isSelected {
-                                            RoundedRectangle(cornerRadius: 4)
-                                                .fill(SumiTheme.foreground.opacity(0.12))
-                                                .matchedGeometryEffect(id: "viewModePill", in: viewModeNamespace)
-                                        }
-                                    }
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.sumiPressable)
+                            Text(mode.rawValue).tag(mode)
                         }
                     }
-                    .animation(.snappy, value: selectedViewMode)
-                    .padding(2)
-                    .background(SumiTheme.card)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1))
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
                     .fixedSize(horizontal: true, vertical: false)
                 }
                 .fixedSize(horizontal: true, vertical: false)
@@ -2190,21 +2033,9 @@ public struct MediaDetailView: View {
         .overlay(Rectangle().fill(SumiTheme.border).frame(height: 1), alignment: .bottom)
     }
 
-    /// Content arrives from the side it is coming from: from the right for a
-    /// tab further along the bar, from the left for one behind it.
-    ///
-    /// Only the arriving side slides. A view's removal transition is recorded
-    /// when that view was last built — that is, during the *previous* switch,
-    /// carrying the `tabSlide` from then — so a departing panel given a
-    /// direction leaves the way the last change went, and reversing direction
-    /// sent both panels the same way at once.
-    private var tabTransition: AnyTransition {
-        if reduceMotion { return .opacity }
-        return .asymmetric(
-            insertion: .opacity.combined(with: .offset(x: 12 * tabSlide)),
-            removal: .opacity
-        )
-    }
+    /// A crossfade. Tabs used to slide in 12pt from the side they sat on,
+    /// a web carousel habit; a Mac tab view swaps its content in place.
+    private var tabTransition: AnyTransition { .opacity }
 
     @ViewBuilder
     private var tabContent: some View {
@@ -2302,7 +2133,7 @@ public struct MediaDetailView: View {
         var body: some View {
             Button(action: onRead) {
                 HStack(spacing: 12) {
-                    Text("CH \(chapter.number)")
+                    Text("Ch \(chapter.number)")
                         .sumiTabularMono(size: 11.5)
                         .foregroundColor(SumiTheme.indigo)
                     VStack(alignment: .leading, spacing: 2) {
@@ -2707,7 +2538,7 @@ private struct EpisodeListSection: View {
     }
 
     private func groupLabel(firstNumber: Int, count: Int) -> String {
-        "EPISODES \(firstNumber)-\(firstNumber + count - 1)"
+        "Episodes \(firstNumber)-\(firstNumber + count - 1)"
     }
 
     var body: some View {
@@ -2728,8 +2559,7 @@ private struct EpisodeListSection: View {
                         #if os(tvOS)
                         VStack(alignment: .leading, spacing: 8) {
                             Text(groupLabel(firstNumber: group.firstNumber, count: group.episodes.count))
-                                .font(.sumiMono(size: 11, weight: .semibold))
-                                .tracking(1)
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.vertical, 4)
                             if selectedViewMode == .compact {
@@ -2755,8 +2585,7 @@ private struct EpisodeListSection: View {
                             }
                         } label: {
                             Text(groupLabel(firstNumber: group.firstNumber, count: group.episodes.count))
-                                .font(.sumiMono(size: 11, weight: .semibold))
-                                .tracking(1)
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.vertical, 4)
                         }
@@ -2815,16 +2644,27 @@ private struct CompactEpisodeRow: View, Equatable {
     }
 
     var body: some View {
+        row
+            #if os(macOS)
+            .contextMenu {
+                Button(isResumeTarget ? "Resume" : "Play", action: onPlay)
+                Button(episode.isWatched ? "Mark as unwatched" : "Mark as watched") {
+                    onToggleWatched(!episode.isWatched)
+                }
+            }
+            #endif
+    }
+
+    private var row: some View {
         HStack(spacing: 12) {
             Button(action: onPlay) {
                 HStack(spacing: 12) {
-                    // Episode Number Badge
-                    Text("\(episode.number)")
-                        .sumiTabularMono(size: 11, weight: .bold)
-                        .foregroundColor(isResumeTarget ? SumiTheme.background : (episode.isWatched ? SumiTheme.muted.opacity(0.6) : SumiTheme.muted))
-                        .frame(width: 28, height: 28)
-                        .background(isResumeTarget ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.07))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    // Fixed width so titles start on one edge whether the
+                    // number has one digit or four.
+                    Text("Ep \(episode.number)")
+                        .sumiTabularMono(size: 11, weight: .semibold)
+                        .foregroundColor(isResumeTarget ? SumiTheme.indigo : (episode.isWatched ? SumiTheme.muted.opacity(0.6) : SumiTheme.muted))
+                        .frame(width: 52, height: 28, alignment: .leading)
 
                     // Title
                     Text(episode.title)
@@ -2834,15 +2674,10 @@ private struct CompactEpisodeRow: View, Equatable {
 
                     Spacer(minLength: 8)
 
-                    // Resume pill or runtime
                     if isResumeTarget, let seconds = resumeSeconds, seconds > 0 {
                         Text("Resume \(MediaDetailView.clock(seconds))")
-                            .sumiTabularMono(size: 10, weight: .medium)
+                            .sumiTabularMono(size: 10.5, weight: .semibold)
                             .foregroundColor(SumiTheme.indigo)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(SumiTheme.indigo.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
 
                     if let runtime = episode.runtimeMinutes, runtime > 0 {
@@ -2971,6 +2806,24 @@ private struct EpisodeRow: View, Equatable {
     }
 
     var body: some View {
+        row
+            #if os(macOS)
+            // The hover-only buttons on the right are the same actions; a
+            // Mac user right-clicks a row before hunting for them.
+            .contextMenu {
+                Button(isResumeTarget ? "Resume" : "Play", action: onPlay)
+                Button(episode.isWatched ? "Mark as unwatched" : "Mark as watched") {
+                    onToggleWatched(!episode.isWatched)
+                }
+                if case .notStarted = downloadState {
+                    Button("Download", action: onDownload)
+                }
+                Button("Choose release…", action: onOpenServerPicker)
+            }
+            #endif
+    }
+
+    private var row: some View {
         HStack(alignment: .top, spacing: 10) {
             Button(action: onPlay) {
                 HStack(alignment: .top, spacing: 14) {
@@ -3109,7 +2962,7 @@ private struct EpisodeRow: View, Equatable {
 
     private var metaLine: some View {
         HStack(spacing: 6) {
-            Text("EP \(episode.number)")
+            Text("Ep \(episode.number)")
                 .foregroundColor(SumiTheme.indigo)
                 .fontWeight(.semibold)
             if let airDate = episode.airDate {

@@ -145,8 +145,8 @@ public struct WeekStrip: View {
                         .font(.system(size: 11.5))
                         .foregroundColor(isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.8))
                     + Text(" ")
-                    + Text("EP \(item.episodeNumber)")
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                    + Text("Ep \(item.episodeNumber)")
+                        .font(.system(size: 8.5, weight: .medium)).monospacedDigit()
                         .foregroundColor(SumiTheme.muted)
                 )
                 .lineLimit(2)
@@ -162,7 +162,6 @@ public struct WeekStrip: View {
                 RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
                     .fill(SumiTheme.indigo.opacity(isHovered ? 0.12 : 0))
             )
-            .scaleEffect(isHovered ? 1.03 : 1.0, anchor: .leading)
             .stableHover { isHovered = $0 }
             .animation(.snappy, value: isHovered)
         }

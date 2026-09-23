@@ -100,7 +100,7 @@ struct PlaybackTabSection: View {
                 .background(SumiTheme.border)
 
             SettingField(
-                label: "Auto-Skip Intros",
+                label: "Auto-skip intros",
                 description: "Automatically skip openings and endings using AniSkip. The video player also displays an on-screen skip button when an intro or outro is detected."
             ) {
                 SumiSwitch(isOn: $autoSkipIntro)
@@ -132,7 +132,7 @@ struct PlaybackTabSection: View {
             description: "How the picture is decoded and drawn. Both of the first two cost GPU time."
         ) {
             SettingField(
-                label: "GPU Upscaling",
+                label: "GPU upscaling",
                 description: "Anime4K — real-time neural upscaling that sharpens lines and adds depth with minimal battery impact. Renders directly in-app via libmpv Metal shaders. Best on screens above 1080p; smaller displays won't show much difference."
             ) {
                 SumiSwitch(isOn: $gpuUpscaling)
@@ -142,7 +142,7 @@ struct PlaybackTabSection: View {
                 .background(SumiTheme.border)
 
             SettingField(
-                label: "Hardware Decoding",
+                label: "Hardware decoding",
                 description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
             ) {
                 SumiSwitch(isOn: $hardwareDecoding)
@@ -152,7 +152,7 @@ struct PlaybackTabSection: View {
                 .background(SumiTheme.border)
 
             SettingField(
-                label: "Ambient Glow",
+                label: "Ambient glow",
                 description: "Lights the black bars in fullscreen with the colours at the picture's edges, like a backlight behind a TV."
             ) {
                 SumiSwitch(isOn: $ambientGlow)
@@ -245,7 +245,7 @@ struct PlaybackTabSection: View {
                         .background(SumiTheme.border)
 
                     SettingField(
-                        label: "Night Hours",
+                        label: "Night hours",
                         description: "Local time. The window may cross midnight."
                     ) {
                         HStack(spacing: 8) {
@@ -267,7 +267,7 @@ struct PlaybackTabSection: View {
 
         SettingsCard(title: "Sound & haptics") {
             SettingField(
-                label: "Interface Sounds",
+                label: "Interface sounds",
                 description: "Short synthesised blips when a tab changes, the player opens or closes, a back swipe lands and an episode is marked watched. Off by default, because every one of them fires during ordinary navigation."
             ) {
                 SumiSwitch(isOn: $interfaceSounds)
@@ -278,7 +278,7 @@ struct PlaybackTabSection: View {
                     .background(SumiTheme.border)
 
                 SettingField(
-                    label: "Sound Volume",
+                    label: "Sound volume",
                     description: "Relative to the system output level. These play over a running episode, so the default sits low."
                 ) {
                     HStack(spacing: 12) {
@@ -299,18 +299,8 @@ struct PlaybackTabSection: View {
                             AppSounds.tabChange.play()
                         } label: {
                             Text("Test")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(SumiTheme.foreground)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(SumiTheme.background)
-                                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                        .stroke(SumiTheme.border, lineWidth: 1)
-                                )
                         }
-                        .buttonStyle(.sumiPressable)
+                        .sumiSecondaryButton()
                     }
                 }
             }
@@ -319,7 +309,7 @@ struct PlaybackTabSection: View {
                 .background(SumiTheme.border)
 
             SettingField(
-                label: "Haptic Feedback",
+                label: "Haptic feedback",
                 description: "A trackpad tick when a back swipe crosses the distance that commits it, and when a seek snaps to a chapter or skip boundary. A Mac without a Force Touch trackpad feels nothing either way."
             ) {
                 SumiSwitch(isOn: $haptics)

@@ -71,7 +71,7 @@ struct TVSettingsView: View {
                         Text(model.viewer?.name ?? "AniList User")
                             .font(.system(size: 28, weight: .semibold))
                         Text("Signed in")
-                            .font(.system(size: 20, design: .monospaced))
+                            .font(.system(size: 20))
                             .foregroundStyle(.secondary)
                     }
                 }

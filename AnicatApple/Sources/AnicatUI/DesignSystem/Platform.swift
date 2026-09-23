@@ -142,21 +142,6 @@ public extension View {
         #endif
     }
 
-    /// The press location for a ripple, where there is a pointer or a
-    /// finger to have one. `SpatialTapGesture` is not declared on tvOS,
-    /// where a press comes from the remote and has no location; the
-    /// ripple simply never fires there.
-    @ViewBuilder
-    func sumiSpatialTap(onEnded action: @escaping (CGPoint) -> Void) -> some View {
-        #if os(tvOS)
-        self
-        #else
-        self.simultaneousGesture(
-            SpatialTapGesture().onEnded { value in action(value.location) }
-        )
-        #endif
-    }
-
     /// `keyboardShortcut` where there is a keyboard. Not declared on tvOS.
     @ViewBuilder
     func sumiKeyboardShortcut(_ key: KeyEquivalent, modifiers: EventModifiers = .command) -> some View {

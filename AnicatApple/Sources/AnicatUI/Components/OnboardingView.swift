@@ -186,12 +186,12 @@ public struct OnboardingView: View {
                 .padding(.bottom, 6)
 
             Text(step.title)
-                .font(.sumiSans(size: 22, weight: .semibold))
+                .font(.system(size: 22, weight: .semibold))
                 .tracking(-0.3)
                 .foregroundColor(SumiTheme.foreground)
 
             Text(step.subtitle)
-                .font(.sumiSans(size: 13))
+                .font(.system(size: 13))
                 .foregroundColor(SumiTheme.muted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -201,14 +201,9 @@ public struct OnboardingView: View {
 
     private var footer: some View {
         VStack(spacing: 14) {
-            HStack(spacing: 6) {
-                ForEach(Array(steps.enumerated()), id: \.element.rawValue) { index, _ in
-                    Capsule()
-                        .fill(index == stepIndex ? SumiTheme.indigo : SumiTheme.muted.opacity(0.3))
-                        .frame(width: index == stepIndex ? 18 : 6, height: 6)
-                        .animation(.snappy, value: stepIndex)
-                }
-            }
+            Text("Step \(stepIndex + 1) of \(steps.count)")
+                .sumiTabularMono(size: 11)
+                .foregroundColor(SumiTheme.muted)
 
             HStack(spacing: 10) {
                 if stepIndex > 0 {
@@ -217,30 +212,26 @@ public struct OnboardingView: View {
                         withAnimation(.smooth(duration: 0.28)) { stepIndex -= 1 }
                     } label: {
                         Text("Back")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(SumiTheme.muted)
-                            .padding(.horizontal, 16)
-                            .frame(height: 34)
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.sumiPressable)
+                    .sumiSecondaryButton()
                 }
 
-                Button {
+                let continueButton = Button {
                     SumiHaptics.selection()
                     if isLastStep { model.completeOnboarding() } else { advance() }
                 } label: {
                     Text(continueLabel)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(SumiTheme.background)
-                        .padding(.horizontal, 22)
-                        .frame(height: 34)
-                        .background(SumiTheme.indigo)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .contentShape(Rectangle())
-                    }
-                .buttonStyle(.sumiPressable)
+                }
+                // Signed out on the Connect step, Connect is the step's
+                // action and this is the way past it; two filled buttons
+                // on one screen left neither reading as the default.
+                if step == .connect, !model.isSignedIn {
+                    continueButton.sumiSecondaryButton()
+                } else {
+                    continueButton.fontWeight(.semibold).sumiPrimaryButton()
+                }
             }
+            .controlSize(.large)
 
             Button {
                 model.completeOnboarding()
@@ -299,17 +290,19 @@ public struct OnboardingView: View {
     private var howItWorksStep: some View {
         VStack(alignment: .leading, spacing: 16) {
             infoRow(
-                "arrow.down.circle",
+                "Watching",
                 "Episodes and films come from public torrents",
                 "They start playing while they download. Anicat never uploads and opens no port, but your IP address is visible to the other peers and to your internet provider, as with any torrent client. Whether that is fine where you live, and whether to use a VPN, is your call."
             )
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
             infoRow(
-                "book",
+                "Reading",
                 "Manga and light novels come from the web",
                 "Read from third-party sites as you open them. Nothing is hosted by Anicat."
             )
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
             infoRow(
-                "list.bullet",
+                "Account",
                 "AniList is optional",
                 Self.leavesDeviceCaption
             )
@@ -367,22 +360,12 @@ public struct OnboardingView: View {
                         Platform.openExternal(Self.authorizeURL)
                         tokenFieldFocused = true
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "globe").font(.system(size: 13, weight: .semibold))
-                            Text("Open AniList").font(.system(size: 13, weight: .semibold))
-                        }
-                        .foregroundColor(SumiTheme.indigo)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 9)
-                        .background(SumiTheme.indigo.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm + 2))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm + 2)
-                                .stroke(SumiTheme.indigo.opacity(0.30), lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
+                        // Secondary: step 2's Connect and the footer's
+                        // Continue are this screen's prominent buttons.
+                        Text("Open AniList")
                     }
-                    .buttonStyle(.sumiPressable)
+                    .sumiSecondaryButton()
+                    .controlSize(.large)
                 }
 
                 numbered(2, "Paste the page you were sent to") {
@@ -423,19 +406,12 @@ public struct OnboardingView: View {
                                     if isConnecting {
                                         ProgressView().controlSize(.small).frame(width: 60)
                                     } else {
-                                        Text("Connect").font(.system(size: 12, weight: .semibold))
+                                        Text("Connect").fontWeight(.semibold)
                                     }
                                 }
-                                .foregroundColor(SumiTheme.background)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(SumiTheme.indigo)
-                                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.sumiPressable)
+                            .sumiPrimaryButton()
                             .disabled(trimmedInput.isEmpty || isConnecting)
-                            .opacity(trimmedInput.isEmpty ? 0.5 : 1)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -636,9 +612,7 @@ public struct OnboardingView: View {
             Text("\(n)")
                 .sumiTabularMono(size: 11, weight: .semibold)
                 .foregroundColor(SumiTheme.indigo)
-                .frame(width: 22, height: 22)
-                .background(SumiTheme.indigo.opacity(0.12))
-                .clipShape(Circle())
+                .frame(width: 22, alignment: .leading)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 10) {
                 Text(title)
@@ -683,18 +657,13 @@ public struct OnboardingView: View {
         #endif
     }
 
-    /// `toggleRow` with the switch replaced by a glyph, drawn the way
-    /// `numbered` draws its badge, for a row that states rather than asks.
-    private func infoRow(_ symbol: String, _ title: String, _ caption: String) -> some View {
+    /// `toggleRow` without the switch, for a row that states rather than asks.
+    private func infoRow(_ kicker: String, _ title: String, _ caption: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(SumiTheme.indigo)
-                .frame(width: 22, height: 22)
-                .background(SumiTheme.indigo.opacity(0.12))
-                .clipShape(Circle())
-                .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
+                Text(kicker)
+                    .sumiTabularMono(size: 10, weight: .semibold)
+                    .foregroundColor(SumiTheme.indigo)
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(SumiTheme.foreground)
@@ -719,9 +688,7 @@ public struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
-            Toggle("", isOn: binding)
-                .labelsHidden()
-                .toggleStyle(.switch)
+            SumiSwitch(isOn: binding)
         }
     }
 
@@ -765,10 +732,9 @@ public struct OnboardingView: View {
     @ViewBuilder
     private func preview<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("PREVIEW")
+            Text("Preview")
                 .sumiTabularMono(size: 9, weight: .semibold)
                 .foregroundColor(SumiTheme.muted.opacity(0.7))
-                .tracking(0.8)
             content()
         }
         .padding(.top, 2)
@@ -801,43 +767,33 @@ public struct OnboardingView: View {
 
 // MARK: - Previews drawn, not photographed
 
-/// A 16:9 stand-in for the player, optionally wearing the ambient glow. The
-/// glow is the same idea the real one implements -- the picture's colour
-/// spilled outward -- drawn here from the mock's own palette so the step can
-/// show what the switch does with no video playing.
+/// A stand-in for the player, optionally wearing the ambient glow: the space
+/// around the picture lit with an indigo tint, so the step can show what the
+/// switch does with no video playing. The picture is inset whether the glow
+/// is on or not, so flipping the switch lights the surround without moving
+/// the picture. The surround stays inside the frame: pushed past its edge the
+/// way the old blurred one was, a hard edge sits over the "Preview" caption
+/// 6pt above.
 private struct MockFrame<Content: View>: View {
     var glow: Bool = false
     @ViewBuilder var content: () -> Content
-    @State private var drift = false
 
     var body: some View {
-        ZStack {
-            if glow {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.36, green: 0.42, blue: 0.85),
-                                     Color(red: 0.75, green: 0.35, blue: 0.55),
-                                     Color(red: 0.30, green: 0.55, blue: 0.70)],
-                            startPoint: drift ? .topLeading : .bottomTrailing,
-                            endPoint: drift ? .bottomTrailing : .topLeading
-                        )
-                    )
-                    .blur(radius: 18)
-                    .opacity(0.85)
-                    .padding(-10)
+        RoundedRectangle(cornerRadius: 8)
+            .fill(Color.black)
+            .overlay { content() }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(10)
+            .background {
+                if glow {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(SumiTheme.card)
+                        .overlay(RoundedRectangle(cornerRadius: 14).fill(SumiTheme.indigo.opacity(0.18)))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(SumiTheme.indigo.opacity(0.35), lineWidth: 1))
+                }
             }
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.black)
-                .overlay { content() }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .frame(height: 132)
-        .frame(maxWidth: .infinity)
-        .onAppear {
-            guard glow else { return }
-            withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) { drift = true }
-        }
+            .frame(height: 132)
+            .frame(maxWidth: .infinity)
     }
 }
 

@@ -186,8 +186,8 @@ struct PhoneDetailView: View {
                         }
                     } label: {
                         HStack(spacing: 12) {
-                            Text("CH \(chapter.number)")
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            Text("Ch \(chapter.number)")
+                                .font(.system(size: 11, weight: .semibold)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.indigo)
                                 .frame(width: 64, alignment: .leading)
                             VStack(alignment: .leading, spacing: 2) {
@@ -197,7 +197,7 @@ struct PhoneDetailView: View {
                                     .lineLimit(1)
                                 if let group = chapter.scanlationGroup, !group.isEmpty {
                                     Text(group)
-                                        .font(.system(size: 10.5, design: .monospaced))
+                                        .font(.system(size: 10.5)).monospacedDigit()
                                         .foregroundStyle(SumiTheme.muted)
                                         .lineLimit(1)
                                 }
@@ -288,9 +288,9 @@ struct PhoneDetailView: View {
                 } label: {
                     HStack(spacing: 12) {
                         // `index` is already 1-based from the engine; +1 showed
-                        // "VOL 2" beside "Volume 1".
-                        Text("VOL \(volume.index)")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        // "Vol 2" beside "Volume 1".
+                        Text("Vol \(volume.index)")
+                            .font(.system(size: 11, weight: .semibold)).monospacedDigit()
                             .foregroundStyle(SumiTheme.indigo)
                             .frame(width: 64, alignment: .leading)
                         Text(volume.volumeName ?? volume.title)
@@ -351,7 +351,7 @@ struct PhoneDetailView: View {
                 .foregroundStyle(SumiTheme.indigo)
         case .downloading(let percent)?:
             Text("\(Int(percent))%")
-                .font(.system(size: 10.5, design: .monospaced))
+                .font(.system(size: 10.5)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
         case .failed?:
             Image(systemName: "exclamationmark.circle")
@@ -454,21 +454,19 @@ struct PhoneDetailView: View {
             let target = next ?? first
             let label: String = {
                 if aired.count == 1 { return "Play" }
-                if next == nil { return "Watch again from EP \(first.number)" }
-                if target.number == first.number, (target.progressPercent ?? 0) == 0 { return "Start watching EP \(target.number)" }
-                return "Continue EP \(target.number)"
+                if next == nil { return "Watch again from Ep \(first.number)" }
+                if target.number == first.number, (target.progressPercent ?? 0) == 0 { return "Start watching Ep \(target.number)" }
+                return "Continue Ep \(target.number)"
             }()
             Button {
                 model.playGuardedByCellular { play(target.number) }
             } label: {
                 Label(label, systemImage: "play.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .foregroundStyle(SumiTheme.background)
-                    .background(SumiTheme.indigo, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .sumiPrimaryButton()
+            .controlSize(.large)
             .padding(.horizontal, 16)
         }
     }
@@ -504,12 +502,11 @@ struct PhoneDetailView: View {
                 Button {
                     showTrailer = true
                 } label: {
-                    Label("Watch trailer", systemImage: "play.rectangle")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(SumiTheme.background)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(SumiTheme.indigo, in: Capsule())
+                    Text("Trailer")
+                        .sumiTabularMono(size: 12, weight: .semibold)
+                        .foregroundStyle(SumiTheme.indigo)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .sheet(isPresented: $showTrailer) {
@@ -526,8 +523,8 @@ struct PhoneDetailView: View {
             }
 
             if let next = details.nextEpisodeText, !next.isEmpty {
-                Text(next.uppercased())
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text(next)
+                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(SumiTheme.indigo)
             }
 
@@ -550,8 +547,11 @@ struct PhoneDetailView: View {
 
             if !details.genres.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    metaLabel("GENRES")
-                    FlowChips(items: details.genres) { _ in }
+                    metaLabel("Genres")
+                    details.genres.dropFirst().reduce(Text(details.genres[0]).foregroundStyle(SumiTheme.muted)) { (line: Text, genre: String) -> Text in
+                        line + Text(" / ").foregroundStyle(SumiTheme.muted.opacity(0.4)) + Text(genre).foregroundStyle(SumiTheme.muted)
+                    }
+                    .font(.system(size: 14))
                 }
             }
 
@@ -560,7 +560,7 @@ struct PhoneDetailView: View {
             // the only one worth a line on a phone.
             if let studios = details.studios, !studios.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    metaLabel("STUDIO")
+                    metaLabel("Studio")
                     // One button per main studio: each has an AniList id and
                     // a page of its own (`openStudio`).
                     HStack(spacing: 8) {
@@ -576,7 +576,7 @@ struct PhoneDetailView: View {
                 }
             } else if let studio = details.studio {
                 VStack(alignment: .leading, spacing: 6) {
-                    metaLabel("STUDIO")
+                    metaLabel("Studio")
                     Text(studio)
                         .font(.system(size: 13))
                         .foregroundStyle(SumiTheme.foreground)
@@ -591,12 +591,12 @@ struct PhoneDetailView: View {
     @ViewBuilder
     private func factRow(_ details: HeroBanner.Details) -> some View {
         let facts: [(String, String)] = [
-            ("STATUS", details.status.map(Self.mediaStatus)),
-            ("FORMAT", details.format),
-            ("EPISODES", details.episodeCount.map(String.init)),
-            ("SCORE", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
-            ("YOUR SCORE", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
-            ("ON YOUR LIST", details.listStatus.map(Self.listStatus))
+            ("Status", details.status.map(Self.mediaStatus)),
+            ("Format", details.format.map(MediaCard.displayFormat)),
+            ("Episodes", details.episodeCount.map(String.init)),
+            ("Score", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
+            ("Your score", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
+            ("On your list", details.listStatus.map(Self.listStatus))
         ].compactMap { name, value in value.map { (name, $0) } }
 
         if !facts.isEmpty {
@@ -647,26 +647,27 @@ struct PhoneDetailView: View {
         VStack(alignment: .leading, spacing: 22) {
             if details.prequel != nil || details.sequel != nil {
                 VStack(alignment: .leading, spacing: 8) {
-                    metaLabel("SEASONS")
+                    metaLabel("Seasons")
                     if let prequel = details.prequel { relationRow("Previous", prequel) }
                     if let sequel = details.sequel { relationRow("Next", sequel) }
                 }
             }
             if !model.selectedRelations.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    metaLabel("RELATED")
+                    metaLabel("Related")
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], alignment: .leading, spacing: 14) {
                         ForEach(model.selectedRelations) { item in
+                            let relation = item.relationType.replacingOccurrences(of: "_", with: " ").lowercased()
                             posterCard(
                                 id: item.id, title: item.title, cover: item.coverURL,
-                                caption: item.relationType.replacingOccurrences(of: "_", with: " ").capitalized)
+                                caption: relation.prefix(1).uppercased() + relation.dropFirst())
                         }
                     }
                 }
             }
             if !model.selectedRecommendations.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    metaLabel("MORE LIKE THIS")
+                    metaLabel("More like this")
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], alignment: .leading, spacing: 14) {
                         ForEach(model.selectedRecommendations) { item in
                             posterCard(id: item.id, title: item.title, cover: item.coverURL)
@@ -676,7 +677,7 @@ struct PhoneDetailView: View {
             }
             if !model.selectedDiscussions.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    metaLabel("DISCUSSIONS")
+                    metaLabel("Discussions")
                     ForEach(model.selectedDiscussions) { thread in
                         Button { model.openThread(id: thread.id) } label: {
                             HStack(spacing: 10) {
@@ -686,8 +687,8 @@ struct PhoneDetailView: View {
                                         .foregroundStyle(SumiTheme.foreground)
                                         .lineLimit(2)
                                         .multilineTextAlignment(.leading)
-                                    Text("\(thread.authorName ?? "AniList") \u{00B7} \(thread.replyCount) \(thread.replyCount == 1 ? "REPLY" : "REPLIES")")
-                                        .font(.system(size: 10, design: .monospaced))
+                                    Text("\(thread.authorName ?? "AniList") \u{00B7} \(thread.replyCount) \(thread.replyCount == 1 ? "reply" : "replies")")
+                                        .font(.system(size: 10)).monospacedDigit()
                                         .foregroundStyle(SumiTheme.muted)
                                         .lineLimit(1)
                                 }
@@ -732,8 +733,8 @@ struct PhoneDetailView: View {
                     .frame(width: 34)
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(role.uppercased())
-                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                    Text(role)
+                        .font(.system(size: 9.5, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(SumiTheme.muted)
                     Text(relation.title)
                         .font(.system(size: 13))
@@ -768,7 +769,7 @@ struct PhoneDetailView: View {
                 .foregroundStyle(SumiTheme.foreground)
                 .lineLimit(1)
             Text(character.voiceActorName ?? character.role.capitalized)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
                 .lineLimit(1)
         }
@@ -801,8 +802,8 @@ struct PhoneDetailView: View {
                     .frame(width: 96)
                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 if let caption {
-                    Text(caption.uppercased())
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    Text(caption)
+                        .font(.system(size: 9, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(SumiTheme.indigo)
                         .lineLimit(1)
                 }
@@ -820,14 +821,14 @@ struct PhoneDetailView: View {
     @ViewBuilder
     private func metaLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .font(.system(size: 9.5, weight: .semibold)).monospacedDigit()
             .foregroundStyle(SumiTheme.muted)
     }
 
     /// The show's own airing status. Kept apart from `listStatus` because
     /// AniList's two vocabularies collide: one map for both put CURRENT and
     /// RELEASING on the same case, so a title the viewer was *watching* read
-    /// "ON YOUR LIST: Airing".
+    /// "On your list: Airing".
     static func mediaStatus(_ raw: String) -> String {
         switch raw {
         case "RELEASING": return "Airing"
@@ -908,7 +909,7 @@ struct PhoneDetailView: View {
                             .foregroundStyle(SumiTheme.foreground)
                             .lineLimit(2)
                         Text(metaLine)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                     }
                     .padding(.horizontal, 16)
@@ -923,7 +924,7 @@ struct PhoneDetailView: View {
             var parts: [String] = []
             if let score = details.averageScore { parts.append("\(Double(score) / 10.0)") }
             if let year = details.year { parts.append("\(year)") }
-            if let count = details.episodeCount { parts.append("\(count) EPS") }
+            if let count = details.episodeCount { parts.append("\(count) eps") }
             return parts.joined(separator: " · ")
         }
     }
@@ -957,14 +958,14 @@ struct PhoneDetailView: View {
                 // the whole page centred on that — the left half rendered off
                 // the screen. The explicit frame is what makes it truncate.
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("EP \(episode.number)\(episode.title.isEmpty ? "" : " · \(episode.title)")")
+                    Text("Ep \(episode.number)\(episode.title.isEmpty ? "" : " · \(episode.title)")")
                         .font(.system(size: 14))
                         .foregroundStyle(episode.isWatched ? SumiTheme.muted : SumiTheme.foreground)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if let runtime = episode.runtimeMinutes {
-                        Text("\(runtime) MIN")
-                            .font(.system(size: 10, design: .monospaced))
+                        Text("\(runtime) min")
+                            .font(.system(size: 10)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                     }
                 }

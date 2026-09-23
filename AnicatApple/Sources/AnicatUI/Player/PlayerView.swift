@@ -1709,7 +1709,7 @@ public struct PlayerView: View {
 
     private func detailGroup(_ title: String, _ rows: [StreamDetailRow]) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title.uppercased())
+            Text(title)
                 .font(.system(size: 9.5, weight: .semibold))
                 .foregroundColor(SumiTheme.muted)
             ForEach(rows) { row in

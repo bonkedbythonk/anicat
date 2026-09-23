@@ -133,17 +133,17 @@ struct WatchOrderRow: View {
                             .sumiTabularMono(size: 9.5)
                             .foregroundColor(entry.isCurrent ? SumiTheme.indigo : SumiTheme.muted)
                         if let format = entry.format {
-                            Text(format)
+                            Text(MediaCard.displayFormat(format))
                                 .sumiTabularMono(size: 9.5)
                                 .foregroundColor(SumiTheme.muted.opacity(0.8))
                         }
                         if let count = entry.episodeCount, count > 0 {
-                            Text("\(count) EP")
+                            Text("\(count) ep")
                                 .sumiTabularMono(size: 9.5)
                                 .foregroundColor(SumiTheme.muted.opacity(0.8))
                         }
                         if let status = entry.listStatus {
-                            Text(status.replacingOccurrences(of: "_", with: " "))
+                            Text(Self.sentenceCase(status))
                                 .sumiTabularMono(size: 9.5)
                                 .foregroundColor(SumiTheme.indigo.opacity(0.8))
                         }
@@ -165,8 +165,13 @@ struct WatchOrderRow: View {
     }
 
     private var badgeLabel: String {
-        if entry.isCurrent { return "YOU ARE HERE" }
-        guard let type = entry.relationType else { return "RELATED" }
-        return type.replacingOccurrences(of: "_", with: " ")
+        if entry.isCurrent { return "You are here" }
+        guard let type = entry.relationType else { return "Related" }
+        return Self.sentenceCase(type)
+    }
+
+    private static func sentenceCase(_ raw: String) -> String {
+        let words = raw.replacingOccurrences(of: "_", with: " ").lowercased()
+        return words.prefix(1).uppercased() + words.dropFirst()
     }
 }

@@ -45,7 +45,6 @@ public struct MediaGridSkeleton: View {
                 MediaCardSkeleton()
             }
         }
-        .sumiShimmer()
     }
 }
 
@@ -91,7 +90,6 @@ public struct MediaRowSkeleton: View {
                 .padding(.vertical, 4)
             }
         }
-        .sumiShimmer()
     }
 }
 
@@ -118,7 +116,6 @@ public struct EpisodeRowSkeleton: View {
                     .fill(SumiTheme.foregroundWash)
                     .frame(width: 40, height: 12)
             }
-            .sumiShimmer()
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(SumiTheme.card.opacity(0.4))
@@ -148,11 +145,6 @@ public struct EpisodeRowSkeleton: View {
 
                 Spacer(minLength: 0)
             }
-            // Inside the row, not on `EpisodeListSkeleton`: the row carries a
-            // card fill, so a mask taken at list level is the solid row rect
-            // and the sweep hides the bars instead of lighting them. One mask
-            // per row is the price of the background.
-            .sumiShimmer()
             .padding(10)
             .background(SumiTheme.card.opacity(0.4))
             .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
@@ -202,6 +194,5 @@ public struct SynopsisSkeleton: View {
                 .frame(width: 220, height: 14)
         }
         .padding(.vertical, 4)
-        .sumiShimmer()
     }
 }

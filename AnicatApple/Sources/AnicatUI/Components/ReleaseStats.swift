@@ -93,7 +93,7 @@ struct ReleaseStatsLine<Trailing: View>: View {
                     .foregroundColor(SumiTheme.muted)
             }
             if item.isDub {
-                Text("DUB")
+                Text("Dub")
                     .sumiTabularMono(size: fontSize - 0.5, weight: .bold)
                     .foregroundColor(SumiTheme.indigo)
             }

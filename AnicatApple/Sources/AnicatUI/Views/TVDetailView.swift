@@ -53,7 +53,9 @@ struct TVDetailView: View {
                     play(resume)
                 } label: {
                     Label("Resume episode \(resume)", systemImage: "play.fill")
+                        .fontWeight(.semibold)
                 }
+                .sumiPrimaryButton()
                 .prefersDefaultFocus(in: pageFocus)
             } else if let first = model.selectedEpisodes.first(where: { !$0.isWatched && $0.isAired })
                         ?? model.selectedEpisodes.first {
@@ -61,7 +63,9 @@ struct TVDetailView: View {
                     play(first.number)
                 } label: {
                     Label("Play episode \(first.number)", systemImage: "play.fill")
+                        .fontWeight(.semibold)
                 }
+                .sumiPrimaryButton()
                 .prefersDefaultFocus(in: pageFocus)
             }
 
@@ -155,8 +159,8 @@ struct TVDetailView: View {
     private func about(_ details: HeroBanner.Details) -> some View {
         VStack(alignment: .leading, spacing: 32) {
             if let next = details.nextEpisodeText, !next.isEmpty {
-                Text(next.uppercased())
-                    .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                Text(next)
+                    .font(.system(size: 20, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(SumiTheme.indigo)
             }
 
@@ -179,7 +183,7 @@ struct TVDetailView: View {
 
             if !details.genres.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    metaLabel("GENRES")
+                    metaLabel("Genres")
                     Text(details.genres.joined(separator: " · "))
                         .font(.system(size: 24))
                         .foregroundStyle(SumiTheme.foreground)
@@ -188,14 +192,14 @@ struct TVDetailView: View {
 
             if let studios = details.studios, !studios.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    metaLabel("STUDIO")
+                    metaLabel("Studio")
                     Text(studios.filter(\.isMain).map(\.name).joined(separator: ", "))
                         .font(.system(size: 24))
                         .foregroundStyle(SumiTheme.foreground)
                 }
             } else if let studio = details.studio {
                 VStack(alignment: .leading, spacing: 10) {
-                    metaLabel("STUDIO")
+                    metaLabel("Studio")
                     Text(studio)
                         .font(.system(size: 24))
                         .foregroundStyle(SumiTheme.foreground)
@@ -232,12 +236,12 @@ struct TVDetailView: View {
     @ViewBuilder
     private func factRow(_ details: HeroBanner.Details) -> some View {
         let facts: [(String, String)] = [
-            ("STATUS", details.status.map(Self.mediaStatus)),
-            ("FORMAT", details.format),
-            ("EPISODES", details.episodeCount.map(String.init)),
-            ("SCORE", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
-            ("YOUR SCORE", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
-            ("ON YOUR LIST", details.listStatus.map(Self.listStatus))
+            ("Status", details.status.map(Self.mediaStatus)),
+            ("Format", details.format.map(MediaCard.displayFormat)),
+            ("Episodes", details.episodeCount.map(String.init)),
+            ("Score", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
+            ("Your score", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
+            ("On your list", details.listStatus.map(Self.listStatus))
         ].compactMap { name, value in value.map { (name, $0) } }
 
         if !facts.isEmpty {
@@ -257,7 +261,7 @@ struct TVDetailView: View {
     @ViewBuilder
     private func metaLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+            .font(.system(size: 18, weight: .semibold)).monospacedDigit()
             .foregroundStyle(SumiTheme.muted)
     }
 
@@ -332,7 +336,7 @@ struct TVDetailView: View {
                             .foregroundStyle(SumiTheme.foreground)
                             .lineLimit(2)
                         Text(metaLine)
-                            .font(.system(size: 22, design: .monospaced))
+                            .font(.system(size: 22)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                     }
                     .padding(.bottom, 12)
@@ -346,8 +350,8 @@ struct TVDetailView: View {
             var parts: [String] = []
             if let score = details.averageScore { parts.append(String(format: "%.1f", Double(score) / 10)) }
             if let year = details.year { parts.append("\(year)") }
-            if let count = details.episodeCount { parts.append("\(count) EPS") }
-            if let format = details.format { parts.append(format) }
+            if let count = details.episodeCount { parts.append("\(count) eps") }
+            if let format = details.format { parts.append(MediaCard.displayFormat(format)) }
             return parts.joined(separator: " · ")
         }
     }
@@ -393,7 +397,7 @@ struct TVDetailView: View {
                         }
 
                         Text("\(episode.number)")
-                            .font(.system(size: 20, weight: .bold, design: .monospaced))
+                            .font(.system(size: 20, weight: .bold)).monospacedDigit()
                             .foregroundStyle(.white)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
@@ -414,12 +418,12 @@ struct TVDetailView: View {
                     .lineLimit(2, reservesSpace: true)
                     .multilineTextAlignment(.leading)
                 if let runtime = episode.runtimeMinutes {
-                    Text("\(runtime) MIN")
-                        .font(.system(size: 18, design: .monospaced))
+                    Text("\(runtime) min")
+                        .font(.system(size: 18)).monospacedDigit()
                         .foregroundStyle(SumiTheme.muted)
                 } else if !episode.isAired, let airDate = episode.airDate {
-                    Text(airDate.uppercased())
-                        .font(.system(size: 18, design: .monospaced))
+                    Text(airDate)
+                        .font(.system(size: 18)).monospacedDigit()
                         .foregroundStyle(SumiTheme.muted)
                 }
             }

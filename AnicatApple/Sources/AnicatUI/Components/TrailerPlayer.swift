@@ -179,20 +179,11 @@ private struct TrailerBlockedView: View {
                     Button {
                         Platform.openExternal(watchURL)
                     } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 10, weight: .bold))
-                            Text("Watch on \(siteName)")
-                                .sumiTabularMono(size: 11.5, weight: .medium)
-                        }
-                        .foregroundColor(SumiTheme.background)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(SumiTheme.indigo)
-                        .clipShape(Capsule())
-                        .contentShape(Capsule())
+                        Label("Watch on \(siteName)", systemImage: "play.fill")
+                            .fontWeight(.semibold)
                     }
-                    .buttonStyle(.sumiPressable)
+                    .sumiPrimaryButton()
+                    .controlSize(.large)
                 }
             }
             .padding(24)

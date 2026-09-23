@@ -675,8 +675,8 @@ struct AiringTodayStrip: View {
                     .foregroundStyle(SumiTheme.foreground)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text("EP \(item.episodeNumber) \u{00B7} \(item.airingTimeText.uppercased())")
-                    .font(.system(size: 10.5, design: .monospaced))
+                Text("Ep \(item.episodeNumber) \u{00B7} \(item.airingTimeText)")
+                    .font(.system(size: 10.5)).monospacedDigit()
                     .foregroundStyle(item.isWatching ? SumiTheme.indigo : SumiTheme.muted)
                     .lineLimit(1)
             }
@@ -731,7 +731,6 @@ struct PosterShelf: View {
                                 }
                             }
                             .buttonStyle(.plain)
-                            .sumiShelfEdge()
                         }
                     }
                     .padding(.horizontal, 16)
@@ -775,7 +774,7 @@ struct ContinueWatchingRow: View {
                                         )
                                     }
                                 } label: {
-                                    Label("Play EP \(entry.nextEpisodeOrChapter)", systemImage: "play.fill")
+                                    Label("Play Ep \(entry.nextEpisodeOrChapter)", systemImage: "play.fill")
                                 }
                             }
                         }
@@ -815,8 +814,8 @@ struct ContinueWatchingCard: View {
                 .font(.sumiHeading(size: 13, weight: .medium))
                 .foregroundStyle(SumiTheme.foreground)
                 .lineLimit(1)
-            Text("\(entry.unit) \(entry.nextEpisodeOrChapter) · \(Int(100 - entry.progressPercent))% LEFT")
-                .font(.system(size: 10.5, design: .monospaced))
+            Text("\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter) · \(Int(100 - entry.progressPercent))% left")
+                .font(.system(size: 10.5)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
                 .lineLimit(1)
         }
@@ -851,8 +850,8 @@ struct NewEpisodeRow: View {
                         .foregroundStyle(SumiTheme.foreground)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text("\(entry.unit) \(entry.nextEpisodeOrChapter) OUT\(entry.watchedTimeAgo.map { " · \($0.uppercased())" } ?? "")")
-                        .font(.system(size: 10.5, design: .monospaced))
+                    Text("\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter) out\(entry.watchedTimeAgo.map { " · \($0)" } ?? "")")
+                        .font(.system(size: 10.5)).monospacedDigit()
                         .foregroundStyle(SumiTheme.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -974,8 +973,8 @@ private struct LibraryTab: View {
                                 detail: "Films and series you add to your watchlist show up here."
                             )
                         } else {
-                            Text("\(model.cinemaWatchlist.count) TITLES")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            Text("\(model.cinemaWatchlist.count) title\(model.cinemaWatchlist.count == 1 ? "" : "s")")
+                                .font(.system(size: 10, weight: .semibold)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.muted)
                                 .padding(.horizontal, 16)
                             PosterGrid(items: model.cinemaWatchlist, onOpen: openCinema)
@@ -999,8 +998,8 @@ private struct LibraryTab: View {
                             formatChips
                         }
                         HStack {
-                            Text("\(shownItems.count) TITLES")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            Text("\(shownItems.count) title\(shownItems.count == 1 ? "" : "s")")
+                                .font(.system(size: 10, weight: .semibold)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.muted)
                             Spacer()
                             sortMenu
@@ -1065,7 +1064,7 @@ private struct LibraryTab: View {
             Spacer(minLength: 4)
             if count > 0 {
                 Text("\(count)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(SumiTheme.muted)
             }
             Image(systemName: "chevron.right")
@@ -1211,7 +1210,7 @@ struct PosterList: View {
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                             // Progress replaces the grid's episode count
-                            // rather than joining it: "11 / 12 6.4 · 12 EPS"
+                            // rather than joining it: "11 / 12 6.4 · 12 eps"
                             // said twelve twice with no separator.
                             HStack(spacing: 6) {
                                 if let progress = item.progress, progress > 0 {
@@ -1223,7 +1222,7 @@ struct PosterList: View {
                                     Text(meta)
                                 }
                             }
-                            .font(.system(size: 10.5, design: .monospaced))
+                            .font(.system(size: 10.5)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1465,8 +1464,8 @@ private struct SearchTab: View {
     @ViewBuilder
     private var genreChips: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("GENRES")
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+            Text("Genres")
+                .font(.system(size: 10.5, weight: .semibold)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
                 .padding(.horizontal, 16)
             // Setting the filter is the search: `onChange(of: filters)` runs
@@ -1488,8 +1487,8 @@ private struct SearchTab: View {
     private var recentChips: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("RECENT")
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                Text("Recent")
+                    .font(.system(size: 10.5, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(SumiTheme.muted)
                 Spacer()
                 Button("Clear") { recentsRaw = "" }
@@ -1605,7 +1604,7 @@ private struct ResolvingCard: View {
                     .animation(.smooth, value: status)
                 TimelineView(.periodic(from: startedAt, by: 1)) { context in
                     Text("\(max(0, Int(context.date.timeIntervalSince(startedAt))))s")
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .font(.system(size: 10.5)).monospacedDigit()
                         .foregroundStyle(SumiTheme.muted)
                 }
             }
@@ -1653,12 +1652,12 @@ struct PosterGrid: View {
         if let score = item.score, score > 0 {
             // No star glyph in front of it: the house rule bars emoji, and
             // the ones that are not emoji render as one on some faces. The
-            // detail hero's meta line already reads "7.3 · 2024 · 12 EPS",
+            // detail hero's meta line already reads "7.3 · 2024 · 12 eps",
             // so this matches it.
             parts.append(String(format: "%.1f", Double(score) / 10))
         }
         if let total = item.totalEpisodesOrChapters, total > 0 {
-            parts.append("\(total) \(item.isManga ? "CH" : "EPS")")
+            parts.append("\(total) \(item.isManga ? "ch" : "eps")")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
@@ -1697,7 +1696,7 @@ struct PosterGrid: View {
 
                         if let meta = Self.meta(for: item) {
                             Text(meta)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 10)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.muted)
                                 .lineLimit(1)
                         }

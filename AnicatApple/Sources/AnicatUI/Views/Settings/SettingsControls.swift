@@ -204,6 +204,8 @@ struct ThemeSwatch: View {
     }
 }
 
+/// Drawn in Sumi rather than the system switch: the native one was tried
+/// and did not look like Anicat next to the rest of the page.
 struct SumiSwitch: View {
     @Binding var isOn: Bool
 
@@ -227,6 +229,8 @@ struct SumiSwitch: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.sumiPressable)
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(isOn ? "On" : "Off")
     }
 }
 
@@ -236,44 +240,16 @@ struct SumiDropdown: View {
     var minWidth: CGFloat = 160
 
     var body: some View {
-        Menu {
-            ForEach(options, id: \.self) { opt in
-                Button {
-                    selected = opt
-                } label: {
-                    HStack {
-                        Text(opt)
-                        if opt == selected {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Text(selected)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(SumiTheme.foreground)
-                    .lineLimit(1)
-
-                Spacer(minLength: 4)
-
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(SumiTheme.muted)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .frame(minWidth: minWidth)
-            .background(SumiTheme.background)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-            .sumiMenuPressable()
+        Picker("", selection: $selected) {
+            ForEach(options, id: \.self) { Text($0).tag($0) }
         }
-        .menuStyle(.borderlessButton)
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .tint(SumiTheme.indigo)
+        .frame(minWidth: minWidth)
+        // A menu picker is horizontally flexible on macOS; unfixed it splits
+        // the row with `SettingField`'s `Spacer` instead of sizing to its
+        // label.
+        .fixedSize(horizontal: true, vertical: false)
     }
 }

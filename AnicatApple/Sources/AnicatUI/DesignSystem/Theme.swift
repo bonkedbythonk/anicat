@@ -94,10 +94,14 @@ public enum SumiTheme {
     /// the same 10% wash behind a progress bar or a shortcut chip.
     public static var foregroundWash: Color { foreground.opacity(0.10) }
 
-    /// The favourite heart. One colour on every skin: AniList's own
-    /// favourite is this pink, and a heart that changed hue with the accent
-    /// read as a second state rather than the same one.
-    public static let favourite = Color(hex: "#EC4899")
+    /// The favourite heart. The same rose on every skin: AniList's own
+    /// favourite is pink, and a heart that changed hue with the accent read
+    /// as a second state rather than the same one. Muted from Tailwind's
+    /// pink-500 (`#EC4899`), which glowed as a second accent beside the
+    /// indigo; the light-ground shade keeps it at 4.4:1 on Paper.
+    public static var favourite: Color {
+        Color(hex: ThemeStore.shared.palette.isLight ? "#B24B63" : "#D86F86")
+    }
 
     // MARK: - Radius
     public static let radiusSm: CGFloat = 6
@@ -134,12 +138,9 @@ public enum SumiFontManager {
         guard !isRegistered else { return }
         isRegistered = true
 
-        let fontFiles = [
-            "Geist.ttf",
-            "IBMPlexMono-Regular.ttf",
-            "IBMPlexMono-Medium.ttf",
-            "IBMPlexMono-SemiBold.ttf"
-        ]
+        // Geist is only the reader's optional body face now; the app's own
+        // text is all SF Pro.
+        let fontFiles = ["Geist.ttf"]
 
         for file in fontFiles {
             let candidates: [URL?] = [
@@ -171,16 +172,6 @@ public enum SumiFontManager {
         #endif
     }()
 
-    public static let isIBMPlexMonoAvailable: Bool = {
-        registerCustomFonts()
-        #if os(macOS)
-        return NSFont(name: "IBMPlexMono-Regular", size: 12) != nil || NSFont(name: "IBM Plex Mono", size: 12) != nil
-        #elseif canImport(UIKit)
-        return UIFont(name: "IBMPlexMono-Regular", size: 12) != nil || UIFont(name: "IBM Plex Mono", size: 12) != nil
-        #else
-        return false
-        #endif
-    }()
 }
 
 public extension Font {
@@ -208,56 +199,12 @@ public extension Font {
     /// descriptions, settings copy), every button and control label, empty
     /// states and error text, author names, technical strings (release
     /// candidates, downloaded filenames), and the player's own chrome, which
-    /// is pinned to the Ink palette whatever the app is set to. The metadata
-    /// register stays IBM Plex Mono in every skin — the stamped index-card
-    /// line is the app's signature, not Ink & Index's alone.
+    /// is pinned to the Ink palette whatever the app is set to.
     static func sumiHeading(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         if ThemeStore.shared.palette.usesSerifHeadings {
             return .system(size: size, weight: weight, design: .serif)
         }
         return .system(size: size, weight: weight)
-    }
-
-    static func sumiMono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        if SumiFontManager.isIBMPlexMonoAvailable {
-            let fontName: String
-            switch weight {
-            case .semibold, .bold, .heavy, .black:
-                fontName = "IBMPlexMono-SemiBold"
-            case .medium:
-                fontName = "IBMPlexMono-Medium"
-            default:
-                fontName = "IBMPlexMono-Regular"
-            }
-            return .custom(fontName, size: size)
-        }
-        return .system(size: size, weight: weight, design: .monospaced)
-    }
-}
-
-/// Mono and tabular figures, for content that is actually figures: a
-/// timecode, `EP 10 / 12`, a countdown, a byte size, a version.
-///
-/// It used to force `.textCase(.uppercase)` as well, which fused two
-/// unrelated jobs into one modifier -- so anything that wanted digits not to
-/// jitter also got shouted in wide-tracked capitals, prose included.
-/// "Watched 3h ago" and "Episode 10" rendered as WATCHED 3H AGO and
-/// EPISODE 10. Monospace plus forced caps plus letterspacing on running
-/// words is the house style of a generic dashboard, and it read as one.
-///
-/// Strings written in capitals at the call site still render in capitals, so
-/// deliberate headings are unaffected; only sentence case is left alone now.
-/// For a heading, reach for `sumiLabelCaps` instead -- caps belong to a label
-/// style, not to a numeric one.
-public struct SumiLabelCaps: ViewModifier {
-    var size: CGFloat = 10
-    var weight: Font.Weight = .semibold
-
-    public func body(content: Content) -> some View {
-        content
-            .font(.sumiSans(size: size, weight: weight))
-            .textCase(.uppercase)
-            .tracking(size * 0.09)
     }
 }
 
@@ -301,31 +248,33 @@ public enum SumiContentWidth {
 // viewport, so shrinking the window pushed the whole page -- sidebar
 // included -- off the left edge. A `maxWidth` can only ever shrink.
 
+/// Metadata and figures: a timecode, `Ep 10 / 12`, a countdown, a byte
+/// size, a status word. SF Pro with fixed-width digits, so a ticking
+/// timecode does not jitter, in sentence case as written at the call site.
+///
+/// It was IBM Plex Mono with 8% tracking, and for a while forced capitals
+/// too. Uppercase tracked monospace on words -- AIRING, TRAILER, MORE FROM
+/// MAPPA -- read as generic dashboard chrome rather than a Mac app, and
+/// wrapping those labels in tinted capsules made it louder. Only the digits
+/// ever needed a fixed width; `.monospacedDigit()` gives that in SF Pro.
 public struct SumiTabularMono: ViewModifier {
     var size: CGFloat = 11.5
     var weight: Font.Weight = .regular
 
     public func body(content: Content) -> some View {
         content
-            .font(.sumiMono(size: size, weight: weight))
+            .font(.system(size: size, weight: weight))
             .monospacedDigit()
-            .tracking(size * 0.08)
     }
 }
 
-/// Every button in the app used plain `.buttonStyle(.sumiPressable)` — no visual
-/// response to mouse-down at all, only the separate hover states each view
-/// wired up by hand. Native AppKit controls always give that instantaneous
-/// press feedback (a slight scale/dim on click, springing back on release);
-/// without it the whole app reads as flat/web-like no matter how good the
-/// hover and transition curves are. This is a drop-in replacement for
-/// `.plain` that adds it back.
-/// The one definition of "what pressed looks like" in the app — both
-/// `SumiPressableButtonStyle` (for `Button`) and `SumiMenuPressable` (for
-/// `Menu`, which ignores `ButtonStyle` entirely) apply this to their own
-/// press signal so retuning the feel means changing it once, not twice.
+/// Press feedback for the app's custom tappables: poster cards, rows, text
+/// links, icon buttons. Anything that looks like a push button uses the
+/// native styles below instead. A dim, not a shrink: every control used to
+/// scale to 97% on press, the web's `active:scale` habit, and no Mac control
+/// moves under the pointer. Shared with `SumiMenuPressable`, which has to
+/// fake the same dip for `Menu`.
 private enum SumiPressFeedback {
-    static let scale: CGFloat = 0.97
     static let opacity: Double = 0.85
 }
 
@@ -334,7 +283,6 @@ public struct SumiPressableButtonStyle: ButtonStyle {
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? SumiPressFeedback.scale : 1.0)
             .opacity(configuration.isPressed ? SumiPressFeedback.opacity : 1.0)
             .animation(.snappy, value: configuration.isPressed)
             // Every button in the app answers under the finger, rather than
@@ -354,8 +302,8 @@ public extension ButtonStyle where Self == SumiPressableButtonStyle {
 /// `Menu`'s label ignores `.buttonStyle` entirely — a `ButtonStyle` only ever
 /// applies to `Button`, so every `Menu`-based control in the app (dropdowns,
 /// the detail page's status/overflow menus) silently lost the press feedback
-/// every `Button` gets from `.sumiPressable`. This fakes the same scale/dim
-/// dip from a raw press gesture, applied to the Menu's label view instead.
+/// every `Button` gets from `.sumiPressable`. This fakes the same dim from a
+/// raw press gesture, applied to the Menu's label view instead.
 private struct SumiMenuPressable: ViewModifier {
     @State private var isPressed = false
 
@@ -367,7 +315,6 @@ private struct SumiMenuPressable: ViewModifier {
         content
         #else
         content
-            .scaleEffect(isPressed ? SumiPressFeedback.scale : 1.0)
             .opacity(isPressed ? SumiPressFeedback.opacity : 1.0)
             .animation(.snappy, value: isPressed)
             .simultaneousGesture(
@@ -382,6 +329,93 @@ private struct SumiMenuPressable: ViewModifier {
 public extension View {
     func sumiMenuPressable() -> some View {
         modifier(SumiMenuPressable())
+    }
+}
+
+/// The app's push buttons, drawn in Sumi: an indigo fill for the one action a
+/// screen is for, a card fill with a hairline for the rest. Sized from
+/// `controlSize` so call sites say how big, not how to draw. The native
+/// bordered styles were tried and read as stock system chrome, not Anicat.
+public struct SumiButtonStyle: ButtonStyle {
+    public enum Kind { case primary, secondary }
+    let kind: Kind
+
+    public func makeBody(configuration: Configuration) -> some View {
+        SumiButtonBody(kind: kind, configuration: configuration)
+    }
+}
+
+private struct SumiButtonBody: View {
+    let kind: SumiButtonStyle.Kind
+    let configuration: ButtonStyleConfiguration
+    @Environment(\.controlSize) private var controlSize
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+
+    var body: some View {
+        let isPrimary = kind == .primary
+        let isDestructive = configuration.role == .destructive
+        let (height, padding, fontSize): (CGFloat, CGFloat, CGFloat) = switch controlSize {
+        case .mini, .small: (24, 10, 11.5)
+        case .large: (34, 16, 12.5)
+        case .extraLarge: (40, isPrimary ? 20 : 16, isPrimary ? 13.5 : 12.5)
+        default: (28, 14, 12)
+        }
+        let radius = isPrimary && controlSize == .extraLarge ? SumiTheme.radiusLg : SumiTheme.radiusMd
+        let shape = RoundedRectangle(cornerRadius: radius)
+        configuration.label
+            .font(.system(size: fontSize, weight: isPrimary ? .bold : .semibold))
+            .labelStyle(SumiButtonLabelStyle())
+            .lineLimit(1)
+            .foregroundColor(isPrimary ? SumiTheme.background : (isDestructive ? SumiTheme.danger : SumiTheme.foreground))
+            .padding(.horizontal, padding)
+            .frame(minHeight: height)
+            .background(isPrimary
+                ? SumiTheme.indigo.opacity(isHovered ? 0.85 : 1)
+                : (isHovered ? SumiTheme.foregroundWash : SumiTheme.card))
+            .clipShape(shape)
+            .overlay(shape.stroke(isPrimary ? Color.clear : SumiTheme.border, lineWidth: 1))
+            .contentShape(shape)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.5)
+            .animation(.snappy, value: isHovered)
+            .stableHover { isHovered = $0 }
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed { SumiHaptics.selection() }
+            }
+    }
+}
+
+/// Icon a size down from the title, as the hand-drawn buttons had it.
+private struct SumiButtonLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 7) {
+            configuration.icon.imageScale(.small)
+            configuration.title
+        }
+    }
+}
+
+public extension View {
+    /// The one action a screen is for: Resume, Continue, Save.
+    @ViewBuilder
+    func sumiPrimaryButton() -> some View {
+        #if os(tvOS)
+        // A custom style loses the focus engine's lift; the TV keeps the
+        // platform button.
+        buttonStyle(.borderedProminent)
+        #else
+        buttonStyle(SumiButtonStyle(kind: .primary))
+        #endif
+    }
+
+    /// Every other push button.
+    @ViewBuilder
+    func sumiSecondaryButton() -> some View {
+        #if os(tvOS)
+        buttonStyle(.bordered)
+        #else
+        buttonStyle(SumiButtonStyle(kind: .secondary))
+        #endif
     }
 }
 
@@ -402,13 +436,6 @@ public extension View {
 }
 
 public extension View {
-    /// A small capitalised heading in the sans face. The caps and the
-    /// tracking are the point here; the monospace face is not, and using the
-    /// numeric modifier for headings is what made them look machine-set.
-    func sumiLabelCaps(size: CGFloat = 10, weight: Font.Weight = .semibold) -> some View {
-        modifier(SumiLabelCaps(size: size, weight: weight))
-    }
-
     func sumiTabularMono(size: CGFloat = 11.5, weight: Font.Weight = .regular) -> some View {
         modifier(SumiTabularMono(size: size, weight: weight))
     }

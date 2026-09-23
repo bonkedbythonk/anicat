@@ -32,7 +32,7 @@ struct GeneralTabSection: View {
                     .background(SumiTheme.border)
 
                 SettingField(
-                    label: "Follow System Appearance",
+                    label: "Follow system appearance",
                     description: "Light or dark to match macOS. Turning this off lands on whichever side the system was already showing, so nothing changes colour until you pick."
                 ) {
                     SumiSwitch(isOn: Binding(
@@ -68,7 +68,7 @@ struct GeneralTabSection: View {
                 .background(SumiTheme.border)
 
             SettingField(
-                label: "Poster Accent",
+                label: "Poster accent",
                 description: "Tint the accent to the cover of the title you have open. Off keeps the skin's own colour everywhere."
             ) {
                 SumiSwitch(isOn: $posterAccentEnabled)
@@ -78,7 +78,7 @@ struct GeneralTabSection: View {
                 .background(SumiTheme.border)
 
             SettingField(
-                label: "Time Format",
+                label: "Time format",
                 description: "How dates and times should be displayed."
             ) {
                 SumiDropdown(
@@ -92,10 +92,10 @@ struct GeneralTabSection: View {
         // Moved off the player tab: the shortcuts are the whole app's, not
         // playback's, and they were the only reference card sitting in a
         // list of switches.
-        SettingsCard(title: "Keyboard Shortcuts") {
+        SettingsCard(title: "Keyboard shortcuts") {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Cheat Sheet")
+                    Text("Cheat sheet")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(SumiTheme.foreground)
 
@@ -107,24 +107,8 @@ struct GeneralTabSection: View {
                 Spacer()
 
                 if let onOpenShortcuts {
-                    Button(action: onOpenShortcuts) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "keyboard")
-                                .font(.system(size: 11))
-                            Text("View Shortcuts")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(SumiTheme.foreground)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.04))
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.sumiPressable)
+                    Button("View shortcuts", action: onOpenShortcuts)
+                        .sumiSecondaryButton()
                 } else {
                     Text("?")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))

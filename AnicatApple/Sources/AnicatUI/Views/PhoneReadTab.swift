@@ -101,14 +101,10 @@ struct PhoneReadTab: View {
             Button {
                 model.openNovelReaderEntry()
             } label: {
-                Label("Open a Syosetu link", systemImage: "link")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(SumiTheme.foreground)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 8)
-                    .background(SumiTheme.card, in: Capsule())
+                Text("Open a Syosetu link")
             }
-            .buttonStyle(.plain)
+            .sumiSecondaryButton()
+            .controlSize(.large)
             if let last = NovelPreferences.lastNovel() {
                 Button {
                     if last.source == AppModel.NovelSource.lnori.rawValue {
@@ -117,15 +113,12 @@ struct PhoneReadTab: View {
                         model.openSyosetuReader(url: last.url)
                     }
                 } label: {
-                    Label("Continue \(last.title)", systemImage: "arrow.right")
-                        .font(.system(size: 13, weight: .medium))
+                    Text("Continue \(last.title)")
+                        .fontWeight(.semibold)
                         .lineLimit(1)
-                        .foregroundStyle(SumiTheme.background)
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 8)
-                        .background(SumiTheme.indigo, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .sumiPrimaryButton()
+                .controlSize(.large)
             }
         }
         .padding(.horizontal, 16)
@@ -169,8 +162,8 @@ private struct ContinueReadingRow: View {
                                     .font(.sumiHeading(size: 13, weight: .medium))
                                     .foregroundStyle(SumiTheme.foreground)
                                     .lineLimit(1)
-                                Text("CH \((item.progress ?? 0) + 1)\(item.totalEpisodesOrChapters.map { " OF \($0)" } ?? "")")
-                                    .font(.system(size: 10.5, design: .monospaced))
+                                Text("Ch \((item.progress ?? 0) + 1)\(item.totalEpisodesOrChapters.map { " of \($0)" } ?? "")")
+                                    .font(.system(size: 10.5)).monospacedDigit()
                                     .foregroundStyle(SumiTheme.muted)
                             }
                             .containerRelativeFrame(.horizontal, count: 3, span: 1, spacing: 12)

@@ -25,7 +25,7 @@ struct SharingTabSection: View {
     VStack(alignment: .leading, spacing: 20) {
         SettingsCard(title: "Notifications") {
             SettingField(
-                label: "New Episode Alerts",
+                label: "New episode alerts",
                 description: "A local notification when an episode of something you are watching airs, and, if you watch dubbed, when its English dub is out. Each episode is announced once, whether or not the app was running when it aired."
             ) {
                 SumiSwitch(isOn: $notifyNewEpisodes)
@@ -34,14 +34,14 @@ struct SharingTabSection: View {
 
         SettingsCard(title: "Presence") {
             SettingField(
-                label: "Discord Rich Presence",
+                label: "Discord presence",
                 description: "Show what you are watching or reading on your Discord profile. Picks Discord up whenever it is running, including when it starts after Anicat."
             ) {
                 SumiSwitch(isOn: $discordPresence)
             }
 
             SettingField(
-                label: "Show on Profile",
+                label: "Show on profile",
                 description: discordPresenceDetail == "private"
                     ? "Only \"Watching anime\" or \"Reading manga\" and the time. No title, cover or link."
                     : "The title, episode or chapter, cover art, and a link to its AniList or TMDB page. Everyone who can see your Discord profile sees it."
@@ -57,7 +57,7 @@ struct SharingTabSection: View {
 
         SettingsCard(title: "Devices") {
             SettingField(
-                label: "Allow Other Devices",
+                label: "Allow other devices",
                 description: "Announce this Mac on the local network so Anicat on an iPhone can find it, control playback and stream through it. Off, nothing on the network can tell Anicat is running."
             ) {
                 SumiSwitch(isOn: $lanSharing)
@@ -70,10 +70,11 @@ struct SharingTabSection: View {
                     ? "Anicat on an iPhone on this Wi-Fi can control playback here. The first time one asks, this Mac asks you first."
                     : "\(pairedCount) iPhone\(pairedCount == 1 ? "" : "s") may control playback on this Mac. Forgetting them means being asked again next time."
             ) {
-                Button("Forget All") {
+                Button("Forget all", role: .destructive) {
                     RemoteHost.shared.unpairAll()
                     pairedCount = 0
                 }
+                .sumiSecondaryButton()
                 .disabled(pairedCount == 0)
             }
         }

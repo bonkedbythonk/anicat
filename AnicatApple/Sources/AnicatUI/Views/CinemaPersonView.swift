@@ -27,7 +27,7 @@ struct CinemaPersonView: View {
 
                 if let biography = person?.biography {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("BIOGRAPHY")
+                        Text("Biography")
                             .sumiTabularMono(size: 9.5, weight: .bold)
                             .foregroundColor(SumiTheme.muted)
                         Text(biography)
@@ -84,7 +84,7 @@ struct CinemaPersonView: View {
                     .foregroundColor(SumiTheme.foreground)
 
                 if let known = person?.knownFor {
-                    Text(known.uppercased())
+                    Text(known)
                         .sumiTabularMono(size: 9.5, weight: .bold)
                         .foregroundColor(SumiTheme.muted)
                 }
@@ -123,7 +123,7 @@ struct CinemaPersonView: View {
 
     private func known(_ credits: [CinemaCredit]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("KNOWN FOR")
+            Text("Known for")
                 .sumiTabularMono(size: 9.5, weight: .bold)
                 .foregroundColor(SumiTheme.muted)
 

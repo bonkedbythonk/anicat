@@ -212,19 +212,16 @@ public struct ReadingView: View {
                 ForEach(items) { item in
                     MediaCard(
                         item: item,
-                        namespace: openingSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil
-                    ) { onSelect(item, "\(shelfKey):\(item.id)") }
-                        .frame(width: 180)
-                        .sumiShelfEdge()
+                        namespace: openingSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil,
                         // The one way off the list for a title whose page
                         // AniList no longer serves: a merged or deleted
                         // entry answers Not Found, so the page's own Remove
                         // is never reached.
-                        .contextMenu {
-                            if removable, let onRemove, item.listEntryId != nil {
-                                Button("Remove from list", role: .destructive) { onRemove(item) }
-                            }
-                        }
+                        removal: removable && item.listEntryId != nil
+                            ? onRemove.map { onRemove in ("Remove from list", { onRemove(item) }) }
+                            : nil
+                    ) { onSelect(item, "\(shelfKey):\(item.id)") }
+                        .frame(width: 180)
                 }
             }
             .padding(.vertical, 4)

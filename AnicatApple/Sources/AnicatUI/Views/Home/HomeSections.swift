@@ -28,7 +28,7 @@ struct HomeSectionView: View {
     private static let upNextCollapsedCount = 4
     @State private var showPicker = false
 
-    /// "3 IN PROGRESS · 2 NEW EPISODES" — the count of new episodes is only
+    /// "3 in progress · 2 new episodes" — the count of new episodes is only
     /// appended when there are any, matching HomeView.tsx.
     private var upNextSubtitle: String {
         let inProgress = model.upNextItems.count
@@ -64,50 +64,15 @@ struct HomeSectionView: View {
 
                         Spacer()
 
-                        // "Pick for me" Random Episode Selector
-                        Button(action: { showPicker = true }) {
-                            // Hairline only, no fill: the web button is
-                            // `border border-border` over the page ground. A
-                            // filled version reads as a macOS push button and
-                            // outweighs the "Resume" control below it, which
-                            // is the one thing on this screen meant to be
-                            // primary.
-                            Text("Pick for me")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(SumiTheme.foreground.opacity(0.7))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 6)
-                                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                        .stroke(SumiTheme.border, lineWidth: 1)
-                                 )
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.sumiPressable)
+                        Button("Pick for me") { showPicker = true }
+                            .sumiSecondaryButton()
 
                         // Reorders/hides the configurable rows below. Shown
                         // even signed-out, same as HomeView.tsx: Trending,
                         // Newly Releasing and Seasonal all work without a
                         // token, only Planning needs one.
-                        Button(action: { showHomeCustomize = true }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "square.grid.2x2")
-                                    .font(.system(size: 11))
-                                Text("Customize")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundColor(SumiTheme.foreground.opacity(0.7))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                    .stroke(SumiTheme.border, lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.sumiPressable)
+                        Button("Customize") { showHomeCustomize = true }
+                            .sumiSecondaryButton()
                     }
 
                     // Up Next Queue Container
@@ -322,7 +287,6 @@ struct HomeShelf: View {
                         }
                         .equatable()
                         .frame(width: 180)
-                        .sumiShelfEdge()
                     }
                 }
                 .padding(.vertical, 4)

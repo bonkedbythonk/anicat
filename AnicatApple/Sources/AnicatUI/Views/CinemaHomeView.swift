@@ -307,7 +307,6 @@ struct CinemaHomeView: View {
                     ForEach(shelf.items) { item in
                         card(item, shelf: shelf.id)
                             .frame(width: 180)
-                            .sumiShelfEdge()
                     }
                 }
                 .padding(.vertical, 4)
@@ -320,13 +319,18 @@ struct CinemaHomeView: View {
     /// two morph sources for one key is undefined behaviour -- the bug that
     /// lost posters on the anime side -- so the key names the shelf, and the
     /// catalog is in it because a TMDB id and an AniList id collide.
-    private func card(_ item: MediaCard.Item, shelf: String) -> some View {
+    private func card(
+        _ item: MediaCard.Item,
+        shelf: String,
+        removal: (label: String, action: () -> Void)? = nil
+    ) -> some View {
         let catalog = item.catalog ?? .tmdbMovie
         let key = "cinema:\(catalog.rawValue):\(shelf):\(item.id)"
         return MediaCard(
             item: item,
             namespace: model.openingDetailSourceKey == key ? namespace : nil,
-            onPrefetch: { model.prefetchCinemaDetail(catalog: catalog, id: item.id) }
+            onPrefetch: { model.prefetchCinemaDetail(catalog: catalog, id: item.id) },
+            removal: removal
         ) {
             model.openingDetailSourceKey = key
             Task {
@@ -478,7 +482,7 @@ struct CinemaHomeView: View {
                     upNext(title: "Pick up where you left off")
                 }
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("CONTINUE WATCHING")
+                    Text("Continue watching")
                         .sumiTabularMono(size: 9.5, weight: .bold)
                         .foregroundColor(SumiTheme.muted)
 
@@ -488,16 +492,11 @@ struct CinemaHomeView: View {
                         spacing: 20
                     ) {
                         ForEach(model.cinemaContinueWatching) { item in
-                            card(item, shelf: "cinemaWatching")
-                                // Right-click, like the Finder: the card has no
-                                // spare corner for a control, and a hover "x"
-                                // next to the open chevron was two targets on
-                                // one poster.
-                                .contextMenu {
-                                    Button("Remove from Continue Watching") {
-                                        Task { await model.removeFromCinemaContinueWatching(id: item.id) }
-                                    }
-                                }
+                            // Right-click, like the Finder: the card has no
+                            // spare corner for a control.
+                            card(item, shelf: "cinemaWatching", removal: ("Remove from Continue Watching", {
+                                Task { await model.removeFromCinemaContinueWatching(id: item.id) }
+                            }))
                         }
                     }
                 }
@@ -521,12 +520,12 @@ struct CinemaHomeView: View {
                  : "TMDB answered with no rows. Check the connection, or try again in a moment.")
                 .font(.system(size: 13))
                 .foregroundColor(SumiTheme.muted)
-            Button("Retry") {
+            Button {
                 Task { await model.loadCinemaHome() }
+            } label: {
+                Text("Retry").fontWeight(.semibold)
             }
-            .buttonStyle(.plain)
-            .foregroundColor(SumiTheme.indigo)
-            .font(.system(size: 13, weight: .medium))
+            .sumiPrimaryButton()
         }
         .padding(.vertical, 40)
     }

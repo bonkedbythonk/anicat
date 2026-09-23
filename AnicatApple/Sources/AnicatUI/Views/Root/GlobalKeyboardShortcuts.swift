@@ -249,13 +249,8 @@ struct GlobalKeyboardShortcutsModifier: ViewModifier {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let rawChars = event.characters ?? ""
 
-        // 1. Cmd+K: Toggle Command Palette (even while typing)
-        if isCmd && !isCtrl && !isAlt && chars == "k" {
-            withAnimation(.snappy) {
-                model.paletteOpen.toggle()
-            }
-            return nil
-        }
+        // Cmd-K, Cmd-[ / Cmd-], Cmd-1...9 are Go menu items (AnicatApp's
+        // AppCommands); a monitor branch here would swallow them first.
 
         // 2. ESC key (keyCode 53):
         // Order of dismissal:

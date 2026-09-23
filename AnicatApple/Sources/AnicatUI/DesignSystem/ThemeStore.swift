@@ -111,6 +111,32 @@ public struct SumiPalette: Sendable {
     }
 }
 
+// MARK: - Status colours
+
+extension SumiPalette {
+    /// Status tones from the same pigment box as the palettes: shu vermilion,
+    /// moss and yamabuki ochre, instead of Tailwind's red-500 / green-500 /
+    /// yellow-500, which every skin carried verbatim and which read as a web
+    /// kit next to the ink grounds. Measured against the grounds they sit on:
+    /// the base tones are 5.2:1 or better on every dark ground and 4.6:1 or
+    /// better on Paper and Sakura's light half.
+    struct StatusHexes {
+        let danger, dangerLight, success, successLight, warning, warningLight: String
+    }
+
+    static let darkStatus = StatusHexes(
+        danger: "#E2674A", dangerLight: "#EC8A70",
+        success: "#8FB573", successLight: "#A9C790",
+        warning: "#D9A441", warningLight: "#E6BC66"
+    )
+
+    static let lightStatus = StatusHexes(
+        danger: "#A93A26", dangerLight: "#C2533B",
+        success: "#4C6B35", successLight: "#5E8243",
+        warning: "#8C6310", warningLight: "#A67A1E"
+    )
+}
+
 // MARK: - The palettes
 
 public extension SumiPalette {
@@ -126,12 +152,12 @@ public extension SumiPalette {
         indigoLightHex: "#A8C9E6",
         mutedAlpha: 0.55,
         borderAlpha: 0.10,
-        dangerHex: "#EF4444",
-        dangerLightHex: "#F87171",
-        successHex: "#22C55E",
-        successLightHex: "#4ADE80",
-        warningHex: "#EAB308",
-        warningLightHex: "#FACC15"
+        dangerHex: SumiPalette.darkStatus.danger,
+        dangerLightHex: SumiPalette.darkStatus.dangerLight,
+        successHex: SumiPalette.darkStatus.success,
+        successLightHex: SumiPalette.darkStatus.successLight,
+        warningHex: SumiPalette.darkStatus.warning,
+        warningLightHex: SumiPalette.darkStatus.warningLight
     )
 
     /// Washi paper. The accent is darkened from Ink's `#8FB8DC`, which measures
@@ -149,12 +175,12 @@ public extension SumiPalette {
         indigoLightHex: "#45789A",
         mutedAlpha: 0.65,
         borderAlpha: 0.14,
-        dangerHex: "#B91C1C",
-        dangerLightHex: "#DC2626",
-        successHex: "#15803D",
-        successLightHex: "#16A34A",
-        warningHex: "#A16207",
-        warningLightHex: "#CA8A04"
+        dangerHex: SumiPalette.lightStatus.danger,
+        dangerLightHex: SumiPalette.lightStatus.dangerLight,
+        successHex: SumiPalette.lightStatus.success,
+        successLightHex: SumiPalette.lightStatus.successLight,
+        warningHex: SumiPalette.lightStatus.warning,
+        warningLightHex: SumiPalette.lightStatus.warningLight
     )
 
     /// True black for OLED panels. The foreground scale is Ink's, but the
@@ -174,12 +200,12 @@ public extension SumiPalette {
         indigoLightHex: "#A8C9E6",
         mutedAlpha: 0.58,
         borderAlpha: 0.18,
-        dangerHex: "#EF4444",
-        dangerLightHex: "#F87171",
-        successHex: "#22C55E",
-        successLightHex: "#4ADE80",
-        warningHex: "#EAB308",
-        warningLightHex: "#FACC15"
+        dangerHex: SumiPalette.darkStatus.danger,
+        dangerLightHex: SumiPalette.darkStatus.dangerLight,
+        successHex: SumiPalette.darkStatus.success,
+        successLightHex: SumiPalette.darkStatus.successLight,
+        warningHex: SumiPalette.darkStatus.warning,
+        warningLightHex: SumiPalette.darkStatus.warningLight
     )
 
     /// "Sakura Zen", the alt skin the Tauri app carried as
@@ -210,12 +236,12 @@ public extension SumiPalette {
         mutedAlpha: 0.55,
         borderAlpha: 0.16,
         usesSerifHeadings: true,
-        dangerHex: "#EF4444",
-        dangerLightHex: "#F87171",
-        successHex: "#22C55E",
-        successLightHex: "#4ADE80",
-        warningHex: "#EAB308",
-        warningLightHex: "#FACC15"
+        dangerHex: SumiPalette.darkStatus.danger,
+        dangerLightHex: SumiPalette.darkStatus.dangerLight,
+        successHex: SumiPalette.darkStatus.success,
+        successLightHex: SumiPalette.darkStatus.successLight,
+        warningHex: SumiPalette.darkStatus.warning,
+        warningLightHex: SumiPalette.darkStatus.warningLight
     )
 
     /// Sakura Zen's light half: sakura paper under deep plum ink. The accent
@@ -235,12 +261,12 @@ public extension SumiPalette {
         mutedAlpha: 0.65,
         borderAlpha: 0.12,
         usesSerifHeadings: true,
-        dangerHex: "#B91C1C",
-        dangerLightHex: "#DC2626",
-        successHex: "#15803D",
-        successLightHex: "#16A34A",
-        warningHex: "#A16207",
-        warningLightHex: "#CA8A04"
+        dangerHex: SumiPalette.lightStatus.danger,
+        dangerLightHex: SumiPalette.lightStatus.dangerLight,
+        successHex: SumiPalette.lightStatus.success,
+        successLightHex: SumiPalette.lightStatus.successLight,
+        warningHex: SumiPalette.lightStatus.warning,
+        warningLightHex: SumiPalette.lightStatus.warningLight
     )
 
     /// Every palette that ships, derived from the skins rather than listed by

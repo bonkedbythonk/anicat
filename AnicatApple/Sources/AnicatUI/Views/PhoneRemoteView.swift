@@ -204,13 +204,10 @@ struct PhoneRemoteView: View {
             Button {
                 client.send(.skipPendingWindow)
             } label: {
-                Label("Skip \(label)", systemImage: "forward.fill")
-                    .font(.system(size: 15, weight: .medium))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(SumiTheme.card))
+                Text("Skip \(label)")
             }
-            .foregroundStyle(SumiTheme.foreground)
+            .sumiSecondaryButton()
+            .controlSize(.large)
             .transition(.scale.combined(with: .opacity))
         }
     }

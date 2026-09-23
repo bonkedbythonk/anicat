@@ -130,7 +130,7 @@ struct PhoneScheduleView: View {
                             Text(day.formatted(.dateTime.day()))
                                 .font(.system(size: 15, weight: .bold))
                             Text(count == 0 ? " " : "\(count)")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 10)).monospacedDigit()
                                 .opacity(0.8)
                         }
                         .foregroundStyle(selected ? SumiTheme.background : SumiTheme.foreground)
@@ -169,8 +169,8 @@ private struct ScheduleRow: View {
                     .foregroundStyle(SumiTheme.foreground)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text("EP \(item.episodeNumber) \u{00B7} \(item.airingTimeText.uppercased()) \u{00B7} \(item.countdownText.uppercased())")
-                    .font(.system(size: 10.5, design: .monospaced))
+                Text("Ep \(item.episodeNumber) \u{00B7} \(item.airingTimeText) \u{00B7} \(item.countdownText)")
+                    .font(.system(size: 10.5)).monospacedDigit()
                     .foregroundStyle(item.isWatching ? SumiTheme.indigo : SumiTheme.muted)
                     .lineLimit(1)
             }
@@ -313,8 +313,8 @@ private struct HistoryRowView: View {
                     .font(.system(size: 15))
                     .foregroundStyle(SumiTheme.foreground)
                     .lineLimit(2)
-                Text("\(row.catalog == .tmdbMovie ? "FILM" : "EP \(row.episodeNumber)") \u{00B7} \(time)")
-                    .font(.system(size: 10.5, design: .monospaced))
+                Text("\(row.catalog == .tmdbMovie ? "Film" : "Ep \(row.episodeNumber)") \u{00B7} \(time)")
+                    .font(.system(size: 10.5)).monospacedDigit()
                     .foregroundStyle(SumiTheme.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

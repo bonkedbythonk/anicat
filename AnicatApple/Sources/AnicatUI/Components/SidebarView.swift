@@ -45,32 +45,6 @@ public struct SidebarView: View {
             }
         }
 
-        public var shortcut: String? { shortcut(for: .anime) }
-
-        public func shortcut(for mode: AppModel.AppMode) -> String? {
-            if mode == .cinema {
-                switch self {
-                case .manga: return "F"
-                case .novels: return "S"
-                case .library: return "L"
-                case .search: return "/"
-                case .stats: return "T"
-                case .downloads: return "D"
-                default: return nil
-                }
-            }
-            switch self {
-            case .upNext: return "H"
-            case .library: return "L"
-            case .manga: return "M"
-            case .novels: return "N"
-            case .search: return "/"
-            case .stats: return "T"
-            case .downloads: return "D"
-            default: return nil
-            }
-        }
-
         /// The 1-9 keys, in the order they were bound. Appended to, never
         /// inserted into: `fromNumberKey` caps at nine, so a new case slotted
         /// in the middle would silently renumber every shortcut a user has
@@ -99,13 +73,6 @@ public struct SidebarView: View {
 
         public static func displayOrder(for mode: AppModel.AppMode) -> [NavSection] {
             browseItems(for: mode) + systemItems
-        }
-
-        /// Where this section sits in the mode's own rail, which is what the
-        /// entrance slide reads to decide its direction. Against the anime
-        /// order it would jump backwards on every section cinema skips.
-        public func displayIndex(in mode: AppModel.AppMode) -> Int {
-            Self.displayOrder(for: mode).firstIndex(of: self) ?? 0
         }
 
         /// The digit keys, for the mode showing. Against the shared list,
@@ -141,18 +108,6 @@ public struct SidebarView: View {
         }
 
         public static let systemItems: [NavSection] = [.downloads, .settings]
-
-        /// The order the rail actually draws, which is not `numberedSections`
-        /// — that list ends Settings, Downloads, while the rail renders
-        /// Browse then System and so ends Downloads, Settings. The section
-        /// entrance slides in the direction of travel down this list, so
-        /// reading the numbered order there sent the last two sections the
-        /// wrong way.
-        public static let displayOrder: [NavSection] = browseItems + systemItems
-
-        public var displayIndex: Int {
-            Self.displayOrder.firstIndex(of: self) ?? 0
-        }
 
         /// Capped at 9 rather than at `numberedSections.count`: the list is
         /// now longer than the digits there are keys for, and a bare count
@@ -291,7 +246,7 @@ public struct SidebarView: View {
 
     private func navGroup(title: String, items: [NavSection]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased())
+            Text(title)
                 .sumiTabularMono(size: 11.5)
                 .foregroundColor(SumiTheme.muted)
                 .padding(.horizontal, 20)
@@ -338,25 +293,6 @@ public struct SidebarView: View {
                         .foregroundColor(isActive ? SumiTheme.foreground : (isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
 
                     Spacer()
-
-                    if let sc = item.shortcut(for: mode) {
-                        // The chip is `meta-mono` at its full 11.5pt, and it — not
-                        // the label — sets the row height: measured against the
-                        // running Tauri app, a row with a shortcut is 37pt and one
-                        // without is 34. Shrinking the chip to 10pt compressed
-                        // every row and the whole list drifted short of the web.
-                        Text(sc)
-                            .sumiTabularMono(size: 11.5)
-                            .foregroundColor(SumiTheme.muted)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(SumiTheme.foreground.opacity(0.06))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .stroke(SumiTheme.border.opacity(0.5), lineWidth: 1)
-                            )
-                    }
                 }
                 .frame(minHeight: 23)
                 .padding(.leading, 20)

@@ -57,7 +57,7 @@ public struct HistoryView: View {
 
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @State private var favouritesType: String = "ANIME"
-    @State private var clearConfirming: Bool = false
+    @State private var showsClearDialog: Bool = false
 
     public init(
         viewer: ViewerProfile?,
@@ -284,30 +284,20 @@ public struct HistoryView: View {
         )
     }
 
-    /// The two-step confirm from Settings' maintenance buttons rather than a
-    /// dialog. The count goes in the confirm label because this is the one
+    /// The count goes in the dialog's title because this is the one
     /// unrecoverable action on the page and "Clear history" alone does not
-    /// say how much is about to go.
+    /// say how much is about to go. `.visible` because iOS hides a
+    /// confirmation dialog's title by default, and the count with it.
     private func clearButton(_ action: @escaping () -> Void) -> some View {
-        Button {
-            if clearConfirming {
-                action()
-                clearConfirming = false
-            } else {
-                clearConfirming = true
-            }
-        } label: {
-            Text(clearConfirming ? "Clear \(activity.count) watches? Click again" : "Clear history")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(SumiTheme.dangerLight)
-                .padding(.horizontal, clearConfirming ? 10 : 0)
-                .padding(.vertical, 4)
-                .background(clearConfirming ? SumiTheme.danger.opacity(0.18) : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                .contentShape(Rectangle())
+        Button("Clear history", role: .destructive) {
+            showsClearDialog = true
         }
-        .buttonStyle(.sumiPressable)
-        .animation(.snappy, value: clearConfirming)
+        .sumiSecondaryButton()
+        .confirmationDialog("Clear \(activity.count) watches?", isPresented: $showsClearDialog, titleVisibility: .visible) {
+            Button("Clear history", role: .destructive, action: action)
+        } message: {
+            Text("The watch log on this device is deleted, and with it where each episode was left off. Your list on AniList is not changed.")
+        }
     }
 
     private var log: some View {
@@ -367,7 +357,7 @@ public struct HistoryView: View {
                 .font(.sumiHeading(size: 13.5, weight: .medium))
                 .foregroundColor(SumiTheme.foreground)
                 .lineLimit(1)
-            Text("— CH \(row.chapterNumber)")
+            Text("— Ch \(row.chapterNumber)")
                 .sumiTabularMono(size: 11.5)
                 .foregroundColor(SumiTheme.muted)
             Spacer()
@@ -392,7 +382,7 @@ public struct HistoryView: View {
                 .font(.sumiHeading(size: 13.5, weight: .medium))
                 .foregroundColor(SumiTheme.foreground)
                 .lineLimit(1)
-            Text("— EP \(row.episodeNumber)")
+            Text("— Ep \(row.episodeNumber)")
                 .sumiTabularMono(size: 11.5)
                 .foregroundColor(SumiTheme.muted)
             Spacer(minLength: 12)

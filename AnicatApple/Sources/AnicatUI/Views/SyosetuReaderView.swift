@@ -68,7 +68,7 @@ public struct SyosetuReaderView: View {
                 SumiOutlineButton("Close", systemImage: "xmark", action: model.closeSyosetuReader)
                 Spacer()
             }
-            SumiPageHeader(title: "Read a Light Novel", subtitle: "PASTE A SYOSETU LINK")
+            SumiPageHeader(title: "Read a Light Novel", subtitle: "Paste a Syosetu link")
             VStack(alignment: .leading, spacing: 12) {
                 Text("Paste a novel or chapter link from ncode.syosetu.com — the whole table of contents loads from it.")
                     .font(.system(size: 13))
@@ -90,8 +90,11 @@ public struct SyosetuReaderView: View {
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                         #endif
-                    SumiOutlineButton("Open", systemImage: "book", action: load)
-                        .disabled(urlField.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button(action: load) {
+                        Label("Open", systemImage: "book").fontWeight(.semibold)
+                    }
+                    .sumiPrimaryButton()
+                    .disabled(urlField.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 if let last = NovelPreferences.lastNovel() {
                     SumiOutlineButton("Continue chapter \(last.chapter + 1) of \(last.title)", systemImage: "arrow.right") {

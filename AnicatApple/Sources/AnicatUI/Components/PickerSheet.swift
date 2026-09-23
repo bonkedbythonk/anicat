@@ -64,7 +64,7 @@ public struct PickerSheet: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("TONIGHT'S PICK")
+                Text("Tonight's pick")
                     .sumiTabularMono(size: 11.5, weight: .medium)
                     .foregroundColor(SumiTheme.muted)
                 Spacer()
@@ -116,7 +116,7 @@ public struct PickerSheet: View {
                             if mood == .continue {
                                 let prog = pick.item.progress ?? 0
                                 let total = pick.item.totalEpisodesOrChapters.map { String($0) } ?? "?"
-                                Text("EP \(prog + 1) / \(total)")
+                                Text("Ep \(prog + 1) / \(total)")
                                     .sumiTabularMono(size: 11)
                                     .foregroundColor(SumiTheme.muted)
                             }
@@ -143,16 +143,9 @@ public struct PickerSheet: View {
 
                         HStack(spacing: 10) {
                             Button(action: { commit(pick.item) }) {
-                                Text("Watch this")
-                                    .font(.system(size: 12.5, weight: .semibold))
-                                    .foregroundColor(SumiTheme.background)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 7)
-                                    .background(SumiTheme.indigo)
-                                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                                    .contentShape(Rectangle())
+                                Text("Watch this").fontWeight(.semibold)
                             }
-                            .buttonStyle(.sumiPressable)
+                            .sumiPrimaryButton()
 
                             Button(action: {
                                 withAnimation(.smooth) {
@@ -160,19 +153,10 @@ public struct PickerSheet: View {
                                 }
                             }) {
                                 Text("Show another")
-                                    .font(.system(size: 12.5, weight: .medium))
-                                    .foregroundColor(SumiTheme.foreground.opacity(0.8))
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 7)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                            .stroke(SumiTheme.border, lineWidth: 1)
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                                    .contentShape(Rectangle())
                             }
-                            .buttonStyle(.sumiPressable)
+                            .sumiSecondaryButton()
                         }
+                        .controlSize(.large)
                         .padding(.top, 14)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -448,7 +432,7 @@ private struct PickerChip: View {
                 // Sans, not the tabular-mono face: these are words, and mono
                 // is for figures. Fixed so the label sets the chip's width
                 // rather than the other way round.
-                .font(.sumiSans(size: 11, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .foregroundColor(isActive ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.55))

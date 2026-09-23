@@ -58,12 +58,16 @@ struct StudioDetailView: View {
                 .foregroundColor(SumiTheme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 12) {
                 if studio.isAnimationStudio {
-                    StatusBadge(.format("Animation Studio"))
+                    Text("Animation studio")
+                        .sumiTabularMono(size: 10.5, weight: .semibold)
+                        .foregroundColor(SumiTheme.indigo)
                 }
                 if studio.favourites > 0 {
-                    StatusBadge(.neutral("\(studio.favourites) favourites"))
+                    Text("\(studio.favourites) favourites")
+                        .sumiTabularMono(size: 10.5, weight: .semibold)
+                        .foregroundColor(SumiTheme.indigo)
                 }
             }
         }

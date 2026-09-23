@@ -37,13 +37,6 @@ public struct SearchView: View {
 
     @State private var searchType: String = "ANIME"
 
-    /// 20ms per row, and nothing past the tenth card: the results grid is
-    /// lazy, so an uncapped delay would also be paid by every row the viewer
-    /// later scrolls into view.
-    private static let resultsEntrance = SumiGridEntrance(
-        step: 0.020, cap: 10, offset: CGSize(width: 0, height: 10)
-    )
-
     // Filters. Empty string means "Any" / no filter — kept as String state
     // (rather than optionals) because SumiFilterDropdown binds to a plain
     // String, and every value here maps straight onto an AniList enum or a
@@ -457,7 +450,7 @@ public struct SearchView: View {
                                     .font(.sumiHeading(size: 17, weight: .semibold))
                                     .foregroundColor(SumiTheme.foreground)
                                 Spacer()
-                                Text("TRENDING")
+                                Text("Trending")
                                     .sumiTabularMono(size: 11.5)
                                     .foregroundColor(SumiTheme.indigo)
                             }
@@ -509,7 +502,7 @@ public struct SearchView: View {
                                     .font(.sumiHeading(size: 17, weight: .semibold))
                                     .foregroundColor(SumiTheme.foreground)
                                 Spacer()
-                                Text("TRENDING")
+                                Text("Trending")
                                     .sumiTabularMono(size: 11.5)
                                     .foregroundColor(SumiTheme.indigo)
                             }
@@ -550,7 +543,6 @@ public struct SearchView: View {
                                 .equatable()
                                 .searchKeyboardRing(keyboardIndex == index)
                                 .id(item.id)
-                                .sumiStaggeredEntrance(index: index, entrance: Self.resultsEntrance)
                                 // Firing the next page a few cards before the
                                 // true end means the next row is already
                                 // loading by the time the viewer scrolls to
@@ -569,8 +561,7 @@ public struct SearchView: View {
                         // The first result's id, and deliberately not the
                         // count: a page appended by `loadMore` leaves the id
                         // alone, so those rows insert immediately instead of
-                        // all landing at once behind the saturated delay the
-                        // stagger's cap would give them.
+                        // fading in under a viewer who is already scrolling.
                         .animation(.smooth(duration: 0.3), value: results.first?.id ?? -1)
 
                         if isLoadingMore {

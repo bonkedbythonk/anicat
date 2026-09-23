@@ -102,14 +102,21 @@ struct StaffDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                // Scrolls rather than wraps: a badge is one fact, and a
+                // Scrolls rather than wraps: each entry is one fact, and a
                 // fact split over two lines reads as two.
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(metaBadges, id: \.self) { badge in
-                            StatusBadge(.neutral(badge))
+                    HStack(spacing: 12) {
+                        ForEach(metaFacts, id: \.self) { fact in
+                            Text(fact)
+                                .foregroundColor(SumiTheme.muted)
+                        }
+                        if staff.favourites > 0 {
+                            Text("\(staff.favourites) favourites")
+                                .sumiTabularMono(size: 10.5, weight: .semibold)
+                                .foregroundColor(SumiTheme.indigo)
                         }
                     }
+                    .sumiTabularMono(size: 10.5)
                 }
                 .padding(.top, 2)
             }
@@ -117,11 +124,10 @@ struct StaffDetailView: View {
         }
     }
 
-    private var metaBadges: [String] {
+    private var metaFacts: [String] {
         var badges: [String] = []
         if let language = staff.language, !language.isEmpty { badges.append(language) }
         if let home = staff.homeTown, !home.isEmpty { badges.append(home) }
-        if staff.favourites > 0 { badges.append("\(staff.favourites) favourites") }
         return badges
     }
 

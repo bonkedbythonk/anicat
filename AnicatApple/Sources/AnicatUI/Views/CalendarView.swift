@@ -365,13 +365,9 @@ public struct CalendarView: View {
                     }
 
                     if slot.onUserList {
-                        Text(slot.userStatus == "CURRENT" ? "Watching" : "On your list")
+                        Text(slot.userStatus == "CURRENT" ? "Watching" : "On list")
                             .sumiTabularMono(size: 9)
-                            .foregroundColor(SumiTheme.indigo)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(SumiTheme.indigo.opacity(0.15))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .foregroundColor(SumiTheme.muted)
                     }
                 }
 

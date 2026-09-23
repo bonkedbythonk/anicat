@@ -37,6 +37,8 @@ struct MaintenanceTabSection: View {
     @State private var isPurging = false
     @State private var registryState: SettingsView.MaintenanceActionState = .idle
     @State private var onboardingResetState: SettingsView.MaintenanceActionState = .idle
+    @State private var showsRegistryDialog = false
+    @State private var showsOnboardingDialog = false
 
     var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -44,7 +46,7 @@ struct MaintenanceTabSection: View {
         // authors publish for free, Lnori carries publisher-owned volumes,
         // and the app must not contact the second without being told to.
         SettingsCard(
-            title: "Light Novel Sources",
+            title: "Light novel sources",
             description: "Where the text of a light novel comes from."
         ) {
             SettingField(
@@ -93,7 +95,7 @@ struct MaintenanceTabSection: View {
                         .sumiTabularMono(size: 11.5)
                         .foregroundColor(SumiTheme.muted)
 
-                    Button(isPurging ? "Emptying…" : "Empty") {
+                    Button(isPurging ? "Emptying…" : "Empty", role: .destructive) {
                         isPurging = true
                         Task {
                             await AppModel.shared?.purgeStreamCache()
@@ -101,6 +103,7 @@ struct MaintenanceTabSection: View {
                             isPurging = false
                         }
                     }
+                    .sumiSecondaryButton()
                     .disabled(isPurging || (cacheBytes ?? 0) == 0)
                 }
             }
@@ -175,8 +178,7 @@ struct MaintenanceTabSection: View {
             }
         }
 
-        // Logs & Debugging Card
-        SettingsCard(title: "Logs & Debugging") {
+        SettingsCard(title: "Logs & debugging") {
             Button {
                 let report = """
                 Anicat Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")
@@ -189,7 +191,7 @@ struct MaintenanceTabSection: View {
                 """
                 Platform.copyToPasteboard(report)
                 withAnimation(.snappy) {
-                    copyFeedback = "Debug report copied to clipboard!"
+                    copyFeedback = "Debug report copied"
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     withAnimation(.snappy) {
@@ -197,24 +199,11 @@ struct MaintenanceTabSection: View {
                     }
                 }
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 13))
-                    Text("Copy Debug Report")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundColor(SumiTheme.foreground.opacity(0.85))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(SumiTheme.border, lineWidth: 1)
-                )
-                .contentShape(Rectangle())
+                Text("Copy debug report")
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.sumiPressable)
+            .sumiSecondaryButton()
+            .controlSize(.large)
 
             #if os(macOS)
             // The file, not its contents: a log is attached to a report,
@@ -222,24 +211,11 @@ struct MaintenanceTabSection: View {
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([AppLog.fileURL])
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 13))
-                    Text("Reveal Log File")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundColor(SumiTheme.foreground.opacity(0.85))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(SumiTheme.border, lineWidth: 1)
-                )
-                .contentShape(Rectangle())
+                Text("Reveal log file")
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.sumiPressable)
+            .sumiSecondaryButton()
+            .controlSize(.large)
             #endif
 
             // Environment Snapshot. No live log stream is wired up in the
@@ -267,108 +243,55 @@ struct MaintenanceTabSection: View {
             )
         }
 
-        // System Maintenance Card
         SettingsCard(
-            title: "System Maintenance",
+            title: "System maintenance",
             description: "Irreversible system actions."
         ) {
-            // Clear Local Registry
-            Button {
-                if registryState == .confirming {
-                    registryState = .working
-                    Task {
-                        let succeeded = await onClearRegistry()
-                        await MainActor.run {
-                            registryState = succeeded ? .done : .idle
-                        }
-                    }
-                } else if registryState == .idle {
-                    registryState = .confirming
-                }
+            Button(role: .destructive) {
+                showsRegistryDialog = true
             } label: {
                 Text(
                     registryState == .working
-                        ? "Wiping Registry..."
+                        ? "Clearing local registry…"
                         : registryState == .done
-                            ? "Registry Wiped"
-                            : registryState == .confirming
-                                ? "Are you sure? Click again to wipe"
-                                : "Clear Local Registry"
+                            ? "Local registry cleared"
+                            : "Clear local registry"
                 )
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(registryState == .done ? SumiTheme.successLight : SumiTheme.dangerLight)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(
-                    registryState == .confirming
-                        ? SumiTheme.danger.opacity(0.18)
-                        : registryState == .done
-                            ? SumiTheme.success.opacity(0.18)
-                            : Color.white.opacity(0.03)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(
-                            registryState == .confirming
-                                ? SumiTheme.danger.opacity(0.40)
-                                : registryState == .done
-                                    ? SumiTheme.success.opacity(0.40)
-                                    : SumiTheme.danger.opacity(0.20),
-                            lineWidth: 1
-                        )
-                )
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.sumiPressable)
-            .animation(.snappy, value: registryState)
+            .sumiSecondaryButton()
+            .controlSize(.extraLarge)
             .disabled(registryState == .working || registryState == .done)
+            .confirmationDialog("Clear the local registry?", isPresented: $showsRegistryDialog) {
+                Button("Clear local registry", role: .destructive) {
+                    registryState = .working
+                    Task {
+                        let succeeded = await onClearRegistry()
+                        registryState = succeeded ? .done : .idle
+                    }
+                }
+            } message: {
+                Text("Your Films and TV list, watch history and resume positions, remembered releases and per-title preferences are deleted from this Mac. Your list on AniList is not changed. This cannot be undone.")
+            }
 
-            // Reset Onboarding Setup
             Button {
-                if onboardingResetState == .confirming {
+                showsOnboardingDialog = true
+            } label: {
+                Text(onboardingResetState == .done ? "Onboarding reset" : "Reset onboarding")
+                    .frame(maxWidth: .infinity)
+            }
+            .sumiSecondaryButton()
+            .controlSize(.large)
+            .disabled(onboardingResetState == .done)
+            .confirmationDialog("Show the setup screens again?", isPresented: $showsOnboardingDialog) {
+                Button("Reset onboarding") {
                     UserDefaults.standard.removeObject(forKey: "anicat_onboarding_seen")
                     onboardingResetState = .done
                     onResetOnboarding()
-                } else if onboardingResetState == .idle {
-                    onboardingResetState = .confirming
                 }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 12))
-                    Text(
-                        onboardingResetState == .done
-                            ? "Onboarding Reset"
-                            : onboardingResetState == .confirming
-                                ? "Are you sure? Click again to Reset"
-                                : "Reset Onboarding Setup"
-                    )
-                    .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundColor(onboardingResetState == .done ? SumiTheme.successLight : SumiTheme.muted)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 9)
-                .background(
-                    onboardingResetState == .confirming
-                        ? SumiTheme.danger.opacity(0.15)
-                        : Color.white.opacity(0.02)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(
-                            onboardingResetState == .confirming
-                                ? SumiTheme.danger.opacity(0.35)
-                                : SumiTheme.border,
-                            lineWidth: 1
-                        )
-                )
-                .contentShape(Rectangle())
+            } message: {
+                Text("Setup opens now. Your settings stay as they are until you change them there.")
             }
-            .buttonStyle(.sumiPressable)
-            .animation(.snappy, value: onboardingResetState)
-            .disabled(onboardingResetState == .done)
         }
     }
 }

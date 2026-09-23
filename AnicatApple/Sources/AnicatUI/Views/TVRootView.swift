@@ -376,8 +376,8 @@ private struct ContinueWatchingShelf: View {
                                 .font(.sumiHeading(size: 24, weight: .medium))
                                 .foregroundStyle(SumiTheme.foreground)
                                 .lineLimit(1)
-                            Text("\(entry.unit) \(entry.nextEpisodeOrChapter) · \(Int(100 - entry.progressPercent))% LEFT")
-                                .font(.system(size: 18, design: .monospaced))
+                            Text("\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter) · \(Int(100 - entry.progressPercent))% left")
+                                .font(.system(size: 18)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.muted)
                                 .lineLimit(1)
                         }
@@ -421,8 +421,8 @@ private struct NewEpisodesShelf: View {
                                 .font(.system(size: 22))
                                 .foregroundStyle(SumiTheme.foreground)
                                 .lineLimit(2, reservesSpace: true)
-                            Text("\(entry.unit) \(entry.nextEpisodeOrChapter) OUT")
-                                .font(.system(size: 18, design: .monospaced))
+                            Text("\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter) out")
+                                .font(.system(size: 18)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.indigo)
                         }
                         .frame(width: TVMetrics.posterWidth, alignment: .leading)
@@ -479,7 +479,7 @@ struct TVPosterCard: View {
             parts.append(String(format: "%.1f", Double(score) / 10))
         }
         if let total = item.totalEpisodesOrChapters, total > 0 {
-            parts.append("\(total) \(item.isManga ? "CH" : "EPS")")
+            parts.append("\(total) \(item.isManga ? "ch" : "eps")")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
@@ -507,7 +507,7 @@ struct TVPosterCard: View {
                 .multilineTextAlignment(.leading)
             if let meta = Self.meta(for: item) {
                 Text(meta)
-                    .font(.system(size: 18, design: .monospaced))
+                    .font(.system(size: 18)).monospacedDigit()
                     .foregroundStyle(SumiTheme.muted)
                     .lineLimit(1)
             }
@@ -640,8 +640,8 @@ private struct LibraryTab: View {
 
     @ViewBuilder
     private func countLine(_ count: Int) -> some View {
-        Text("\(count) TITLES")
-            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+        Text(count == 1 ? "1 title" : "\(count) titles")
+            .font(.system(size: 18, weight: .semibold)).monospacedDigit()
             .foregroundStyle(SumiTheme.muted)
             .padding(.horizontal, TVMetrics.gutter)
     }
@@ -801,7 +801,7 @@ struct TVResolvingCard: View {
                     .animation(.smooth, value: status)
                 TimelineView(.periodic(from: startedAt, by: 1)) { context in
                     Text("\(max(0, Int(context.date.timeIntervalSince(startedAt))))s")
-                        .font(.system(size: 20, design: .monospaced))
+                        .font(.system(size: 20)).monospacedDigit()
                         .foregroundStyle(SumiTheme.muted)
                 }
             }

@@ -192,7 +192,10 @@ struct PersonPageErrorState: View {
     var body: some View {
         VStack(spacing: 14) {
             SumiEmptyState(headline: "Couldn't load this page", detail: message)
-            SumiOutlineButton("Try again", systemImage: "arrow.clockwise", action: onRetry)
+            Button(action: onRetry) {
+                Text("Try again").fontWeight(.semibold)
+            }
+            .sumiPrimaryButton()
         }
     }
 }
@@ -345,8 +348,8 @@ struct PersonPortrait: View {
     }
 }
 
-/// The uppercase mono label every section on these pages is headed with,
-/// matching the "SEASONS & ADAPTATIONS" heading in the Related tab.
+/// The mono label every section on these pages is headed with,
+/// matching the "Seasons & adaptations" heading in the Related tab.
 struct PersonSectionLabel: View {
     let title: String
     var trailing: String?

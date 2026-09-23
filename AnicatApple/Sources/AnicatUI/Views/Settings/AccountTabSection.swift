@@ -8,7 +8,7 @@ struct AccountTabSection: View {
     let onDisconnectAniList: () -> Void
 
     @State private var anilistTokenInput: String = ""
-    @State private var disconnectConfirming: Bool = false
+    @State private var showsDisconnectDialog: Bool = false
     /// A viewer's own TMDB key, which wins over the one the app carries.
     /// `TmdbCredential` is the reader; `@AppStorage` needs a literal here, so
     /// the two spellings have to agree.
@@ -45,7 +45,7 @@ struct AccountTabSection: View {
                     )
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(username ?? "AniList User")
+                        Text(username ?? "AniList user")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundColor(SumiTheme.foreground)
 
@@ -62,29 +62,16 @@ struct AccountTabSection: View {
 
                     Spacer()
 
-                    Button {
-                        if disconnectConfirming {
-                            onDisconnectAniList()
-                            disconnectConfirming = false
-                        } else {
-                            disconnectConfirming = true
-                        }
-                    } label: {
-                        Text(disconnectConfirming ? "Are you sure? Click again" : "Disconnect")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(SumiTheme.dangerLight)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(SumiTheme.card)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(disconnectConfirming ? SumiTheme.danger : SumiTheme.border, lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
+                    Button("Disconnect", role: .destructive) {
+                        showsDisconnectDialog = true
                     }
-                    .buttonStyle(.sumiPressable)
-                    .animation(.snappy, value: disconnectConfirming)
+                    .sumiSecondaryButton()
+                    .controlSize(.large)
+                    .confirmationDialog("Disconnect from AniList?", isPresented: $showsDisconnectDialog) {
+                        Button("Disconnect", role: .destructive, action: onDisconnectAniList)
+                    } message: {
+                        Text("Anicat forgets its AniList token and stops syncing progress. Your list on AniList is not changed.")
+                    }
                 }
                 .padding(14)
                 .background(Color.white.opacity(0.02))
@@ -118,7 +105,7 @@ struct AccountTabSection: View {
 
                 // API Token
                 SettingField(
-                    label: "API Token",
+                    label: "API token",
                     description: "Your authorization token. Keep this private."
                 ) {
                     Text("••••••••••••••••••••••••••••••••")
@@ -149,24 +136,12 @@ struct AccountTabSection: View {
                             Platform.openExternal(url)
                         }
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "globe")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Connect AniList")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .foregroundColor(SumiTheme.indigo)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(SumiTheme.indigo.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(SumiTheme.indigo.opacity(0.30), lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
+                        // Secondary: Save and connect below is this card's
+                        // prominent button.
+                        Text("Connect AniList")
                     }
-                    .buttonStyle(.sumiPressable)
+                    .sumiSecondaryButton()
+                    .controlSize(.large)
                 }
 
                 Divider()
@@ -174,11 +149,11 @@ struct AccountTabSection: View {
 
                 // API Token Input
                 SettingField(
-                    label: "API Token",
+                    label: "API token",
                     description: "After authorizing, paste the full URL you were redirected to (or just the token)."
                 ) {
                     HStack(spacing: 8) {
-                        SecureField("Paste redirect URL or token...", text: $anilistTokenInput)
+                        SecureField("Paste redirect URL or token…", text: $anilistTokenInput)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
                             .foregroundColor(SumiTheme.foreground)
@@ -190,18 +165,10 @@ struct AccountTabSection: View {
                                 anilistTokenInput = ""
                             }
                         } label: {
-                            Text("Save & Connect")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(SumiTheme.background)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(SumiTheme.indigo)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                                .contentShape(Rectangle())
+                            Text("Save and connect").fontWeight(.semibold)
                         }
-                        .buttonStyle(.sumiPressable)
+                        .sumiPrimaryButton()
                         .disabled(anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .opacity(anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1.0)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)

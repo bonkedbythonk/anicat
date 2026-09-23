@@ -3,7 +3,7 @@ import SwiftUI
 /// The shared chrome the views are built from, so a tab bar in the Library and
 /// one in Search are the same control rather than two lookalikes that drift.
 
-/// Page heading: a 19pt semibold title over an uppercase mono subtitle, with
+/// Page heading: a 19pt semibold title over a mono subtitle, with
 /// controls pinned to the trailing edge. Every top-level view uses it.
 public struct SumiPageHeader<Trailing: View>: View {
     let title: String
@@ -89,10 +89,11 @@ public struct SumiTabBar: View {
     }
 }
 
-/// The joined toggle used for Anime/Manga and Grid/Table: one hairline box
-/// with the segments butted together inside it, not separate buttons.
+/// The joined toggle used for Anime/Manga and Grid/Table. A native
+/// segmented picker. It was a hand-drawn row of buttons with an
+/// indigo highlight sliding between them, the web's tabs/toggle-group look;
+/// the system control is what a Mac app offers for one-of-a-few choices.
 public struct SumiSegmentedControl: View {
-    @Namespace private var segmentNamespace
     let options: [(key: String, label: String)]
     @Binding var selection: String
 
@@ -102,46 +103,19 @@ public struct SumiSegmentedControl: View {
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
+        Picker("", selection: $selection) {
             ForEach(options, id: \.key) { option in
-                let isSelected = selection == option.key
-                Button {
-                    if selection != option.key {
-                        SumiHaptics.selection()
-                        withAnimation(.sumiSpring) {
-                            selection = option.key
-                        }
-                    }
-                } label: {
-                    Text(option.label)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(isSelected ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.5))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background {
-                            if isSelected {
-                                Rectangle()
-                                    .fill(SumiTheme.indigo.opacity(0.15))
-                                    .matchedGeometryEffect(id: "sumiSegmentHighlight", in: segmentNamespace)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
+                Text(option.label).tag(option.key)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
-        .animation(.sumiSpring, value: selection)
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 }
 
-/// The hairline-over-ground button: "Pick for me", "Browse all manga",
-/// "Shuffle". Never filled — a fill here competes with the one accent control
-/// a screen is allowed.
+/// The secondary push button: "Browse all manga", "Shuffle". Never
+/// prominent -- that competes with the one primary action a screen is allowed.
 public struct SumiOutlineButton: View {
     let title: String
     var systemImage: String?
@@ -158,20 +132,11 @@ public struct SumiOutlineButton: View {
             HStack(spacing: 6) {
                 Text(title)
                 if let systemImage {
-                    Image(systemName: systemImage).font(.system(size: 11, weight: .semibold))
+                    Image(systemName: systemImage)
                 }
             }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundColor(SumiTheme.foreground.opacity(0.7))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-            .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
         }
-        .buttonStyle(.sumiPressable)
+        .sumiSecondaryButton()
     }
 }
 
@@ -307,10 +272,6 @@ public struct SumiPosterGrid: View {
     // the same screen — see `AppModel.openingDetailSourceKey`.
     let openingSourceKey: String?
     let shelfKey: String
-    // Off unless the caller swaps this grid's contents under the viewer. The
-    // Reading and History grids load once and never change, so an entrance
-    // there would only ever play on the first paint.
-    let entrance: SumiGridEntrance?
     let onSelect: (MediaCard.Item) -> Void
 
     public init(
@@ -318,14 +279,12 @@ public struct SumiPosterGrid: View {
         namespace: Namespace.ID? = nil,
         openingSourceKey: String? = nil,
         shelfKey: String = "grid",
-        entrance: SumiGridEntrance? = nil,
         onSelect: @escaping (MediaCard.Item) -> Void
     ) {
         self.items = items
         self.namespace = namespace
         self.openingSourceKey = openingSourceKey
         self.shelfKey = shelfKey
-        self.entrance = entrance
         self.onSelect = onSelect
     }
 
@@ -335,12 +294,11 @@ public struct SumiPosterGrid: View {
             alignment: .leading,
             spacing: 20
         ) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+            ForEach(items) { item in
                 MediaCard(
                     item: item,
                     namespace: openingSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil
                 ) { onSelect(item) }
-                .sumiStaggeredEntrance(index: index, entrance: entrance)
             }
         }
     }

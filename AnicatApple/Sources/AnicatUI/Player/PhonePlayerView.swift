@@ -207,7 +207,7 @@ struct PhonePlayerView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(SumiTheme.foreground)
                     .lineLimit(1)
-                Text("EP \(controller.episodeNumber) \u{00B7} -\(Self.timestamp(max(0, controller.duration - controller.currentTime)))")
+                Text("Ep \(controller.episodeNumber) \u{00B7} -\(Self.timestamp(max(0, controller.duration - controller.currentTime)))")
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(SumiTheme.muted)
                     .lineLimit(1)

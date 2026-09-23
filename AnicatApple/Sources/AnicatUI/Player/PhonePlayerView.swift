@@ -35,6 +35,18 @@ struct PhonePlayerView: View {
     @State private var releaseFailure: String?
     @State private var isLoadingReleases = false
     @State private var showReleases = false
+    @State private var showEpisodes = false
+    /// Set when Sub/Dub asked for a language the playing file has no track
+    /// in; the alert offers to fetch this episode again in that language.
+    @State private var languageReloadOffer: Bool?
+    /// A pinch and the one-finger recogniser see the same touches. While
+    /// this is set, or just after, the drag is ignored: a pinch opening
+    /// sideways otherwise read as a scrub and landed a seek on lift.
+    /// `GestureState`, not `State`: a cancelled pinch never reaches
+    /// `onEnded`, and a flag left set there would swallow every touch after.
+    @GestureState private var isPinching = false
+    @State private var pinchEndedAt: Date?
+    @AppStorage("anicat_sub_dub") private var storedSubDub: String = "Subtitled"
     /// When `isBuffering` last went true; nil while playing. Drives the
     /// stall line under the spinner.
     @State private var bufferingSince: Date?
@@ -127,6 +139,22 @@ struct PhonePlayerView: View {
         // clock in the same strip as the title.
         .statusBarHidden(!isMinimized)
         .sheet(isPresented: $showReleases) { releaseSheet }
+        .sheet(isPresented: $showEpisodes) { episodesSheet }
+        .alert(
+            languageReloadOffer == true ? "No English audio in this release" : "No Japanese audio in this release",
+            isPresented: Binding(
+                get: { languageReloadOffer != nil },
+                set: { if !$0 { languageReloadOffer = nil } }
+            ),
+            presenting: languageReloadOffer
+        ) { wantsDub in
+            Button(wantsDub ? "Find a dub" : "Find a sub") {
+                controller.onReloadForAudioLanguage?(wantsDub)
+            }
+            Button("Not now", role: .cancel) {}
+        } message: { wantsDub in
+            Text("Next episodes will look for \(wantsDub ? "a dub" : "the subtitled version") first. Search again for this one, from where you are?")
+        }
         .onChange(of: controller.isBuffering, initial: true) { _, buffering in
             bufferingSince = buffering ? Date() : nil
         }
@@ -330,8 +358,73 @@ struct PhonePlayerView: View {
                     .lineLimit(1)
             }
 
+            // Out of the menu and onto the bar: choosing another episode is
+            // the thing a streaming app's player is most often opened for,
+            // and Next/Previous in the overflow menu only reached neighbours.
+            if !controller.episodeList.isEmpty {
+                Button {
+                    showEpisodes = true
+                } label: {
+                    Image(systemName: "rectangle.stack")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .playerGlass(in: Circle())
+                }
+                .accessibilityLabel("Episodes")
+            }
+
             tracksMenu
         }
+    }
+
+    /// The playing title's episodes, the current one in view. Unaired ones
+    /// stay listed, as the detail page lists them, but cannot be picked.
+    @ViewBuilder
+    private var episodesSheet: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                List(controller.episodeList) { episode in
+                    Button {
+                        showEpisodes = false
+                        controller.selectEpisode(episode.number)
+                    } label: {
+                        PlayerEpisodeRow(episode: episode, isCurrent: episode.number == controller.episodeNumber)
+                    }
+                    .disabled(!episode.isAired || episode.number == controller.episodeNumber)
+                    .id(episode.number)
+                }
+                .listStyle(.plain)
+                .onAppear { proxy.scrollTo(controller.episodeNumber, anchor: .center) }
+            }
+            .navigationTitle(controller.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showEpisodes = false }
+                }
+            }
+        }
+    }
+
+    /// Sub/Dub, the standing choice shared with Settings through
+    /// `anicat_sub_dub`. Picking one switches the playing file's audio when it
+    /// carries that language; most releases carry one, and then the alert
+    /// offers a search for this episode in the other language, since a
+    /// switch that only changes the next episode reads as broken.
+    private var subDubSelection: Binding<String> {
+        Binding(
+            get: { storedSubDub },
+            set: { option in
+                storedSubDub = option
+                let wantsDub = option == "Dubbed"
+                guard let select = controller.onSelectAudioLanguage else { return }
+                select(wantsDub) { switched in
+                    if !switched { languageReloadOffer = wantsDub }
+                    fetchTracks()
+                }
+            }
+        )
     }
 
     /// Hands this episode to the Mac at the second the phone is on, and
@@ -360,6 +453,17 @@ struct PhonePlayerView: View {
     @ViewBuilder
     private var tracksMenu: some View {
         Menu {
+            // Films and TV have no sub/dub split; their audio tracks are
+            // the picker below.
+            if AppModel.shared?.currentPlaybackCatalog == .anilist {
+                Picker(selection: subDubSelection) {
+                    Text("Subtitled").tag("Subtitled")
+                    Text("Dubbed").tag("Dubbed")
+                } label: {
+                    Label("Sub / Dub", systemImage: "captions.bubble")
+                }
+                .pickerStyle(.menu)
+            }
             if !audioTracks.isEmpty {
                 Picker("Audio", selection: audioSelection) {
                     ForEach(audioTracks) { track in
@@ -415,6 +519,13 @@ struct PhonePlayerView: View {
                 } label: {
                     Label("Chapters", systemImage: "list.number")
                 }
+            }
+
+            Button {
+                setFill(!controller.isFillingScreen)
+            } label: {
+                Label(controller.isFillingScreen ? "Fit to screen" : "Fill screen",
+                      systemImage: controller.isFillingScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
             }
 
             Button {
@@ -824,9 +935,30 @@ struct PhonePlayerView: View {
                 // the left is brightness, on the right volume, horizontal is
                 // a scrub. What every phone player does, and what the Mac
                 // has no gesture for.
+                // Pinch out to fill, in to fit: the system player's gesture.
+                // Decided on lift, past a small margin, so a two-finger
+                // touch that barely moves changes nothing.
+                .simultaneousGesture(
+                    MagnifyGesture()
+                        .updating($isPinching) { _, pinching, _ in pinching = true }
+                        .onChanged { _ in
+                            holdTask?.cancel()
+                            if dragAxis != nil || heldSpeed { abandonDrag() }
+                        }
+                        .onEnded { value in
+                            pinchEndedAt = Date()
+                            let scale = value.magnification
+                            if scale > 1.08, !controller.isFillingScreen {
+                                setFill(true)
+                            } else if scale < 0.92, controller.isFillingScreen {
+                                setFill(false)
+                            }
+                        }
+                )
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { drag in
+                            guard !isPinching else { return }
                             if !touchDown {
                                 touchDown = true
                                 AppLog.write("[gesture] touch down at \(Int(drag.startLocation.x)),\(Int(drag.startLocation.y)) in \(Int(geo.size.width))x\(Int(geo.size.height))")
@@ -886,6 +1018,15 @@ struct PhonePlayerView: View {
                             AppLog.write("[gesture] ended axis=\(String(describing: dragAxis)) translation=\(Int(drag.translation.width)),\(Int(drag.translation.height)) held=\(heldSpeed)")
                             holdTask?.cancel()
                             touchDown = false
+                            // The fingers of a pinch lift after it ends; that
+                            // lift is not a tap and must not show the chrome.
+                            if isPinching || pinchEndedAt.map({ Date().timeIntervalSince($0) < 0.5 }) == true {
+                                // Only when something is left to undo: the
+                                // call clears the HUD, and the pinch has just
+                                // put "Fill" or "Fit" there.
+                                if heldSpeed || dragAxis != nil { abandonDrag() }
+                                return
+                            }
                             if heldSpeed {
                                 heldSpeed = false
                                 controller.setPlaybackRate(storedSpeed)
@@ -928,6 +1069,45 @@ struct PhonePlayerView: View {
         controller.showControlsBriefly()
     }
 
+    /// Undoes whatever the first finger of a pinch had started: the drag
+    /// fixes its axis at 12pt, and two fingers spreading cross that before
+    /// the pinch is recognised. A finger resting past 0.5s first has already
+    /// switched to 2x, and the pinch's lift never reaches the restore in the
+    /// drag's `onEnded`, so the rate is put back here too.
+    private func abandonDrag() {
+        holdTask?.cancel()
+        if heldSpeed {
+            heldSpeed = false
+            controller.setPlaybackRate(storedSpeed)
+            hud = nil
+        }
+        switch dragAxis {
+        case .horizontal?:
+            scrubTarget = nil
+            controller.isScrubbing = false
+        case .brightness?:
+            UIScreen.main.brightness = CGFloat(dragStartValue)
+        case .volume?:
+            controller.setVolume(dragStartValue)
+        case nil:
+            break
+        }
+        dragAxis = nil
+        hud = nil
+    }
+
+    private func setFill(_ fill: Bool) {
+        controller.setFillScreen(fill)
+        withAnimation(.easeOut(duration: 0.12)) {
+            hud = Hud(symbol: fill ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left",
+                      text: fill ? "Fill" : "Fit")
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            withAnimation(.easeIn(duration: 0.2)) { if !heldSpeed { hud = nil } }
+        }
+    }
+
     @ViewBuilder
     private func seekFlash(symbol: String, trailing: Bool) -> some View {
         HStack {
@@ -965,6 +1145,12 @@ struct PhonePlayerView: View {
                 Text(PlayerController.withElapsed("Searching indexers", seconds))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.8))
+            }
+            // Not while the Mac serves the stream: the phone's engine may
+            // still hold a preload or its last local torrent, whose peers
+            // say nothing about this one.
+            if controller.resolveStatus == nil, AppModel.shared?.activeRemoteStreamToken == nil {
+                SwarmLine(controller: controller)
             }
             // A spinner that has sat for a quarter of a minute with mpv's
             // percentage not moving is a swarm that dried up, and on a
@@ -1011,6 +1197,105 @@ struct PhonePlayerView: View {
         return h > 0
             ? String(format: "%d:%02d:%02d", h, m, s)
             : String(format: "%d:%02d", m, s)
+    }
+}
+
+/// Peers and speed under the stall spinner, read once a second. During a
+/// resolve the line above already carries the engine's own reading, and the
+/// swarm stats would describe the torrent being left.
+private struct SwarmLine: View {
+    let controller: PlayerController
+    @State private var line: String?
+
+    var body: some View {
+        // Always a `Text`, never an empty branch: the `task` below needs a
+        // view to hang on from the first frame.
+        Text(line ?? " ")
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.65))
+            .task {
+                while !Task.isCancelled {
+                    controller.onFetchSwarmSummary? { line = $0 }
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
+    }
+}
+
+/// One row of the in-player episode list: the detail page's row, with room
+/// for the synopsis and a marker on the one playing.
+private struct PlayerEpisodeRow: View {
+    let episode: MediaDetailView.EpisodeItem
+    let isCurrent: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack(alignment: .bottomLeading) {
+                CachedAsyncImage(url: episode.thumbnailURL, maxPixelSize: 300) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    SumiTheme.card
+                }
+                .frame(width: 112, height: 63)
+                .clipped()
+                if isCurrent {
+                    Color.black.opacity(0.45)
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if episode.isWatched {
+                    Color.black.opacity(0.45)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                if let percent = episode.progressPercent, percent > 0, !episode.isWatched {
+                    Rectangle()
+                        .fill(SumiTheme.indigo)
+                        .frame(width: 112 * min(percent, 100) / 100, height: 3)
+                }
+            }
+            .frame(width: 112, height: 63)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(isCurrent ? "EPISODE \(episode.number) \u{00B7} NOW PLAYING" : "EPISODE \(episode.number)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(isCurrent ? SumiTheme.indigo : SumiTheme.muted)
+                if !episode.title.isEmpty {
+                    Text(episode.title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(episode.isAired ? SumiTheme.foreground : SumiTheme.muted)
+                        .lineLimit(1)
+                }
+                if !episode.isAired {
+                    Text(Self.airDate(episode.airDate).map { "Airs \($0)" } ?? "Not aired yet")
+                        .font(.system(size: 11))
+                        .foregroundStyle(SumiTheme.muted)
+                } else if let synopsis = episode.synopsis, !synopsis.isEmpty {
+                    Text(synopsis)
+                        .font(.system(size: 11))
+                        .foregroundStyle(SumiTheme.muted)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    /// AniZip's `YYYY-MM-DD`, read as UTC because that is how it is written;
+    /// local time rolled the date back a day west of Greenwich.
+    private static func airDate(_ raw: String?) -> String? {
+        guard let raw,
+              let date = try? Date(raw, strategy: Date.ISO8601FormatStyle().year().month().day())
+        else { return nil }
+        var style = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        style.timeZone = .gmt
+        return date.formatted(style)
     }
 }
 

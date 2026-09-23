@@ -823,6 +823,9 @@ public struct MpvSurface {
             controller.onCycleSideways = { [weak self] in
                 self?.cycleSideways()
             }
+            controller.onSetFillScreen = { [weak self] fill, crop in
+                self?.setFillScreen(fill, crop: crop)
+            }
 
             mpv_observe_property(handle, 1, "time-pos", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 2, "duration", MPV_FORMAT_DOUBLE)
@@ -878,6 +881,9 @@ public struct MpvSurface {
             setSpeed(controller.playbackRate)
             setSubtitleScale(PlayerController.subtitleScaleSetting)
             setSubtitleStyle(SubtitleStyle.current)
+            if controller.isFillingScreen {
+                setFillScreen(true, crop: controller.fillCrop)
+            }
 
             if let pending = pendingStreamURL {
                 loadFile(url: pending)
@@ -1242,6 +1248,20 @@ public struct MpvSurface {
             mpv_set_property(mpv, "sub-scale", MPV_FORMAT_DOUBLE, &value)
         }
 
+        /// ASS places dialogue against the video, and filled, the video runs
+        /// past the screen: the bottom line was cut in half on the 17 Pro.
+        /// `sub-ass-use-margins` does not help, because mpv clamps the
+        /// overhang to zero before libass sees it. So the dialogue styles'
+        /// `MarginV` is raised by the crop instead; signs with their own
+        /// position still crop with the picture, as in the system player.
+        func setFillScreen(_ fill: Bool, crop: Double) {
+            guard let mpv = mpv else { return }
+            var value: Double = fill ? 1 : 0
+            mpv_set_property(mpv, "panscan", MPV_FORMAT_DOUBLE, &value)
+            fillCrop = crop
+            setSubtitleStyle(SubtitleStyle.current)
+        }
+
         /// ASS releases through named-style overrides, text subtitles through
         /// the `sub-*` options; `SubtitleStyle` says why not `force`. A
         /// failed set (an option this libmpv does not know) is ignored: the
@@ -1249,7 +1269,7 @@ public struct MpvSurface {
         /// error in the middle of an episode.
         func setSubtitleStyle(_ style: SubtitleStyle) {
             guard let mpv = mpv else { return }
-            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides(playResY: scriptHeight))
+            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides(playResY: scriptHeight, liftingBy: fillCrop))
             for (name, value) in style.textOptions {
                 mpv_set_property_string(mpv, name, value)
             }
@@ -1526,6 +1546,13 @@ public struct MpvSurface {
         var scriptHeight: Double {
             get { scriptHeightLock.lock(); defer { scriptHeightLock.unlock() }; return _scriptHeight }
             set { scriptHeightLock.lock(); _scriptHeight = newValue; scriptHeightLock.unlock() }
+        }
+        /// Read by `setSubtitleStyle`, which the event loop calls off the main
+        /// thread when a new file's script height arrives.
+        private var _fillCrop: Double = 0
+        var fillCrop: Double {
+            get { scriptHeightLock.lock(); defer { scriptHeightLock.unlock() }; return _fillCrop }
+            set { scriptHeightLock.lock(); _fillCrop = newValue; scriptHeightLock.unlock() }
         }
 
         /// mpv's `demuxer-cache-state/seekable-ranges` as spans in seconds.
@@ -2060,6 +2087,8 @@ public struct MpvSurface {
             controller.onSetSubtitleScale = nil
             controller.onCycleSideways = nil
             controller.sidewaysState = 0
+            controller.onSetFillScreen = nil
+            controller.isFillingScreen = false
             sidewaysSavedHwdec = nil
             lastLoadedURL = nil
             pendingStreamURL = nil

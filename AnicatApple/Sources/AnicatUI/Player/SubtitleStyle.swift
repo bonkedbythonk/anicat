@@ -136,20 +136,31 @@ public enum SubtitleStyle: String, CaseIterable, Identifiable, Sendable {
     /// the thick outline that makes the look ("looks completely off"). So
     /// they are scaled from 360-line units to the file's own here, and the
     /// player re-applies the style whenever the subtitle track changes.
-    func assOverrides(playResY: Double = 360) -> String {
-        guard let look else { return "" }
+    ///
+    /// `crop` is the share of the picture cut off each edge by the phone's
+    /// fill mode; the dialogue's vertical margin grows by it so bottom and top
+    /// lines land on the screen instead of past it. Absolute, since an
+    /// override cannot add to the file's value: the file's own 23 of 360
+    /// lines, plus the crop.
+    func assOverrides(playResY: Double = 360, liftingBy crop: Double = 0) -> String {
+        var fields: [(String, String)] = []
         let k = playResY / 360
-        var fields: [(String, String)] = [
-            ("Fontname", look.font),
-            ("Bold", look.bold ? "-1" : "0"),
-            ("PrimaryColour", Self.assColour(look.text)),
-            ("OutlineColour", Self.assColour(look.outline)),
-            ("BackColour", Self.assColour(look.shadow)),
-            ("BorderStyle", look.boxed ? "3" : "1"),
-            ("Outline", Self.number(look.outlineWidth * k)),
-            ("Shadow", Self.number(look.shadowOffset * k)),
-        ]
-        if let size = look.size { fields.append(("Fontsize", Self.number(size * k))) }
+        if let look {
+            fields += [
+                ("Fontname", look.font),
+                ("Bold", look.bold ? "-1" : "0"),
+                ("PrimaryColour", Self.assColour(look.text)),
+                ("OutlineColour", Self.assColour(look.outline)),
+                ("BackColour", Self.assColour(look.shadow)),
+                ("BorderStyle", look.boxed ? "3" : "1"),
+                ("Outline", Self.number(look.outlineWidth * k)),
+                ("Shadow", Self.number(look.shadowOffset * k)),
+            ]
+            if let size = look.size { fields.append(("Fontsize", Self.number(size * k))) }
+        }
+        if crop > 0 {
+            fields.append(("MarginV", "\(Int(((23.0 / 360) + crop) * playResY))"))
+        }
         return Self.dialogueStyleNames
             .flatMap { style in fields.map { "\(style).\($0.0)=\($0.1)" } }
             .joined(separator: ",")

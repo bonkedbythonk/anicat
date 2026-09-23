@@ -132,6 +132,15 @@ extension AppModel {
                 }
             }
         }
+        playerController.onFetchSwarmSummary = { [weak self] completion in
+            Task { @MainActor [weak self] in
+                guard let self, let engine = self.engine else { return completion(nil) }
+                self.engineIOQueue.async {
+                    let line = Self.swarmSummary(engine.playingTorrentStats())
+                    Task { @MainActor in completion(line) }
+                }
+            }
+        }
         playerController.onPreviousEpisode = { [weak self] in
             Task { await self?.playAdjacentEpisode(offset: -1) }
         }
@@ -1922,5 +1931,19 @@ extension AppModel {
             : String(format: "%@, %.2f MiB/s down, %.2f MiB/s up", stats.state, stats.downloadMibPerSec, stats.uploadMibPerSec)))
         rows.append(StreamDetailRow("Peers", "\(stats.peersLive) live, \(stats.peersConnecting) connecting, \(stats.peersSeen) seen"))
         return rows
+    }
+    /// The playing swarm in the few words that fit under a spinner. Nil for
+    /// no swarm and for a finished file: a stall on a complete file is mpv's,
+    /// and a peer count there would point at the wrong culprit.
+    nonisolated static func swarmSummary(_ stats: PlayingTorrentStats?) -> String? {
+        guard let stats, !stats.finished else { return nil }
+        guard stats.peersLive > 0 else {
+            return stats.peersConnecting > 0 ? "Connecting to \(stats.peersConnecting) peers" : "No peers"
+        }
+        let peers = "\(stats.peersLive) peer\(stats.peersLive == 1 ? "" : "s")"
+        let rate = stats.downloadMibPerSec >= 1
+            ? String(format: "%.1f MB/s", stats.downloadMibPerSec)
+            : "\(Int(stats.downloadMibPerSec * 1024)) KB/s"
+        return "\(peers) \u{00B7} \(rate)"
     }
 }

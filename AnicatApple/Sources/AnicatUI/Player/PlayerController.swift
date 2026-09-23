@@ -341,6 +341,39 @@ public final class PlayerController {
     public var sidewaysState: Int = 0
     public var onCycleSideways: (@MainActor () -> Void)?
 
+    /// Pinch to fill on the phone: mpv's `panscan` at 1, cropping a 16:9
+    /// picture to the 19.5:9 screen instead of pillarboxing it. Session-only
+    /// like the system player's zoom; the coordinator puts it back to fit
+    /// when it tears down.
+    public var isFillingScreen: Bool = false
+    /// `crop` is the share of the picture's height cut off each edge, which
+    /// the coordinator lifts the dialogue by.
+    public var onSetFillScreen: (@Sendable (_ fill: Bool, _ crop: Double) -> Void)?
+    public func setFillScreen(_ fill: Bool) {
+        isFillingScreen = fill
+        onSetFillScreen?(fill, fill ? fillCrop : 0)
+    }
+
+    /// 0.091 for 16:9 on the 17 Pro's 2.17:1. Zero for a picture already
+    /// wider than the screen: filling that crops the sides, and the dialogue
+    /// at the bottom stays where it was.
+    var fillCrop: Double {
+        #if os(iOS)
+        let bounds = UIScreen.main.bounds
+        let screen = max(bounds.width, bounds.height) / max(min(bounds.width, bounds.height), 1)
+        guard let video = videoAspectRatio, screen > video else { return 0 }
+        return (1 - video / screen) / 2
+        #else
+        return 0
+        #endif
+    }
+
+    /// The playing swarm as one short line ("6 peers · 2.3 MB/s"), nil for
+    /// a file with no swarm behind it. The stall spinner only had mpv's
+    /// cache percentage, which sits at the same number whether the swarm is
+    /// slow or gone.
+    public var onFetchSwarmSummary: (@Sendable (_ completion: @escaping @Sendable @MainActor (String?) -> Void) -> Void)?
+
     // Skip windows (chapters first, AniSkip filling what chapters left).
     public var introStartTime: Double? = nil
     public var introEndTime: Double? = nil

@@ -52,6 +52,23 @@ struct SubtitleStyleTests {
         #expect(field(SubtitleStyle.streaming.assOverrides(playResY: 360), "Fontsize") == nil)
     }
 
+    @Test("Fill mode lifts only the dialogue, by the crop, in the file's own lines")
+    func liftedForFill() {
+        // 16:9 filled on a 2.17:1 screen loses 9.1% off each edge.
+        let lifted = SubtitleStyle.release.assOverrides(playResY: 360, liftingBy: 0.091)
+            .split(separator: ",").map(String.init)
+        #expect(lifted.contains("Default.MarginV=55"))
+        #expect(lifted.contains("DefaultItalicsTop.MarginV=55"))
+        #expect(lifted.allSatisfy { $0.contains(".MarginV=") })
+        #expect(!lifted.contains { $0.hasPrefix("Sign.") })
+        #expect(SubtitleStyle.release.assOverrides(playResY: 1080, liftingBy: 0.091).contains("Default.MarginV=167"))
+        // A preset keeps its look and gains the margin.
+        let preset = SubtitleStyle.simulcast.assOverrides(playResY: 360, liftingBy: 0.091)
+        #expect(preset.contains("Default.Fontname=Trebuchet MS"))
+        #expect(preset.contains("Default.MarginV=55"))
+        #expect(!SubtitleStyle.simulcast.assOverrides(playResY: 360).contains("MarginV"))
+    }
+
     @Test("Script height is read the way libass defaults it")
     func playResY() {
         #expect(SubtitleStyle.playResY(fromHeader: "[Script Info]\nPlayResX: 640\nPlayResY: 360\n") == 360)

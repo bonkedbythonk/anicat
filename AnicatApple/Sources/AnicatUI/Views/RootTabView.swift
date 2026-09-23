@@ -293,11 +293,26 @@ public struct RootTabView: View {
             get: { detailOwner == owner },
             // Only the owning tab may release the page. An unguarded setter
             // let whichever tab was being left clear a page another tab owned.
+            //
+            // The model is cleared here, synchronously, and never through
+            // `closeDetail`. Taking the page to another tab used to pop the
+            // first tab's page, whose `onChange` ran `closeDetail` on the
+            // shared model while the new title's fetch was starting: it
+            // cancelled that fetch and restored the previous entry of
+            // `detailHistory` (a title reached through a relation row), so a
+            // tap on one show landed on a different one. The phone has no
+            // step-back through that history -- Back leaves the page -- so
+            // nothing here should ever restore from it. Tap order keeps this
+            // safe: `showDetail = true` runs before the `openDetail` task.
             set: { presented in
                 if presented {
+                    if let previous = detailOwner, previous != owner {
+                        model.clearDetail()
+                    }
                     detailOwner = owner
                 } else if detailOwner == owner {
                     detailOwner = nil
+                    model.clearDetail()
                 }
             }
         )
@@ -369,9 +384,9 @@ struct TabHeader<Trailing: View>: View {
 /// The flag is per tab and set at tap time, not when the fetch lands:
 /// `openDetail` is async, so binding the push to `selectedMediaDetails`
 /// instead would leave the tap dead for as long as AniList takes to answer.
-/// Clearing the model is driven off the flag going false — doing it in the
-/// page's `onDisappear` also fired on a tab switch, which emptied the page
-/// still pushed on the tab being left.
+/// Clearing the model belongs to `RootTabView.scoped(to:)`, which knows
+/// whether the page went false because it was popped or because another tab
+/// took it; this modifier cannot tell the two apart.
 struct DetailPush: ViewModifier {
     @Bindable var model: AppModel
     @Binding var isPresented: Bool
@@ -380,9 +395,6 @@ struct DetailPush: ViewModifier {
         content
             .navigationDestination(isPresented: $isPresented) {
                 PhoneDetailView(model: model)
-            }
-            .onChange(of: isPresented) { _, presented in
-                if !presented { model.closeDetail() }
             }
 
     }

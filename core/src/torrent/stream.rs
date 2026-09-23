@@ -43,6 +43,7 @@ pub async fn serve(manager: Arc<TorrentManager>) -> Result<u16, String> {
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let app = Router::new()
         .route("/torrent-stream", get(torrent_stream_handler))
+        .route("/torrent-segments", get(torrent_segments_handler))
         .with_state(manager);
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -176,6 +177,65 @@ pub async fn torrent_stream_handler(
         builder.status(StatusCode::OK)
     };
     builder.body(body).unwrap()
+}
+
+/// An m3u of the torrent's other files for mpv's `ordered-chapters-files`.
+///
+/// Releases with ordered chapters (Coalgirls' Valkyria Chronicles, among
+/// others) keep the OP and ED in files of their own that each episode links
+/// by segment UID. mpv looks for them in the playing file's directory, and a
+/// loopback URL has none: "Playback source is not a normal disk file. Will
+/// not search for related files.", and both were cut from every episode.
+/// mpv only reads this when a file does link another, so a plain episode
+/// never asks for it.
+///
+/// Smallest first, because mpv opens entries in order and stops once every
+/// link is found, and each open waits on that file's first piece from the
+/// swarm. Files over half this one's size are left out: those are other
+/// episodes, and when a link is missing from the pack mpv would otherwise
+/// open every one of them (40 in that Coalgirls batch) before playing.
+pub async fn torrent_segments_handler(
+    State(manager): State<Arc<TorrentManager>>,
+    Query(q): Query<StreamQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let session = match manager.session().await {
+        Ok(s) => s,
+        Err(e) => return error_response(StatusCode::SERVICE_UNAVAILABLE, &e),
+    };
+    let Some(handle) = session.get(q.t.into()) else {
+        return error_response(StatusCode::NOT_FOUND, "torrent not found");
+    };
+    let files = handle.with_metadata(|m| {
+        m.file_infos
+            .iter()
+            .map(|f| (f.relative_filename.to_string_lossy().to_lowercase(), f.len))
+            .collect::<Vec<_>>()
+    });
+    let Ok(files) = files else {
+        return error_response(StatusCode::NOT_FOUND, "torrent metadata not resolved");
+    };
+    let Some(&(_, own_len)) = files.get(q.f) else {
+        return error_response(StatusCode::NOT_FOUND, "file not found in torrent");
+    };
+    let Some(host) = headers.get(http::header::HOST).and_then(|h| h.to_str().ok()) else {
+        return error_response(StatusCode::BAD_REQUEST, "no Host header");
+    };
+    let mut linked: Vec<(usize, u64)> = files
+        .iter()
+        .enumerate()
+        .filter(|(i, (name, len))| *i != q.f && name.ends_with(".mkv") && *len < own_len / 2)
+        .map(|(i, (_, len))| (i, *len))
+        .collect();
+    linked.sort_by_key(|&(_, len)| len);
+    let mut body = String::from("#EXTM3U\n");
+    for (i, _) in linked {
+        body.push_str(&format!("http://{host}/torrent-stream?t={}&f={i}\n", q.t));
+    }
+    Response::builder()
+        .header(http::header::CONTENT_TYPE, "audio/x-mpegurl")
+        .body(Body::from(body))
+        .unwrap()
 }
 
 #[cfg(test)]

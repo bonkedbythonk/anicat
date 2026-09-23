@@ -1202,6 +1202,13 @@ public struct MpvSurface {
             // through `loadfile ... replace`, and `alang` is consumed at
             // load time.
             mpv_set_property_string(mpv, "alang", Coordinator.audioLanguages(preferDub: Coordinator.preferDubSetting()))
+            // A torrent stream is a loopback URL, so mpv has no directory to
+            // find an ordered-chapters release's OP/ED files in and played
+            // episodes without them. The engine lists the torrent's other
+            // files instead; empty for a local file keeps mpv's own scan.
+            let segments = url.contains("/torrent-stream?")
+                ? url.replacingOccurrences(of: "/torrent-stream?", with: "/torrent-segments?") : ""
+            mpv_set_property_string(mpv, "ordered-chapters-files", segments)
             runCommand(["loadfile", url, "replace"])
             print("[libmpv] Playing stream: \(url)")
         }

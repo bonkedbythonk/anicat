@@ -566,6 +566,7 @@ extension AppModel {
             if played >= Self.minimumPlaybackBeforeCompletionSeconds {
                 AppLog.write("[progress] ep \(episode) finished by Next after \(Int(played))s played")
                 markEpisodeFinished(catalogId: catalogId, episode: episode)
+                queueWatchedDownloadRemoval(catalogId: catalogId, episode: episode)
             } else {
                 AppLog.write("[progress] ep \(episode) left by Next after \(Int(played))s played: not marked")
             }
@@ -869,7 +870,8 @@ extension AppModel {
                 catalogId: details.id,
                 episode: Int64(episode),
                 title: details.title,
-                preferDub: preferDub
+                preferDub: preferDub,
+                preferSmall: Self.prefersSmallerDownloads
             )
         } catch {
             downloadStates[episode] = .failed(message: error.localizedDescription)
@@ -1013,6 +1015,12 @@ extension AppModel {
                 // when it isn't — see `advanceAniListProgress`.
                 Task { await self.advanceAniListProgress(catalogId: catalogId, episode: Int(episode)) }
             }
+        }
+
+        // Any catalog, not just AniList's: a downloaded film is as much space.
+        if completionRulesApply, dur > 0,
+           Double(stopTime) / Double(dur) * 100 >= Self.watchedThresholdPct {
+            queueWatchedDownloadRemoval(catalogId: catalogId, episode: episode)
         }
 
         // Resolve the next episode into the second selected-file slot before
@@ -1315,6 +1323,7 @@ extension AppModel {
         // and a new surface applies `isMuted` at setup.
         playerController.onSetMuted?(true)
         self.activeStreamURL = nil
+        flushWatchedDownloadRemovals()
         if wasPlaying {
             playFeedback(.playerClose)
         }

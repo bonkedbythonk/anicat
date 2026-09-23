@@ -6,6 +6,81 @@ import SwiftUI
 import AnicatCoreKit
 
 extension AppModel {
+    /// Downloads take the smallest release that is as good a match (720p or
+    /// HEVC) instead of streaming's pick, SubsPlease's 1.4 GB 1080p H.264:
+    /// 587 MB for Frieren S2 05 and 225 MB for Buddy Daddies 03 (2026-09-23).
+    /// On by default on the phone, where every download is its own storage;
+    /// off on the Mac, whose copies land in the viewer's Downloads folder.
+    static let smallerDownloadsKey = "anicat_smaller_downloads"
+    static var prefersSmallerDownloads: Bool {
+        UserDefaults.standard.object(forKey: smallerDownloadsKey) as? Bool ?? isPhoneDefault
+    }
+
+    /// A downloaded episode is deleted once it counts as watched. Same
+    /// defaults, same reason: on the phone the file is in the app's own
+    /// container and nothing but this app can ever remove it.
+    static let deleteWatchedDownloadsKey = "anicat_delete_watched_downloads"
+    static var deletesWatchedDownloads: Bool {
+        UserDefaults.standard.object(forKey: deleteWatchedDownloadsKey) as? Bool ?? isPhoneDefault
+    }
+
+    private static var isPhoneDefault: Bool {
+        #if os(iOS)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// Forgets a download and, when asked, deletes its file. The phone's
+    /// Downloads page used to drop the row only: the file stayed in the app's
+    /// container, where nothing else can reach it, and the row came back at
+    /// the next launch from the engine's table.
+    public func removeDownload(_ download: LibraryDownload, deleteFile: Bool) {
+        libraryDownloads.removeAll { $0.id == download.id }
+        pendingWatchedDownloadRemovals.remove(download.id)
+        if selectedMediaDetails?.id == download.catalogId {
+            downloadStates[download.episode] = nil
+        }
+        guard let engine else { return }
+        let catalog = download.catalog.ffi
+        engineIOQueue.async {
+            try? engine.removeDownloadedEpisode(
+                catalog: catalog, catalogId: download.catalogId,
+                episode: Int64(download.episode), deleteFile: deleteFile
+            )
+        }
+    }
+
+    /// Marks the playing episode's download, if it has one, for deletion
+    /// once the file is no longer being read. Called where the episode
+    /// counts as watched: the 85% line, and Next after real playback.
+    func queueWatchedDownloadRemoval(catalogId: Int64, episode: Int64) {
+        guard Self.deletesWatchedDownloads else { return }
+        let card: MediaCard.CardCatalog = switch currentPlaybackCatalog {
+        case .tmdbMovie: .tmdbMovie
+        case .tmdbTv: .tmdbTv
+        case .anilist, .mangaDex: .anilist
+        }
+        guard let download = finishedDownload(catalog: card, catalogId: catalogId, episode: Int(episode)),
+              !pendingWatchedDownloadRemovals.contains(download.id) else { return }
+        pendingWatchedDownloadRemovals.insert(download.id)
+        AppLog.write("[downloads] ep \(episode) of \(catalogId) watched: its download goes when playback moves on")
+    }
+
+    /// Deletes the queued downloads except the one mpv has open. Unlinking an
+    /// open file would not stop mpv, but a rewind into the credits after the
+    /// 85% line should still find the file, so it waits for the stop.
+    func flushWatchedDownloadRemovals() {
+        guard !pendingWatchedDownloadRemovals.isEmpty else { return }
+        let playing = activeStreamURL?.isFileURL == true ? activeStreamURL?.path : nil
+        for download in libraryDownloads where pendingWatchedDownloadRemovals.contains(download.id) {
+            if let path = DownloadsView.donePath(download.state), path == playing { continue }
+            AppLog.write("[downloads] deleting watched \(download.title) ep \(download.episode)")
+            removeDownload(download, deleteFile: true)
+        }
+    }
+
     /// The finished download of `episode`, if its row is still listed and
     /// its file is still where the engine left it. A `.done` state records
     /// where the copy landed, not that it is still there: the folder is the

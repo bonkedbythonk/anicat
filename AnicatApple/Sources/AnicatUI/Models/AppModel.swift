@@ -1293,6 +1293,10 @@ public final class AppModel {
     }
 
     public var libraryDownloads: [LibraryDownload] = []
+    /// `LibraryDownload.id`s whose episode counted as watched while this
+    /// setting was on; deleted once nothing is playing them. See
+    /// `queueWatchedDownloadRemoval`.
+    var pendingWatchedDownloadRemovals: Set<String> = []
 
     // MARK: - System
     //

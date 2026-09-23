@@ -1338,6 +1338,7 @@ impl AnicatEngine {
                     episode_count: info.episode_count,
                     aired_episodes: info.aired_episodes,
                     prefer_dub: req.prefer_dub,
+                    prefer_small: false,
                     // libmpv decodes everything a release can be encoded in,
                     // so nothing here is filtered on codec. This flag existed
                     // for the WebKit `<video>` element, which is gone.
@@ -2395,6 +2396,7 @@ impl AnicatEngine {
                     // preference — that choice belongs to whoever is
                     // picking, not to the same default the auto-pick uses.
                     prefer_dub: preview_dub,
+                    prefer_small: false,
                     browser_client: false,
                     chosen_name: None,
                     movie: cinema.as_ref().and_then(|c| c.movie_criteria),
@@ -2443,6 +2445,9 @@ impl AnicatEngine {
         episode: i64,
         title: Option<String>,
         prefer_dub: bool,
+        // Smallest-first among equally good releases: see
+        // `search::prefer_smaller`. The phone passes it by default.
+        prefer_small: bool,
     ) -> FfiResult<()> {
         let media = MediaKey::new(catalog.into(), catalog_id);
         // A cinema download searches on exactly what a cinema play searches
@@ -2489,6 +2494,7 @@ impl AnicatEngine {
                         .map(|c| Some(c.episode_count))
                         .unwrap_or(info.aired_episodes),
                     prefer_dub,
+                    prefer_small,
                     browser_client: false,
                     chosen_name: None,
                     movie: cinema.as_ref().and_then(|c| c.movie_criteria),
@@ -4212,6 +4218,7 @@ impl AnicatEngine {
                     episode_count: Some(episode_count),
                     aired_episodes: Some(episode_count),
                     prefer_dub: req.prefer_dub,
+                    prefer_small: false,
                     browser_client: false,
                     chosen_name: req.chosen_name.clone(),
                     movie: movie_criteria,

@@ -372,7 +372,8 @@ struct PhoneDownloadsView: View {
         DownloadsView(
             downloads: model.libraryDownloads,
             onPlay: { download in Task { await model.playDownloadedFile(download) } },
-            onRemove: { download in model.libraryDownloads.removeAll { $0.id == download.id } },
+            // The file too: on the phone it is in the app's own container.
+            onRemove: { download in model.removeDownload(download, deleteFile: true) },
             chapters: model.offlineChapters,
             chapterBytes: model.offlineBytes,
             chapterCapBytes: model.offlineCapBytes,

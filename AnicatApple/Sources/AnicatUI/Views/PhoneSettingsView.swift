@@ -34,6 +34,10 @@ struct PhoneSettingsView: View {
     // `AppModel.isCellularWarningEnabled` owns the reader and the default;
     // `@AppStorage` needs a literal here, so the two must agree.
     @AppStorage("anicat_warn_on_cellular") private var warnOnCellular: Bool = true
+    // `AppModel.prefersSmallerDownloads` / `deletesWatchedDownloads` own the
+    // readers; both default on for the phone.
+    @AppStorage(AppModel.smallerDownloadsKey) private var smallerDownloads: Bool = true
+    @AppStorage(AppModel.deleteWatchedDownloadsKey) private var deleteWatchedDownloads: Bool = true
     // `AppModel.isStreamFromMacEnabled` owns the reader and the default.
     @AppStorage("anicat_stream_from_mac") private var streamFromMac: Bool = true
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
@@ -373,6 +377,14 @@ struct PhoneSettingsView: View {
             }
             .disabled(isPurging || (cacheBytes ?? 0) == 0)
             Text("Cleared automatically when you leave the app. Whatever is playing is kept.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
+            Toggle("Smaller downloads", isOn: $smallerDownloads)
+            Text("Downloads pick a 720p or HEVC release when one is as good a match: about half to a sixth of the size, and hard to tell apart on a phone.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
+            Toggle("Delete watched downloads", isOn: $deleteWatchedDownloads)
+            Text("A downloaded episode is removed once you have watched it.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(SumiTheme.muted)
         }

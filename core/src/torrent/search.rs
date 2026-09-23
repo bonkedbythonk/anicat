@@ -2348,6 +2348,39 @@ fn merge_duplicates(candidates: Vec<Candidate>) -> Vec<Candidate> {
     out
 }
 
+/// For a download, the smallest release that is still as good a match,
+/// first. Streaming takes the best-ranked release, which is SubsPlease's
+/// 1080p H.264 at 1.4 GB an episode; the same episodes came as 587 MB (Frieren
+/// S2 05) and 225 MB (Buddy Daddies 03) in 1080p HEVC, and 715 MB in 720p
+/// (2026-09-23), which on a phone is most of its storage per season.
+///
+/// Absolute rather than "within so many points of the best": SubsPlease's API
+/// scores on its own 2000 scale, so nothing from Nyaa is ever near it. What
+/// qualifies is a named episode (not a guessed pack, whose size is the whole
+/// pack), a swarm measured at twice the dead line, a known size, and the same
+/// sub/dub kind as the top pick. A 720p release keeps its place despite
+/// `SD_PENALTY`; dub-only, specials and wrong-kind releases fall under 600.
+/// AV1 is left out: the smallest Frieren S2 05 was an AV1 encode, which only
+/// the newest iPhones decode in hardware, and in software it costs battery
+/// on every episode. Everything else keeps its order behind them.
+pub(crate) fn prefer_smaller(candidates: &mut Vec<Candidate>) {
+    let want_dub = candidates.first().is_some_and(|c| is_dub_release(&normalize(&c.name)));
+    let eligible = |c: &Candidate| {
+        !c.assume_batch
+            && c.score >= 600
+            && c.seeders_known
+            && c.seeders >= 2 * LOW_SEEDER_THRESHOLD
+            && c.size_bytes.is_some()
+            && is_dub_release(&normalize(&c.name)) == want_dub
+            && !normalize(&c.name).split(' ').any(|t| t == "av1")
+    };
+    let (mut small, rest): (Vec<Candidate>, Vec<Candidate>) =
+        std::mem::take(candidates).into_iter().partition(eligible);
+    small.sort_by_key(|c| c.size_bytes.unwrap_or(u64::MAX));
+    small.extend(rest);
+    *candidates = small;
+}
+
 /// A candidate `resolve` would actually be willing to spend startup budget
 /// on: its swarm is above the probably-dead line and it scored well enough to
 /// be a plausible match, without the stricter "names its own episode" bar
@@ -2612,6 +2645,34 @@ mod tests {
         let merged = merge_duplicates(vec![dead, from_api]);
         assert_eq!(merged[0].seeders, 2);
         assert_eq!(merged[0].score, 2100 - DEAD_SWARM_PENALTY);
+    }
+
+    /// Frieren S2 05 as Nyaa listed it on 2026-09-23.
+    #[test]
+    fn a_download_takes_the_smallest_release_that_is_as_good_a_match() {
+        let listed = |name: &str, score: i64, seeders: u64, mib: u64| Candidate {
+            name: name.into(),
+            size_bytes: Some(mib * 1_048_576),
+            ..candidate(score, seeders, false)
+        };
+        let mut pool = vec![
+            listed("[SubsPlease] Sousou no Frieren S2 - 05 (1080p)", 2100, 710, 1434),
+            listed("[Erai-raws] Sousou no Frieren 2nd Season - 05 [1080p CR WEB-DL AVC AAC]", 1250, 242, 1434),
+            listed("[ASW] Sousou no Frieren S2 - 05 [1080p HEVC x265 10Bit][AAC]", 1190, 116, 587),
+            listed("[SubsPlease] Sousou no Frieren S2 - 05 (720p)", 760, 86, 715),
+            // A dub-only release scores under 600 and never jumps the queue.
+            listed("[Yameii] Frieren - S02E05 [English Dub] [CR WEB-DL 1080p]", 250, 79, 300),
+            // Nor does a nearly dead swarm, however small.
+            listed("[Raze] Sousou no Frieren S2 - 05 x265 10bit 1080p", 1000, 1, 200),
+            // Nor AV1, which older phones decode in software.
+            listed("[Ironclad] Sousou no Frieren 2nd Season - S02E05 [WEB.1080p.AV1]", 1100, 35, 441),
+        ];
+        prefer_smaller(&mut pool);
+        let names: Vec<&str> = pool.iter().map(|c| c.name.as_str()).collect();
+        assert!(names[0].starts_with("[ASW]"));
+        assert!(names[1].contains("(720p)"));
+        assert!(names[2].starts_with("[SubsPlease] Sousou no Frieren S2 - 05 (1080p)"));
+        assert!(names[4].starts_with("[Yameii]"), "the rest keep their order: {names:?}");
     }
 
     /// A batch assumption is a guess about a name; one listing naming its

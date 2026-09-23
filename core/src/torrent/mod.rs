@@ -115,6 +115,9 @@ pub struct ResolveTarget<'a> {
     /// `search::ReleaseCriteria::aired_episodes`.
     pub aired_episodes: Option<i64>,
     pub prefer_dub: bool,
+    /// A download rather than a stream: the smallest release that is as good
+    /// a match goes first. See `search::prefer_smaller`.
+    pub prefer_small: bool,
     /// The stream is bound for a browser `<video>` element rather than mpv,
     /// which narrows what codecs are acceptable. See
     /// `search::ReleaseCriteria::browser_client`.
@@ -1041,7 +1044,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered, rejected, franchise } = target;
+        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub, prefer_small, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered, rejected, franchise } = target;
         let criteria = search::ReleaseCriteria {
             episode,
             allow_episodeless,
@@ -1282,6 +1285,9 @@ impl TorrentManager {
         }
         // A hand pick overrides an earlier rejection; nothing else does.
         candidates.retain(|c| !rejected.contains(&c.name) || chosen_name.as_deref() == Some(c.name.as_str()));
+        if prefer_small && chosen_name.is_none() {
+            search::prefer_smaller(&mut candidates);
+        }
         // The other half of the picture is per-candidate (see
         // `CandidateStages`); this half is everything that happens before the
         // first candidate is touched, which on a rate-limited Nyaa is where a
@@ -3545,6 +3551,7 @@ mod tests {
                 episode_count: Some(12),
                 aired_episodes: Some(12),
                 prefer_dub: false,
+                prefer_small: false,
                 browser_client: false,
                 chosen_name: None,
                 movie: None,
@@ -3600,6 +3607,7 @@ mod tests {
             episode_count: Some(28),
             aired_episodes: Some(28),
             prefer_dub: false,
+            prefer_small: false,
             browser_client: false,
             chosen_name: None,
             movie: None,
@@ -4015,6 +4023,7 @@ mod tests {
                         episode_count: case.episode_count,
                         aired_episodes: case.episode_count,
                         prefer_dub: false,
+                        prefer_small: false,
                         browser_client: false,
                         chosen_name: None,
                         movie: None,
@@ -4215,6 +4224,7 @@ mod tests {
                     aired_episodes: Some(28),
                     browser_client: false,
                     prefer_dub: false,
+                    prefer_small: false,
                     chosen_name: None,
                     movie: None,
                     series: None,
@@ -4281,6 +4291,7 @@ mod tests {
                     aired_episodes: Some(1),
                     browser_client: false,
                     prefer_dub: false,
+                    prefer_small: false,
                     chosen_name: None,
                     movie: Some(cinema::MovieCriteria { year: Some(2021), browser_client: false }),
                     series: None,
@@ -4345,6 +4356,7 @@ mod tests {
                     aired_episodes: None,
                     browser_client: false,
                     prefer_dub: false,
+                    prefer_small: false,
                     chosen_name: None,
                     movie: None,
                     series: Some(series::EpisodeCriteria {
@@ -4419,6 +4431,7 @@ mod tests {
             aired_episodes: Some(12),
             browser_client: false,
             prefer_dub: false,
+            prefer_small: false,
             chosen_name: None,
             movie: None,
             series: None,

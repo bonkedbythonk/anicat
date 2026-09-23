@@ -112,7 +112,11 @@ struct PhonePlayerView: View {
                 // showing the controls.
                 gestureLayer
 
-                if controller.isBuffering {
+                // A resolve from inside the player (Next, a release switch,
+                // the opening watchdog) can run while the old file still
+                // plays; its line and Cancel live here, not on the tab bar's
+                // card, which stays hidden under a full-screen player.
+                if controller.isBuffering || controller.resolveStatus != nil {
                     bufferingIndicator
                 }
 
@@ -1137,6 +1141,17 @@ struct PhonePlayerView: View {
                 Text(PlayerController.withElapsed(status, controller.resolveElapsedSeconds))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.8))
+                Button {
+                    AppModel.shared?.cancelResolve()
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.white.opacity(0.16), in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
             } else if let percent = controller.bufferingPercent {
                 Text("\(percent)%")
                     .font(.system(size: 11, design: .monospaced))

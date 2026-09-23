@@ -182,7 +182,11 @@ public struct RootTabView: View {
                 .zIndex(60)
             }
 
-            if model.resolveStartedAt != nil {
+            // Not over the full-screen player: a release switch or Next from
+            // inside it drew this card across the landscape picture, above the
+            // player's own spinner carrying the same line. The player shows
+            // the status and its own Cancel then.
+            if model.resolveStartedAt != nil, model.activeStreamURL == nil || model.isPlayerMinimized {
                 VStack(spacing: 10) {
                     if let startedAt = model.resolveStartedAt {
                         // `cancelResolve`, not a bare task cancel: it also stops

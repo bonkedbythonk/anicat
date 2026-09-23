@@ -1680,11 +1680,12 @@ extension AppModel {
             // No new file is coming; whatever is still playing owns the
             // position again.
             self.playerController.awaitingNewFile = false
+            let airedRecently = episodeAiredRecently(catalogId: catalogId, episode: episode)
             restorePlaybackIdentity(previous)
             // A cancel is the viewer's own doing and every caller matches
             // it by type; wrapping it would turn Cancel into an error toast.
             if error is CancellationError { throw error }
-            throw PlaybackFailure(error, catalog: catalog, episode: episode)
+            throw PlaybackFailure(error, catalog: catalog, episode: episode, airedRecently: airedRecently)
         }
         guard let streamURL = URL(string: handleURL) else {
             self.playerController.awaitingNewFile = false
@@ -1828,12 +1829,16 @@ public struct PlaybackFailure: LocalizedError, CustomDebugStringConvertible {
     public let catalog: FfiCatalog
     public let episode: Int64
     public let rawEngineText: String
+    /// Whether the episode aired in the last few days; nil when its air date
+    /// is not known. Only then is "not out yet" the likely reason.
+    public let airedRecently: Bool?
 
-    public init(_ error: Error, catalog: FfiCatalog, episode: Int64) {
+    public init(_ error: Error, catalog: FfiCatalog, episode: Int64, airedRecently: Bool? = nil) {
         let raw = Self.engineText(of: error)
         self.rawEngineText = raw
         self.catalog = catalog
         self.episode = episode
+        self.airedRecently = airedRecently
         self.kind = Self.classify(raw)
         print("[play] \(catalog) episode \(episode) failed: \(raw)")
     }
@@ -1851,7 +1856,16 @@ public struct PlaybackFailure: LocalizedError, CustomDebugStringConvertible {
             if catalog == .tmdbMovie {
                 return "No release of this film was found. Recent films can take a while to appear."
             }
-            return "Nothing found for episode \(episode) yet. Releases usually appear within a day of airing."
+            // "Yet" told a viewer of a 2009 show to wait for a release
+            // that was never coming.
+            switch airedRecently {
+            case true?:
+                return "Nothing found for episode \(episode) yet. Releases usually appear within a day of airing."
+            case false?:
+                return "Nobody is sharing episode \(episode) right now. Older shows often have few people sharing them; try again later."
+            case nil:
+                return "No release of episode \(episode) was found."
+            }
         case .swarmTooSlow:
             return "Every release is too slow right now. Try again in a minute, or pick a release from the player menu."
         case .aniListDown:
@@ -1916,6 +1930,17 @@ extension AppModel {
 }
 
 extension AppModel {
+    /// Whether `episode` of `catalogId` aired within the last three days, from
+    /// whichever episode list holds that title. Nil without an air date.
+    func episodeAiredRecently(catalogId: Int64, episode: Int64) -> Bool? {
+        let list = playbackEpisodesCatalogId == catalogId ? playbackEpisodes
+            : (selectedMediaDetails?.id == catalogId ? selectedEpisodes : [])
+        guard let raw = list.first(where: { $0.number == Int(episode) })?.airDate,
+              let aired = try? Date(raw, strategy: Date.ISO8601FormatStyle().year().month().day())
+        else { return nil }
+        return Date().timeIntervalSince(aired) < 3 * 24 * 3600
+    }
+
     /// The playing torrent as stream details rows; empty for a file with no
     /// swarm behind it (a download).
     nonisolated static func torrentDetailRows(_ stats: PlayingTorrentStats?) -> [StreamDetailRow] {
@@ -1932,6 +1957,7 @@ extension AppModel {
         rows.append(StreamDetailRow("Peers", "\(stats.peersLive) live, \(stats.peersConnecting) connecting, \(stats.peersSeen) seen"))
         return rows
     }
+
     /// The playing swarm in the few words that fit under a spinner. Nil for
     /// no swarm and for a finished file: a stall on a complete file is mpv's,
     /// and a peer count there would point at the wrong culprit.

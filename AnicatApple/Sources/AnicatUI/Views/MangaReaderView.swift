@@ -683,6 +683,12 @@ public struct MangaReaderView: View {
     private func webtoonView(fit: ImageFit) -> some View {
         ScrollViewReader { proxy in
             webtoonColumn(fit: fit)
+                // A chapter turn keeps this view (see `onChange(of: pageURLs)`),
+                // so without a fresh scroll view per chapter the next one
+                // opened at the old scroll offset -- its last pages -- and
+                // the rows, keyed by offset, went on drawing the previous
+                // chapter's panels until each new page finished decoding.
+                .id(pageURLs)
                 .onChange(of: webtoonJump) { _, page in
                     guard let page else { return }
                     proxy.scrollTo(page, anchor: .top)

@@ -1099,6 +1099,37 @@ const DEAD_SWARM_PENALTY: i64 = 350;
 /// release outranked one with 52.
 const TRUSTED_BONUS: i64 = 100;
 
+/// A magnet's v1 infohash as lowercase hex, whichever of the two encodings
+/// it was written in: Nyaa and AnimeTosho write 40 hex digits, SubsPlease
+/// 32 base32 characters.
+pub(crate) fn magnet_infohash(magnet: &str) -> Option<String> {
+    let start = magnet.find("xt=urn:btih:")? + "xt=urn:btih:".len();
+    let hash: String = magnet[start..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    match hash.len() {
+        40 if hash.chars().all(|c| c.is_ascii_hexdigit()) => Some(hash.to_ascii_lowercase()),
+        32 => {
+            let mut bits: u64 = 0;
+            let mut width = 0;
+            let mut hex = String::with_capacity(40);
+            for c in hash.to_ascii_uppercase().chars() {
+                let v = match c {
+                    'A'..='Z' => c as u64 - 'A' as u64,
+                    '2'..='7' => c as u64 - '2' as u64 + 26,
+                    _ => return None,
+                };
+                bits = (bits << 5) | v;
+                width += 5;
+                if width >= 8 {
+                    width -= 8;
+                    hex.push_str(&format!("{:02x}", (bits >> width) & 0xff));
+                }
+            }
+            Some(hex)
+        }
+        _ => None,
+    }
+}
+
 /// Build a magnet from a bare infohash, with the standard open trackers
 /// appended so peers are found before DHT bootstraps.
 pub(crate) fn magnet_from_infohash(infohash: &str) -> String {
@@ -1893,6 +1924,24 @@ async fn search_pool(
             }
         }
     }
+    // Last, and so only reached when the rounds above came up short: the bare
+    // title, which Nyaa answers with its best-seeded listings of the show. A
+    // finished show is mostly shared as season packs named with whatever
+    // resolution spelling the group liked, and Nyaa matches words literally,
+    // so "<title> 1080p" never lists "(1920x1080_Blu-Ray_FLAC)" or "[10bit BD
+    // 720p]". Valkyria Chronicles (2009) found nothing at all without this,
+    // while those two packs had 15 and 11 seeders (2026-09-23).
+    let bare: Vec<(String, String, ReleaseCriteria)> = expanded
+        .iter()
+        .map(|title| (format!("{}{}", search_query_form(title), sibling_exclusions(siblings)), normalize(title), criteria))
+        .collect();
+    // At either breadth: the release sheet and the hourly dub check search
+    // `Full`, and two more Nyaa rounds on every one of those calls is load
+    // Nyaa answers by throttling, which silently shrinks every pool.
+    let bare_from = rounds.len();
+    for chunk in bare.chunks(3) {
+        rounds.push(chunk.to_vec());
+    }
     // Concurrent, but only so far. Measured against the live site, four
     // concurrent Nyaa requests all answer 200 while eight return two 429s and
     // twelve return six. Every throttled query is a silently smaller candidate
@@ -2016,7 +2065,7 @@ async fn search_pool(
     let mut query_count = rounds.first().map(|r| r.len()).unwrap_or(0);
     let later_rounds = std::time::Instant::now();
     for (round, queries) in rounds.iter().enumerate().skip(1) {
-        if breadth == Breadth::Fast && enough_candidates(&all) {
+        if (breadth == Breadth::Fast || round >= bare_from) && enough_candidates(&all) {
             log::info!(
                 "[resolve] torrent search stopping before round {}/{}: {} strong candidates",
                 round + 1,
@@ -2231,16 +2280,40 @@ async fn stated_episodes(
 /// swarm, and any direct `.torrent` URL either of them had -- that last one
 /// is the whole reason to prefer a mirrored listing, since it skips the DHT
 /// metadata round-trip a magnet costs on the play path.
+///
+/// Listings are matched by infohash first and by name second. SubsPlease's
+/// own API names a release "[SubsPlease] Show - 03 (1080p)" while Nyaa lists
+/// the same torrent as "... (1080p) [674ED301].mkv", so by name alone the
+/// API's copy -- magnet only, and a swarm it never reports -- ranked first on
+/// its assumed 50 seeders, next to a Nyaa copy that knew both the real count
+/// and a `.torrent` URL (Buddy Daddies 03, 2026-09-23).
 fn merge_duplicates(candidates: Vec<Candidate>) -> Vec<Candidate> {
     let mut out: Vec<Candidate> = Vec::with_capacity(candidates.len());
     let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for c in candidates {
-        match index.get(&normalize(&c.name)) {
-            Some(&i) => {
+    for mut c in candidates {
+        let name_key = normalize(&c.name);
+        let hash_key = c.magnet.as_deref().and_then(magnet_infohash).map(|h| format!("btih:{h}"));
+        let found = hash_key.as_ref().and_then(|k| index.get(k)).or_else(|| index.get(&name_key)).copied();
+        match found {
+            Some(i) => {
                 let kept: &mut Candidate = &mut out[i];
+                // A count some tracker reported beats one an index assumed.
+                // The assumed one never paid the dead-swarm penalty either,
+                // so it pays it here when the real count turns out that low.
+                if c.seeders_known && !kept.seeders_known {
+                    if kept.seeders >= LOW_SEEDER_THRESHOLD && c.seeders < LOW_SEEDER_THRESHOLD {
+                        kept.score -= DEAD_SWARM_PENALTY;
+                    }
+                    kept.seeders = c.seeders;
+                    kept.seeders_known = true;
+                } else if kept.seeders_known && !c.seeders_known {
+                    if c.seeders >= LOW_SEEDER_THRESHOLD && kept.seeders < LOW_SEEDER_THRESHOLD {
+                        c.score -= DEAD_SWARM_PENALTY;
+                    }
+                } else {
+                    kept.seeders = kept.seeders.max(c.seeders);
+                }
                 kept.score = kept.score.max(c.score);
-                kept.seeders = kept.seeders.max(c.seeders);
-                kept.seeders_known |= c.seeders_known;
                 if kept.size_bytes.is_none() {
                     kept.size_bytes = c.size_bytes;
                 }
@@ -2256,9 +2329,18 @@ fn merge_duplicates(candidates: Vec<Candidate>) -> Vec<Candidate> {
                 // Only one of the two listings needs to have named the episode
                 // for the pair to stop being a guess.
                 kept.assume_batch = kept.assume_batch && c.assume_batch;
+                // Either spelling of this release now leads here: a third
+                // listing may share only the name of the second.
+                index.entry(name_key).or_insert(i);
+                if let Some(k) = hash_key {
+                    index.entry(k).or_insert(i);
+                }
             }
             None => {
-                index.insert(normalize(&c.name), out.len());
+                index.insert(name_key, out.len());
+                if let Some(k) = hash_key {
+                    index.insert(k, out.len());
+                }
                 out.push(c);
             }
         }
@@ -2481,6 +2563,55 @@ mod tests {
             merged[0].torrent_url.is_some(),
             "the direct .torrent URL is the whole reason to keep the mirrored listing"
         );
+    }
+
+    /// SubsPlease's magnets spell the hash in base32; Nyaa's in hex.
+    #[test]
+    fn a_magnet_hash_reads_the_same_in_either_encoding() {
+        let base32 = "magnet:?xt=urn:btih:YQJP5F5HPNCG7IIWGEDTL4SESUERQGUR&dn=x&tr=udp";
+        let hex = "magnet:?xt=urn:btih:C412FE97A77B446FA116310735F2449509181A91&tr=udp";
+        assert_eq!(magnet_infohash(base32).as_deref(), Some("c412fe97a77b446fa116310735f2449509181a91"));
+        assert_eq!(magnet_infohash(hex), magnet_infohash(base32));
+        assert_eq!(magnet_infohash("magnet:?xt=urn:btih:abc"), None);
+    }
+
+    /// Buddy Daddies 03 on 2026-09-23: the API's copy ranked first on a
+    /// swarm nobody measured, beside Nyaa's copy of the same torrent.
+    #[test]
+    fn the_same_torrent_under_two_names_is_one_candidate_with_the_measured_swarm() {
+        let from_api = Candidate {
+            name: "[SubsPlease] Buddy Daddies - 03 (1080p)".into(),
+            magnet: Some("magnet:?xt=urn:btih:YQJP5F5HPNCG7IIWGEDTL4SESUERQGUR&dn=x".into()),
+            torrent_url: None,
+            seeders_known: false,
+            ..candidate(2100, 50, false)
+        };
+        let from_nyaa = Candidate {
+            name: "[SubsPlease] Buddy Daddies - 03 (1080p) [674ED301].mkv".into(),
+            magnet: Some(magnet_from_infohash("c412fe97a77b446fa116310735f2449509181a91")),
+            torrent_url: Some("https://nyaa.si/download/1.torrent".into()),
+            ..candidate(1169, 15, false)
+        };
+        let merged = merge_duplicates(vec![from_api.clone(), from_nyaa]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].seeders, 15);
+        assert!(merged[0].seeders_known);
+        assert!(merged[0].torrent_url.is_some(), "the .torrent skips the DHT metadata fetch");
+        assert_eq!(merged[0].score, 2100);
+
+        // Measured nearly dead: the assumed-healthy score pays the penalty.
+        let dead = Candidate {
+            name: "[SubsPlease] Buddy Daddies - 03 (1080p) [674ED301].mkv".into(),
+            magnet: Some(magnet_from_infohash("c412fe97a77b446fa116310735f2449509181a91")),
+            ..candidate(700, 2, false)
+        };
+        let merged = merge_duplicates(vec![from_api.clone(), dead.clone()]);
+        assert_eq!(merged[0].seeders, 2);
+        assert_eq!(merged[0].score, 2100 - DEAD_SWARM_PENALTY);
+        // Order does not matter.
+        let merged = merge_duplicates(vec![dead, from_api]);
+        assert_eq!(merged[0].seeders, 2);
+        assert_eq!(merged[0].score, 2100 - DEAD_SWARM_PENALTY);
     }
 
     /// A batch assumption is a guess about a name; one listing naming its

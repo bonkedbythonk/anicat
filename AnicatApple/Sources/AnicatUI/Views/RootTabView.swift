@@ -6,10 +6,11 @@ import SwiftUI
 /// Not a narrower `RootView`: the rail is a list of ten sections and a tab
 /// bar holds five. Up Next, Library and Search are the three a phone reaches
 /// for; Read carries manga and light novels under one segment, the way the
-/// header already carries Anime and Films & TV; More holds the rest
-/// (Schedule, History, Downloads, Stats, Settings) in the rail's own order.
-/// The first cut shipped three tabs with the rest "absent, not hidden", and
-/// the absence read as the app being a viewer.
+/// header already carries Anime and Films & TV. The sections without a tab
+/// sit where a streaming app's viewer looks for them, not in the rail's
+/// order: today's schedule on Up Next, Downloads and History beside the
+/// lists in Library. Under More, all three were two taps deep, and Downloads
+/// is what someone opens offline. More keeps Stats and Settings.
 public struct RootTabView: View {
     @Bindable var model: AppModel
 
@@ -219,11 +220,11 @@ public struct RootTabView: View {
         // action reached the model and the screen did not move.
         .onChange(of: model.currentNavSection) { _, section in
             switch section {
-            case .upNext: tab = .upNext
-            case .library: tab = .library
+            case .upNext, .schedule: tab = .upNext
+            case .library, .history, .downloads: tab = .library
             case .manga, .novels: tab = .read
             case .search: tab = .search
-            case .schedule, .history, .stats, .downloads, .settings: tab = .more
+            case .stats, .settings: tab = .more
             }
         }
         .animation(.sumi(.page), value: model.personPageStack.count)
@@ -434,6 +435,10 @@ private struct UpNextTab: View {
                         }
                     }
 
+                    if !model.scheduleItems.isEmpty {
+                        AiringTodayStrip(model: model, showDetail: $showDetail)
+                    }
+
                     // The page used to end after New Episodes and left two
                     // thirds of the screen black, which read as "nothing
                     // here" rather than "you are up to date". These rows are
@@ -578,6 +583,91 @@ private struct UpNextTab: View {
 
     private func open(_ item: MediaCard.Item) {
         open(item.id, item.title, item.coverImageURL, item.isManga)
+    }
+}
+
+/// Today's episodes on the home page, with the week one tap away. The
+/// schedule used to be More > Schedule, two taps from anywhere, and it is
+/// what someone following a weekly show checks. What they watch comes first,
+/// then the rest of the day by air time.
+struct AiringTodayStrip: View {
+    @Bindable var model: AppModel
+    @Binding var showDetail: Bool
+
+    private var items: [ScheduleView.ScheduleItem] {
+        let calendar = Calendar.current
+        return model.scheduleItems
+            .filter { calendar.isDateInToday(Date(timeIntervalSince1970: Double($0.airingAt))) }
+            .sorted { ($0.isWatching ? 0 : 1, $0.airingAt) < ($1.isWatching ? 0 : 1, $1.airingAt) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                SectionHeader("Airing Today")
+                Spacer()
+                NavigationLink {
+                    PhoneScheduleView(model: model, showDetail: $showDetail)
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("Schedule")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(SumiTheme.indigo)
+                }
+                .padding(.trailing, 16)
+            }
+            if items.isEmpty {
+                Text("Nothing airs today.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(SumiTheme.muted)
+                    .padding(.horizontal, 16)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(items) { item in
+                            Button { open(item) } label: { card(item) }
+                                .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
+    }
+
+    private func card(_ item: ScheduleView.ScheduleItem) -> some View {
+        HStack(spacing: 10) {
+            CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 200) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                SumiTheme.card
+            }
+            .frame(width: 44, height: 62)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(SumiTheme.foreground)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Text("EP \(item.episodeNumber) \u{00B7} \(item.airingTimeText.uppercased())")
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(item.isWatching ? SumiTheme.indigo : SumiTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(width: 150, alignment: .leading)
+        }
+        .padding(8)
+        .background(SumiTheme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(Rectangle())
+    }
+
+    private func open(_ item: ScheduleView.ScheduleItem) {
+        showDetail = true
+        Task { await model.openDetail(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false) }
     }
 }
 
@@ -845,6 +935,7 @@ private struct LibraryTab: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     TabHeader(title: "Library", model: model) { statusMenu }
+                    shortcuts
 
                     if model.appMode == .cinema {
                         if model.cinemaWatchlist.isEmpty {
@@ -913,6 +1004,50 @@ private struct LibraryTab: View {
                 await model.loadLibrary(status: storedStatus)
             }
         }
+    }
+
+    /// Downloads and History, beside the lists as a streaming app keeps them.
+    /// Pushed on this tab's own stack, so a title opened from either comes
+    /// back to it.
+    @ViewBuilder
+    private var shortcuts: some View {
+        HStack(spacing: 10) {
+            NavigationLink { PhoneDownloadsView(model: model) } label: {
+                shortcut("Downloads", "arrow.down.circle",
+                         count: model.libraryDownloads.count + model.offlineChapters.count)
+            }
+            NavigationLink { PhoneHistoryView(model: model, showDetail: $showDetail) } label: {
+                shortcut("History", "clock.arrow.circlepath", count: 0)
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+    }
+
+    private func shortcut(_ title: String, _ symbol: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(SumiTheme.indigo)
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(SumiTheme.foreground)
+            Spacer(minLength: 4)
+            if count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(SumiTheme.muted)
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(SumiTheme.muted)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity)
+        .background(SumiTheme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(SumiTheme.border, lineWidth: 1))
+        .contentShape(Rectangle())
     }
 
     /// A menu, not a segmented control: six statuses across 402pt truncate to
@@ -1139,7 +1274,14 @@ private struct SearchTab: View {
                         if !recents.isEmpty {
                             recentChips
                         }
-                        PosterSection(title: "Trending", items: model.trendingItems, onOpen: open)
+                        // Somewhere to go without typing, as a streaming
+                        // app's Browse opens: the page was one Trending grid,
+                        // and every other way in sat behind the filter sheet.
+                        if !filters.isActive {
+                            genreChips
+                        }
+                        PosterShelf(title: "This Season", items: model.seasonalItems, onOpen: open)
+                        PosterShelf(title: "Trending", items: model.trendingItems, onOpen: open)
                     } else {
                         PosterGrid(items: model.searchResults, onOpen: open)
                     }
@@ -1280,6 +1422,29 @@ private struct SearchTab: View {
                 id: item.id, title: item.title,
                 coverURL: item.coverImageURL, isManga: item.isManga
             )
+        }
+    }
+
+    /// The filter sheet's genres as one tap each. Ecchi is left to the sheet:
+    /// this is the first thing the Search tab shows (owner 2026-09-21, "this
+    /// app is family friendly").
+    private static let browseGenres = PhoneSearchFilters.genreOptions
+        .map(\.value)
+        .filter { !$0.isEmpty && $0 != "Ecchi" }
+
+    @ViewBuilder
+    private var genreChips: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("GENRES")
+                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(SumiTheme.muted)
+                .padding(.horizontal, 16)
+            // Setting the filter is the search: `onChange(of: filters)` runs
+            // it, and the chip above the results takes it off again.
+            FlowChips(items: Self.browseGenres) { genre in
+                filters.genre = genre
+            }
+            .padding(.horizontal, 16)
         }
     }
 

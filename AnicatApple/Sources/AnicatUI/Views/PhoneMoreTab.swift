@@ -2,11 +2,10 @@
 import SwiftUI
 import AnicatCoreKit
 
-/// The sidebar sections that did not earn a tab, in the rail's own order.
-///
-/// A plain list. Each row pushes the section's phone view; Settings moved
-/// here from behind the Up Next avatar, which stays as a shortcut because
-/// it is where people already look for the account.
+/// What is left once the sections a viewer uses weekly moved to their tabs
+/// (Schedule to Up Next, Downloads and History to Library): Stats and
+/// Settings. The Up Next avatar stays a shortcut to Settings, because it is
+/// where people already look for the account.
 struct PhoneMoreTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
@@ -15,15 +14,6 @@ struct PhoneMoreTab: View {
         NavigationStack {
             List {
                 Section {
-                    NavigationLink { PhoneScheduleView(model: model, showDetail: $showDetail) } label: {
-                        Label("Schedule", systemImage: "calendar")
-                    }
-                    NavigationLink { PhoneHistoryView(model: model, showDetail: $showDetail) } label: {
-                        Label("History", systemImage: "clock.arrow.circlepath")
-                    }
-                    NavigationLink { PhoneDownloadsView(model: model) } label: {
-                        Label("Downloads", systemImage: "arrow.down.circle")
-                    }
                     NavigationLink { PhoneStatsView(model: model, showDetail: $showDetail) } label: {
                         Label("Stats", systemImage: "chart.bar")
                     }

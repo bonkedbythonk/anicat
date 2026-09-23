@@ -606,17 +606,27 @@ struct AiringTodayStrip: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
 
-    private var items: [ScheduleView.ScheduleItem] {
+    /// Today's, or tomorrow's once today's have aired. `scheduleItems` holds
+    /// each show's *next* airing, so an episode drops off the moment it airs
+    /// and by the evening the row said "Nothing airs today" on a day with
+    /// four episodes.
+    private var day: (label: String, items: [ScheduleView.ScheduleItem]) {
         let calendar = Calendar.current
-        return model.scheduleItems
-            .filter { calendar.isDateInToday(Date(timeIntervalSince1970: Double($0.airingAt))) }
-            .sorted { ($0.isWatching ? 0 : 1, $0.airingAt) < ($1.isWatching ? 0 : 1, $1.airingAt) }
+        func on(_ test: (Date) -> Bool) -> [ScheduleView.ScheduleItem] {
+            model.scheduleItems
+                .filter { test(Date(timeIntervalSince1970: Double($0.airingAt))) }
+                .sorted { ($0.isWatching ? 0 : 1, $0.airingAt) < ($1.isWatching ? 0 : 1, $1.airingAt) }
+        }
+        let today = on(calendar.isDateInToday)
+        if !today.isEmpty { return ("Airing Today", today) }
+        return ("Airing Tomorrow", on(calendar.isDateInTomorrow))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            let day = day
             HStack(alignment: .firstTextBaseline) {
-                SectionHeader("Airing Today")
+                SectionHeader(day.label)
                 Spacer()
                 NavigationLink {
                     PhoneScheduleView(model: model, showDetail: $showDetail)
@@ -631,15 +641,15 @@ struct AiringTodayStrip: View {
                 }
                 .padding(.trailing, 16)
             }
-            if items.isEmpty {
-                Text("Nothing airs today.")
+            if day.items.isEmpty {
+                Text("Nothing airs today or tomorrow.")
                     .font(.system(size: 13))
                     .foregroundStyle(SumiTheme.muted)
                     .padding(.horizontal, 16)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(items) { item in
+                        ForEach(day.items) { item in
                             Button { open(item) } label: { card(item) }
                                 .buttonStyle(.plain)
                         }

@@ -466,9 +466,6 @@ public final class AppModel {
     /// That preresolve while it runs, so a play of the same episode can wait
     /// for it rather than resolve beside it; see `resolveAndPlay`.
     var preresolveInFlight: (catalogId: Int64, episode: Int64, task: Task<Void, Never>)?
-    /// When the file currently loaded started playing, for the completion
-    /// rules above. Reset with the other per-episode state.
-    var playbackSessionStartedAt: Date?
     // Where in the current episode the next one is resolved ahead of time.
     // Far enough from the end that a cold resolve (search, race, pre-buffer;
     // 2 to 10 s, more on a slow swarm) has landed before auto-next fires at

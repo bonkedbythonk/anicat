@@ -44,7 +44,6 @@ extension AppModel {
         hasPreloadedNextEpisode = false
         hasSearchedStoredEnding = false
         hasBootstrappedOpening = false
-        playbackSessionStartedAt = Date()
         // Fifth flag, same rule: the countdown card's "cancelled" is scoped
         // to one episode, and a cancel that survived into the next one would
         // silently disable auto-next for the rest of the binge.
@@ -558,8 +557,18 @@ extension AppModel {
         // The same button behaved differently depending on who pressed it.
         //
         // Backwards is not a claim about anything, so Previous marks nothing.
+        //
+        // Only once the episode actually played: Next at 0:00 of a stream
+        // that never started is leaving a dead release, not finishing an
+        // episode, and marking it moved AniList for something never seen.
         if offset > 0 {
-            markEpisodeFinished(catalogId: catalogId, episode: episode)
+            let played = playerController.secondsActuallyPlayed
+            if played >= Self.minimumPlaybackBeforeCompletionSeconds {
+                AppLog.write("[progress] ep \(episode) finished by Next after \(Int(played))s played")
+                markEpisodeFinished(catalogId: catalogId, episode: episode)
+            } else {
+                AppLog.write("[progress] ep \(episode) left by Next after \(Int(played))s played: not marked")
+            }
         }
         // Next out of a downloaded episode into another downloaded one used
         // to resolve the swarm for a file already on disk; the Downloads
@@ -968,9 +977,11 @@ extension AppModel {
         // and an instant end, and without this every rule below fires on it
         // at once -- marking the episode watched and auto-advancing into the
         // next one, which fails identically. A season went by in seconds.
-        let playedFor = playbackSessionStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        // Seconds mpv actually moved through, not seconds since the session
+        // began: a stream stalled at its resume point for longer than the
+        // minimum passed a wall-clock test (see `playedTo`).
         let completionRulesApply = duration >= Self.minimumCredibleDurationSeconds
-            && playedFor >= Self.minimumPlaybackBeforeCompletionSeconds
+            && playerController.secondsActuallyPlayed >= Self.minimumPlaybackBeforeCompletionSeconds
 
         let isPaused = !playerController.isPlaying
         let pauseEdgeChanged = isPaused != lastDiscordPaused
@@ -991,6 +1002,7 @@ extension AppModel {
             let percent = Double(stopTime) / Double(dur) * 100
             if percent >= Self.watchedThresholdPct {
                 hasAdvancedAniListForCurrentEpisode = true
+                AppLog.write("[progress] ep \(episode) watched at \(stopTime)s of \(dur)s (mpv played \(Int(playerController.secondsActuallyPlayed))s, reached \(Int(playerController.playedTo))s): advancing AniList")
                 // The one moment in an episode where something is recorded
                 // that the viewer cannot see happening. The flag above makes
                 // it once per episode, not once per tick past the line.

@@ -610,6 +610,34 @@ public final class PlayerController {
         onPlaybackFailed?(message)
     }
 
+    /// Where mpv's own clock has been on the loaded file: the first and the
+    /// furthest `time-pos` it reported. `currentTime` is not that. A resolve
+    /// writes the resume point into it before any frame exists, and the end
+    /// of file writes the duration into it, so a stream that never played a
+    /// frame could read as finished: a dead Buddy Daddies 03 on the
+    /// simulator was recorded 1440 of 1440, completed, and moved the
+    /// owner's AniList progress (2026-09-23). Written per tick, read at a
+    /// handful of decisions, so kept out of observation.
+    @ObservationIgnored public private(set) var playedFrom: Double?
+    @ObservationIgnored public private(set) var playedTo: Double = 0
+
+    /// Seconds of the file mpv actually moved through, seeks included: a
+    /// scrub to the credits that then plays out is a finished episode, a
+    /// stall at the resume point is not.
+    public var secondsActuallyPlayed: Double {
+        playedFrom.map { max(0, playedTo - $0) } ?? 0
+    }
+
+    public func notePlayedPosition(_ position: Double) {
+        if playedFrom == nil { playedFrom = position }
+        if position > playedTo { playedTo = position }
+    }
+
+    public func resetPlayedSpan() {
+        playedFrom = nil
+        playedTo = 0
+    }
+
     /// An end this far before the duration is a dead stream, not a finale.
     /// 120s plus 5%: a container can overstate its duration by tens of
     /// seconds (one release reported 1407s for 1380s of video), and the
@@ -1221,8 +1249,11 @@ public final class PlayerController {
     /// on changes nothing.
     public func handleEndOfFile() {
         guard duration > 0, !isScrubbing else { return }
-        if Self.isEarlyEnd(position: currentTime, duration: duration) {
-            print("[autonext] eof-reached at \(Int(currentTime))s of \(Int(duration))s: treated as a dead stream, not an end")
+        // Judged by where mpv really got to, not `currentTime`: see
+        // `playedTo`. With no tick at all the stream never played.
+        let reached = playedFrom == nil ? 0 : playedTo
+        if Self.isEarlyEnd(position: reached, duration: duration) {
+            print("[autonext] eof-reached at \(Int(currentTime))s of \(Int(duration))s, mpv reached \(Int(reached))s: treated as a dead stream, not an end")
             reportPlaybackFailure("The stream stopped at \(Self.clock(currentTime)) of \(Self.clock(duration)).")
             return
         }

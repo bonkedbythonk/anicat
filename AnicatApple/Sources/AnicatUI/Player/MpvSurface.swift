@@ -1901,6 +1901,7 @@ public struct MpvSurface {
                         let memory = await MainActor.run {
                             self.controller.awaitingNewFile = false
                             self.controller.playbackFailureReported = false
+                            self.controller.resetPlayedSpan()
                             // Unconditional, empty list included: a release
                             // without chapters must not inherit the previous
                             // episode's windows.
@@ -1927,6 +1928,7 @@ public struct MpvSurface {
                             let pos = data.assumingMemoryBound(to: Double.self).pointee
                             await MainActor.run {
                                 guard !self.controller.awaitingNewFile else { return }
+                                self.controller.notePlayedPosition(pos)
                                 if !self.controller.isScrubbing {
                                     // mpv reports time-pos on every video
                                     // frame and `currentTime` is observed:

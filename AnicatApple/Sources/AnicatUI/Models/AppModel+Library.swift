@@ -207,6 +207,7 @@ extension AppModel {
         // After the shelves, and detached: it is a handful of requests to the
         // manga sources and nothing on screen waits for it.
         Task { await checkForNewChapters() }
+        Task { await predownloadReadingChapters() }
         scheduleDubChecks()
     }
 

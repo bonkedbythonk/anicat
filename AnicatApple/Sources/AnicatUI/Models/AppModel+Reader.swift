@@ -488,7 +488,7 @@ extension AppModel {
             // Downloaded pages first, and without asking the network at all:
             // that is what "offline" has to mean, and a stored chapter opens
             // at disk speed rather than at the provider's.
-            let stored = anilistId.map {
+            let stored = Self.chaptersInFlight.contains(chapter.id) ? [] : anilistId.map {
                 engine.offlineChapterPages(catalog: .anilist, catalogId: $0, chapterId: chapter.id)
             } ?? []
             // A chapter the reader preloaded past 70% of the last one is
@@ -607,11 +607,14 @@ extension AppModel {
     /// row's state, because the button has to say something while it runs.
     public func downloadChapter(_ chapter: MediaDetailView.MangaChapterItem) {
         guard let engine, let details = selectedMediaDetails else { return }
-        guard chapterOfflineStates[chapter.id] != .downloading else { return }
+        guard chapterOfflineStates[chapter.id] != .downloading,
+              !Self.chaptersInFlight.contains(chapter.id) else { return }
         chapterOfflineStates[chapter.id] = .downloading
+        Self.chaptersInFlight.insert(chapter.id)
         let catalogId = details.id
         let title = details.title
         Task { [weak self] in
+            defer { Self.chaptersInFlight.remove(chapter.id) }
             do {
                 _ = try await engine.downloadChapter(
                     catalog: .anilist,
@@ -629,6 +632,125 @@ extension AppModel {
                 self.errorMessage = "Could not download chapter \(chapter.number): \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Chapters being written to disk right now, by either path. The engine
+    /// writes pages into the final directory as they land, so a chapter in
+    /// here reads as stored with half its pages; and two downloads of one
+    /// chapter share that directory, where the first to fail deletes it
+    /// under the other.
+    static var chaptersInFlight: Set<String> = []
+
+    /// How many unread chapters of each title are kept on disk ahead of the
+    /// reader.
+    static let predownloadCount = 2
+    /// Chapters fetched ahead rather than on request, `"catalogId:chapterId"`
+    /// to chapter number, so they can be deleted once read. Eviction is
+    /// least recently used across the whole library, so predownloads left
+    /// behind would push out chapters someone downloaded on purpose.
+    static let predownloadedKey = "anicat_predownloaded_chapters"
+
+    /// Wi-Fi only on the phone: nobody asked for these chapters yet, so they
+    /// must not spend a data plan. `isExpensive` rather than the interface
+    /// type, so a hotspot counts as cellular too. Read per chapter, so a pass
+    /// that started on Wi-Fi stops when the phone walks out of range.
+    static var mayPredownload: Bool {
+        #if os(iOS)
+        return !NetworkReachability.shared.isExpensive
+        #else
+        return true
+        #endif
+    }
+
+    /// The next `count` chapters after `progress`, in reading order. Empty
+    /// when the source has nothing past it: a caught-up title has nothing
+    /// to fetch. A number that does not parse ("Oneshot") is never "next".
+    nonisolated static func chaptersToPredownload(
+        _ chapters: [MediaDetailView.MangaChapterItem],
+        after progress: Double,
+        count: Int
+    ) -> [MediaDetailView.MangaChapterItem] {
+        var seen = Set<Double>()
+        return chapters.enumerated()
+            .compactMap { offset, chapter in Double(chapter.number).map { (offset, $0, chapter) } }
+            .filter { $0.1 > progress }
+            .sorted { ($0.1, $0.0) < ($1.1, $1.0) }
+            .filter { seen.insert($0.1).inserted }
+            .prefix(count)
+            .map(\.2)
+    }
+
+    /// Downloads the next unread chapters of every manga on the Reading
+    /// list, one at a time, and deletes the ones read since the last pass.
+    /// One chapter at a time: each already fetches four pages at once, and
+    /// MangaDex rate-limits its page-server lookup per IP.
+    public func predownloadReadingChapters() async {
+        guard let engine else { return }
+        for item in mangaReading.prefix(8) {
+            let progress = Double(item.progress ?? 0)
+            dropReadPredownloads(catalogId: item.id, through: progress)
+            guard Self.mayPredownload else { continue }
+            // A finished run has nothing left to fetch, and asking the
+            // source to prove it costs a search and a feed per title.
+            if let total = item.totalEpisodesOrChapters, progress >= Double(total) { continue }
+            guard let fetched = try? await engine.mangaChapters(alId: item.id) else { continue }
+            let chapters = fetched.map {
+                MediaDetailView.MangaChapterItem(id: $0.id, number: $0.number, title: $0.title, scanlationGroup: $0.scanlationGroup)
+            }
+            await predownloadChapters(catalogId: item.id, title: item.title, chapters: chapters, after: progress)
+        }
+    }
+
+    func predownloadChapters(
+        catalogId: Int64,
+        title: String,
+        chapters: [MediaDetailView.MangaChapterItem],
+        after progress: Double
+    ) async {
+        guard let engine else { return }
+        for chapter in Self.chaptersToPredownload(chapters, after: progress, count: Self.predownloadCount) {
+            guard Self.mayPredownload else { return }
+            guard !Self.chaptersInFlight.contains(chapter.id),
+                  engine.offlineChapterPages(catalog: .anilist, catalogId: catalogId, chapterId: chapter.id).isEmpty
+            else { continue }
+            Self.chaptersInFlight.insert(chapter.id)
+            defer { Self.chaptersInFlight.remove(chapter.id) }
+            let began = Date()
+            do {
+                let pages = try await engine.downloadChapter(
+                    catalog: .anilist,
+                    catalogId: catalogId,
+                    chapterId: chapter.id,
+                    chapterNumber: chapter.number,
+                    title: title
+                )
+                var ledger = UserDefaults.standard.dictionary(forKey: Self.predownloadedKey) as? [String: Double] ?? [:]
+                ledger["\(catalogId):\(chapter.id)"] = Double(chapter.number)
+                UserDefaults.standard.set(ledger, forKey: Self.predownloadedKey)
+                AppLog.write("[predownload] \(catalogId) ch \(chapter.number): \(pages) pages in \(String(format: "%.1f", Date().timeIntervalSince(began)))s")
+                loadOfflineChapters()
+            } catch {
+                AppLog.write("[predownload] \(catalogId) ch \(chapter.number) failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func dropReadPredownloads(catalogId: Int64, through progress: Double) {
+        guard let engine,
+              var ledger = UserDefaults.standard.dictionary(forKey: Self.predownloadedKey) as? [String: Double]
+        else { return }
+        let prefix = "\(catalogId):"
+        let read = ledger.filter { $0.key.hasPrefix(prefix) && $0.value <= progress }
+        guard !read.isEmpty else { return }
+        for key in read.keys {
+            let chapterId = String(key.dropFirst(prefix.count))
+            // A reread of an old chapter is open on exactly this download.
+            guard chapterId != activeReadingSession?.chapterId else { continue }
+            try? engine.deleteOfflineChapter(catalog: .anilist, catalogId: catalogId, chapterId: chapterId)
+            ledger[key] = nil
+        }
+        UserDefaults.standard.set(ledger, forKey: Self.predownloadedKey)
+        loadOfflineChapters()
     }
 
     public func deleteChapterDownload(_ chapter: MediaDetailView.MangaChapterItem) {
@@ -892,6 +1014,13 @@ public final class ReaderBridge {
     /// fetch of the same list.
     func preloadNextChapter() {
         guard preloadTask == nil, let model else { return }
+        // The whole of the next chapters, not just the opening pages below:
+        // a reader going chapter after chapter otherwise waits on every page
+        // of each new one as it scrolls in.
+        if let catalogId, let number = Double(chapterNumber), let title = model.activeReadingSession?.title {
+            let chapters = chapters
+            Task { await model.predownloadChapters(catalogId: catalogId, title: title, chapters: chapters, after: number) }
+        }
         let next = chapterIndex + 1
         guard chapters.indices.contains(next) else { return }
         let chapter = chapters[next]

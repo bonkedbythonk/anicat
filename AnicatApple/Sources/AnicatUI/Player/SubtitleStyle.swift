@@ -111,10 +111,16 @@ public enum SubtitleStyle: String, CaseIterable, Identifiable, Sendable {
 
     /// The style names fansub groups and simulcast rips give their dialogue.
     /// Anything else (signs, songs, titles, notes) keeps the release's look.
+    /// The run-together names (`DefaultItalics`, `FlashbackTop`) are the
+    /// simulcast rips': the 1.4 GB test file carries eight of them, and with
+    /// only `Default` and `Flashback` matched, a preset restyled the plain
+    /// lines and left every italic and top line in the release's look.
     static let dialogueStyleNames = [
         "Default", "Main", "Dialogue", "Dialog", "Default-alt", "Alt",
         "Italics", "Italic", "Main-italic", "Top", "Main-top", "Default-top",
         "Flashback", "Thoughts", "Overlap", "Narration",
+        "DefaultItalics", "DefaultTop", "DefaultItalicsTop",
+        "FlashbackItalics", "FlashbackTop", "FlashbackItalicsTop",
     ]
 
     /// `sub-ass-style-overrides` for a file whose script is `playResY`

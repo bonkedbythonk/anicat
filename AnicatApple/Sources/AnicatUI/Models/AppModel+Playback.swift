@@ -791,6 +791,8 @@ extension AppModel {
         #if os(iOS)
         // Before the early return so a closed stream also ends the session
         // and hands the route back to whatever was playing before.
+        // Before the player's session, which it would otherwise share.
+        syncDownloadKeepAlive()
         if activeStreamURL != nil {
             AudioSessionCoordinator.shared.begin(controller: playerController)
         } else {
@@ -861,6 +863,13 @@ extension AppModel {
             catalog: currentDetailCatalog
         )
         let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
+        #if os(iOS)
+        // At the tap, before the resolve: the request has to come from the
+        // app in the foreground, and the search and race that follow take
+        // seconds in which the viewer may already have left.
+        let backgroundKey = DownloadBackgroundTasks.key(catalogId: details.id, episode: episode)
+        DownloadBackgroundTasks.shared.begin(key: backgroundKey, title: details.title, subtitle: "Episode \(episode)")
+        #endif
         do {
             try await engine.startEpisodeDownload(
                 // The open page's catalog, not AniList's: a film downloaded
@@ -876,6 +885,9 @@ extension AppModel {
         } catch {
             downloadStates[episode] = .failed(message: error.localizedDescription)
             setLibraryDownload(catalogId: details.id, episode: episode, title: details.title, coverURL: details.coverURL, state: .failed(message: error.localizedDescription))
+            #if os(iOS)
+            DownloadBackgroundTasks.shared.finish(key: backgroundKey, success: false)
+            #endif
             return
         }
 
@@ -892,7 +904,12 @@ extension AppModel {
         while true {
             // A cancelled task returns from `sleep` at once; with the error
             // swallowed this became a hot FFI poll until the download ended.
-            do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
+            do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch {
+                #if os(iOS)
+                DownloadBackgroundTasks.shared.finish(key: backgroundKey, success: false)
+                #endif
+                return
+            }
             let status = await engine.episodeDownloadStatus(
                 catalog: catalog,
                 catalogId: catalogId,
@@ -910,14 +927,26 @@ extension AppModel {
                 let next = MediaDetailView.EpisodeDownloadState.downloading(percent: percent.rounded())
                 if mirrorToDetailPage, downloadStates[episode] != next { downloadStates[episode] = next }
                 setLibraryDownload(catalogId: catalogId, episode: episode, title: title, coverURL: coverURL, state: .downloading(percent: percent))
+                #if os(iOS)
+                DownloadBackgroundTasks.shared.update(key: backgroundKey, percent: percent)
+                #endif
                 continue
             case .done(let path):
                 if mirrorToDetailPage { downloadStates[episode] = .done(path: path) }
                 setLibraryDownload(catalogId: catalogId, episode: episode, title: title, coverURL: coverURL, state: .done(path: path))
             case .failed(let message):
+                AppLog.write("[downloads] \(title) episode \(episode) failed: \(message)")
                 if mirrorToDetailPage { downloadStates[episode] = .failed(message: message) }
                 setLibraryDownload(catalogId: catalogId, episode: episode, title: title, coverURL: coverURL, state: .failed(message: message))
             }
+            #if os(iOS)
+            if case .done = status {
+                DownloadBackgroundTasks.shared.finish(key: backgroundKey, success: true)
+            } else {
+                DownloadBackgroundTasks.shared.finish(key: backgroundKey, success: false)
+            }
+            syncDownloadKeepAlive()
+            #endif
             return
         }
     }

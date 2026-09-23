@@ -60,8 +60,19 @@ targets:
         # Playback must survive the screen locking or the app leaving the
         # foreground; without this the audio session is torn down the moment
         # the user pockets the phone mid-episode.
+        # `processing` for the download tasks below, which several guides list
+        # as required. On the owner's phone the request is refused as
+        # "unavailable" with or without it, and `DownloadKeepAlive` (audio)
+        # is what keeps a download going there.
         UIBackgroundModes:
           - audio
+          - processing
+        # One `BGContinuedProcessingTask` per download, each registered under
+        # its own `com.anicat.ios.download.<uuid>` (see
+        # `DownloadBackgroundTasks`). Without the pattern here the scheduler
+        # refuses the registration and a download stops when the phone locks.
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.anicat.ios.download.*
         # librqbit talks to peers on the local subnet and BonjourDiscovery
         # advertises/browses `_anicat-stream._tcp`. iOS 14 and later refuse
         # both silently — no error, just no peers — unless the app declares

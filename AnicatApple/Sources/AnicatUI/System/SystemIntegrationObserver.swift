@@ -35,6 +35,10 @@ public struct SystemIntegrationObserver: View {
             // playing torrent is exempt inside the engine, so backgrounding
             // mid-episode with audio still running keeps what it is reading.
             .onChange(of: scenePhase) { _, phase in
+                // Background only, not inactive: a pulled-down Control
+                // Centre is inactive, and the app is not suspended there.
+                AppModel.isInBackground = phase == .background
+                model.syncDownloadKeepAlive()
                 // The remote's socket does not survive suspension, and the
                 // cancellation is not delivered until the app is resumed --
                 // so it is hung up on the way out and redialled on the way

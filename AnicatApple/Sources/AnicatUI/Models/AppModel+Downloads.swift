@@ -24,6 +24,50 @@ extension AppModel {
         UserDefaults.standard.object(forKey: deleteWatchedDownloadsKey) as? Bool ?? isPhoneDefault
     }
 
+    /// Silence keeps the app from being suspended while a download runs in the
+    /// background (`DownloadKeepAlive`). On by default; the switch is there
+    /// because it costs battery.
+    static let backgroundDownloadsKey = "anicat_background_downloads"
+    static var keepsDownloadingInBackground: Bool {
+        UserDefaults.standard.object(forKey: backgroundDownloadsKey) as? Bool ?? true
+    }
+
+    #if os(iOS)
+    /// Whether the app is in the background, as the scene last reported it.
+    /// Set by `SystemIntegrationObserver`; read by `syncDownloadKeepAlive`.
+    static var isInBackground = false
+
+    /// Starts or stops `DownloadKeepAlive` to match: in the background, a
+    /// download in progress, nothing playing (a stream has its own audio
+    /// session and keeps the app running already), no system task doing the
+    /// job, and the setting on.
+    func syncDownloadKeepAlive() {
+        let downloading = libraryDownloads.contains {
+            if case .downloading = $0.state { return true }
+            return false
+        }
+        let wanted = Self.isInBackground
+            && downloading
+            && activeStreamURL == nil
+            && !DownloadBackgroundTasks.shared.hasRunningTask
+            && Self.keepsDownloadingInBackground
+        DownloadKeepAlive.shared.setRunning(wanted)
+    }
+
+    /// The engine saves phone downloads under Documents/Anicat
+    /// (`downloads_root`), and Documents goes into the iCloud backup by
+    /// default: a season of episodes would be gigabytes of someone's backup
+    /// quota for files a torrent can fetch again.
+    static func excludeDownloadsFromBackup() {
+        guard var folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Anicat", isDirectory: true) else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? folder.setResourceValues(values)
+    }
+    #endif
+
     private static var isPhoneDefault: Bool {
         #if os(iOS)
         return true
@@ -95,6 +139,9 @@ extension AppModel {
     @MainActor
     public func loadDownloadedEpisodes() {
         guard let engine else { return }
+        #if os(iOS)
+        Self.excludeDownloadsFromBackup()
+        #endif
         // Files from before there was a table, and any a crash lost: the
         // engine walks the Downloads folder and indexes what it can identify
         // from the lists this side already has. Idempotent, so this runs at

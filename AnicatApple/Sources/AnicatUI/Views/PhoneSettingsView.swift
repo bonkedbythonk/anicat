@@ -38,6 +38,7 @@ struct PhoneSettingsView: View {
     // readers; both default on for the phone.
     @AppStorage(AppModel.smallerDownloadsKey) private var smallerDownloads: Bool = true
     @AppStorage(AppModel.deleteWatchedDownloadsKey) private var deleteWatchedDownloads: Bool = true
+    @AppStorage(AppModel.backgroundDownloadsKey) private var backgroundDownloads: Bool = true
     // `AppModel.isStreamFromMacEnabled` owns the reader and the default.
     @AppStorage("anicat_stream_from_mac") private var streamFromMac: Bool = true
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
@@ -381,6 +382,10 @@ struct PhoneSettingsView: View {
                 .foregroundStyle(SumiTheme.muted)
             Toggle("Smaller downloads", isOn: $smallerDownloads)
             Text("Downloads pick a 720p or HEVC release when one is as good a match: about half to a sixth of the size, and hard to tell apart on a phone.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SumiTheme.muted)
+            Toggle("Keep downloading in the background", isOn: $backgroundDownloads)
+            Text("Keeps a download going after you leave the app, by holding a silent audio session. Uses some battery while it runs.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(SumiTheme.muted)
             Toggle("Delete watched downloads", isOn: $deleteWatchedDownloads)

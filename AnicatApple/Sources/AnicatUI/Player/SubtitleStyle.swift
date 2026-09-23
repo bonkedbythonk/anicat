@@ -9,8 +9,8 @@ import Foundation
 /// and signs turn into white dialogue text floating over the scene. So a
 /// preset here restyles ASS files through `sub-ass-style-overrides` with a
 /// style name in front of each field (libass's `Style.Field=Value`), aimed at
-/// the names fansub groups and simulcasts use for dialogue. A style called
-/// "Sign", "TS" or "Title" is left exactly as the release made it.
+/// the file's dialogue styles as `dialogueStyles(fromHeader:)` finds them.
+/// Signs, songs and titles are left exactly as the release made them.
 ///
 /// Plain-text subtitles (SRT, WebVTT) have no styles of their own and take
 /// the preset through mpv's `sub-*` options instead.
@@ -109,23 +109,10 @@ public enum SubtitleStyle: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The style names fansub groups and simulcast rips give their dialogue.
-    /// Anything else (signs, songs, titles, notes) keeps the release's look.
-    /// The run-together names (`DefaultItalics`, `FlashbackTop`) are the
-    /// simulcast rips': the 1.4 GB test file carries eight of them, and with
-    /// only `Default` and `Flashback` matched, a preset restyled the plain
-    /// lines and left every italic and top line in the release's look.
-    static let dialogueStyleNames = [
-        "Default", "Main", "Dialogue", "Dialog", "Default-alt", "Alt",
-        "Italics", "Italic", "Main-italic", "Top", "Main-top", "Default-top",
-        "Flashback", "Thoughts", "Overlap", "Narration",
-        "DefaultItalics", "DefaultTop", "DefaultItalicsTop",
-        "FlashbackItalics", "FlashbackTop", "FlashbackItalicsTop",
-    ]
-
-    /// `sub-ass-style-overrides` for a file whose script is `playResY`
-    /// lines tall, or the empty string for `.release`, which clears whatever
-    /// an earlier pick set.
+    /// `sub-ass-style-overrides` for the `styles` of a file whose script is
+    /// `playResY` lines tall, or the empty string for `.release`, which
+    /// clears whatever an earlier pick set. `Default` stands in until a
+    /// header has been read.
     ///
     /// Size, outline and shadow are in the file's own script pixels, and a
     /// release's coordinate space is whatever its group chose: SubsPlease
@@ -142,7 +129,7 @@ public enum SubtitleStyle: String, CaseIterable, Identifiable, Sendable {
     /// lines land on the screen instead of past it. Absolute, since an
     /// override cannot add to the file's value: the file's own 23 of 360
     /// lines, plus the crop.
-    func assOverrides(playResY: Double = 360, liftingBy crop: Double = 0) -> String {
+    func assOverrides(playResY: Double = 360, styles: [String] = ["Default"], liftingBy crop: Double = 0) -> String {
         var fields: [(String, String)] = []
         let k = playResY / 360
         if let look {
@@ -161,7 +148,7 @@ public enum SubtitleStyle: String, CaseIterable, Identifiable, Sendable {
         if crop > 0 {
             fields.append(("MarginV", "\(Int(((23.0 / 360) + crop) * playResY))"))
         }
-        return Self.dialogueStyleNames
+        return styles
             .flatMap { style in fields.map { "\(style).\($0.0)=\($0.1)" } }
             .joined(separator: ",")
     }
@@ -180,6 +167,57 @@ public enum SubtitleStyle: String, CaseIterable, Identifiable, Sendable {
         if let y = field("PlayResY"), y > 0 { return y }
         if let x = field("PlayResX"), x > 0 { return x == 1280 ? 1024 : x * 3 / 4 }
         return 288
+    }
+
+    /// The dialogue styles in an ASS header (mpv's `sub-ass-extradata`).
+    ///
+    /// A fixed list of names missed a quarter of the dialogue: over 125
+    /// AnimeTosho tracks it covered 27,692 of 36,900 unpositioned lines, and
+    /// a style like `On Top`, `main - italics` or `Flashback - Italics` kept
+    /// the release's look between restyled `Default` lines, switching from
+    /// one line to the next. Groups name their styles freely but give every
+    /// dialogue variant the main style's font and size, so the styles named
+    /// default, main or dialogue anchor the set (the first style, libass's
+    /// fallback, when none is: `BD DX`), and every style sharing an anchor's
+    /// font and size joins it. That covers 35,542 lines; what is left is
+    /// OP, ED, songs, titles and signs. A sign style in the dialogue font
+    /// (`MarySigns`, 1,908 positioned lines) is kept out by its name.
+    static func dialogueStyles(fromHeader header: String) -> [String] {
+        let styles: [(name: String, font: String, size: Double?)] = header
+            .split(whereSeparator: \.isNewline)
+            .filter { $0.hasPrefix("Style:") }
+            .map { line in
+                let fields = line.dropFirst(6).split(separator: ",", omittingEmptySubsequences: false)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                return (fields[0], fields.count > 1 ? fields[1].lowercased() : "",
+                        fields.count > 2 ? Double(fields[2]) : nil)
+            }
+            // mpv splits the override list on commas, and libass reads the
+            // last `.` before `=` as the end of the name.
+            .filter { !$0.name.isEmpty && !$0.name.contains(",") && !$0.name.contains("=") }
+        let named = styles.filter { !words($0.name).isDisjoint(with: ["default", "main", "dialogue", "dialog"]) }
+        let anchors = named.isEmpty ? Array(styles.prefix(1)) : named
+        return styles
+            .filter { style in anchors.contains { $0.font == style.font && $0.size == style.size } }
+            .filter { style in !words(style.name).contains { $0.hasPrefix("sign") || $0.hasPrefix("song") } }
+            .map(\.name)
+    }
+
+    /// A style name's words, lowercased: `DefaultItalicsTop` and
+    /// `GJM_Main_1080p` both read as words, so `main` is found in the second
+    /// without matching `domain`.
+    static func words(_ name: String) -> Set<String> {
+        var words: Set<String> = [], current = ""
+        for ch in name {
+            if !ch.isLetter || (ch.isUppercase && current.last?.isLowercase == true) {
+                if !current.isEmpty { words.insert(current.lowercased()) }
+                current = ch.isLetter ? String(ch) : ""
+            } else {
+                current.append(ch)
+            }
+        }
+        if !current.isEmpty { words.insert(current.lowercased()) }
+        return words
     }
 
     /// mpv's `sub-*` options for plain-text subtitles. `.release` restores

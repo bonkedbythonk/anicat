@@ -1269,7 +1269,7 @@ public struct MpvSurface {
         /// error in the middle of an episode.
         func setSubtitleStyle(_ style: SubtitleStyle) {
             guard let mpv = mpv else { return }
-            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides(playResY: scriptHeight, liftingBy: fillCrop))
+            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides(playResY: scriptHeight, styles: dialogueStyles, liftingBy: fillCrop))
             for (name, value) in style.textOptions {
                 mpv_set_property_string(mpv, name, value)
             }
@@ -1546,6 +1546,13 @@ public struct MpvSurface {
         var scriptHeight: Double {
             get { scriptHeightLock.lock(); defer { scriptHeightLock.unlock() }; return _scriptHeight }
             set { scriptHeightLock.lock(); _scriptHeight = newValue; scriptHeightLock.unlock() }
+        }
+        /// The current ASS track's dialogue styles, the ones a subtitle
+        /// style restyles; same writer and reader as `scriptHeight`.
+        private var _dialogueStyles = ["Default"]
+        var dialogueStyles: [String] {
+            get { scriptHeightLock.lock(); defer { scriptHeightLock.unlock() }; return _dialogueStyles }
+            set { scriptHeightLock.lock(); _dialogueStyles = newValue; scriptHeightLock.unlock() }
         }
         /// Read by `setSubtitleStyle`, which the event loop calls off the main
         /// thread when a new file's script height arrives.
@@ -2002,10 +2009,16 @@ public struct MpvSurface {
                             // A plain-text track has no header; the style
                             // then goes through the `sub-*` options and the
                             // script height does not matter.
-                            let height = self.stringProperty("sub-ass-extradata")
-                                .map(SubtitleStyle.playResY(fromHeader:)) ?? 360
-                            if height != self.scriptHeight {
+                            let header = self.stringProperty("sub-ass-extradata")
+                            let height = header.map(SubtitleStyle.playResY(fromHeader:)) ?? 360
+                            // Two files can share a height and not their
+                            // style names; the first file's names would
+                            // miss every dialogue line of the second.
+                            let found = header.map(SubtitleStyle.dialogueStyles(fromHeader:)) ?? []
+                            let styles = found.isEmpty ? ["Default"] : found
+                            if height != self.scriptHeight || styles != self.dialogueStyles {
                                 self.scriptHeight = height
+                                self.dialogueStyles = styles
                                 self.setSubtitleStyle(SubtitleStyle.current)
                             }
                         } else if name == "demuxer-cache-state" {

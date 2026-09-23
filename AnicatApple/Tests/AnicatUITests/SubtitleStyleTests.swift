@@ -24,7 +24,8 @@ struct SubtitleStyleTests {
 
     @Test("A preset restyles dialogue styles by name and never touches a sign style")
     func presetsAreNamed() {
-        let overrides = SubtitleStyle.simulcast.assOverrides().split(separator: ",").map(String.init)
+        let overrides = SubtitleStyle.simulcast.assOverrides(styles: ["Default", "Main"])
+            .split(separator: ",").map(String.init)
         #expect(overrides.contains("Default.Fontname=Trebuchet MS"))
         #expect(overrides.contains("Main.PrimaryColour=&H00FFFFFF"))
         // Every field is scoped to a style: a bare `Fontname=` would hit
@@ -55,7 +56,7 @@ struct SubtitleStyleTests {
     @Test("Fill mode lifts only the dialogue, by the crop, in the file's own lines")
     func liftedForFill() {
         // 16:9 filled on a 2.17:1 screen loses 9.1% off each edge.
-        let lifted = SubtitleStyle.release.assOverrides(playResY: 360, liftingBy: 0.091)
+        let lifted = SubtitleStyle.release.assOverrides(playResY: 360, styles: ["Default", "DefaultItalicsTop"], liftingBy: 0.091)
             .split(separator: ",").map(String.init)
         #expect(lifted.contains("Default.MarginV=55"))
         #expect(lifted.contains("DefaultItalicsTop.MarginV=55"))
@@ -75,6 +76,46 @@ struct SubtitleStyleTests {
         #expect(SubtitleStyle.playResY(fromHeader: "PlayResX: 1280\n") == 1024)
         #expect(SubtitleStyle.playResY(fromHeader: "PlayResX: 1920\n") == 1440)
         #expect(SubtitleStyle.playResY(fromHeader: "[Script Info]\nTitle: x\n") == 288)
+    }
+
+    /// `Style:` lines as the releases wrote them, cut to name, font, size.
+    private func header(_ styles: String...) -> String {
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour\n"
+            + styles.map { "Style: \($0),&H00FFFFFF" }.joined(separator: "\n")
+    }
+
+    @Test("Dialogue styles come from the header: the main style's font and size, signs out")
+    func dialogueStylesFromHeader() {
+        // SubsPlease, Watari-kun 26.
+        let subsPlease = header(
+            "Default,Roboto Medium,26", "DefaultItalics,Roboto Medium,26", "DefaultTop,Roboto Medium,26",
+            "Flashback,Roboto Medium,26", "Narration,Roboto Medium,26", "Signs,Arial,24",
+            "Signs_PhoneW,Arial,18", "Credits2,Arial,13")
+        #expect(SubtitleStyle.dialogueStyles(fromHeader: subsPlease)
+            == ["Default", "DefaultItalics", "DefaultTop", "Flashback", "Narration"])
+        // `On Top` carried 53 lines an episode between restyled `Default` ones.
+        #expect(SubtitleStyle.dialogueStyles(fromHeader: header(
+            "Default,Roboto Medium,26", "OS,Arial,18", "On Top,Roboto Medium,26", "Italics,Roboto Medium,26"))
+            == ["Default", "On Top", "Italics"])
+        // An unused `Default` in another size: the show's own family anchors.
+        #expect(SubtitleStyle.dialogueStyles(fromHeader: header(
+            "Default,Roboto Medium,22", "Irumakun - Default,Roboto Medium,26", "Irumakun - Flashback  Top,Roboto Medium,26",
+            "sign_11525_110_I_thought,Roboto Medium,26", "Iruma - Ep Title,Trebuchet MS,20"))
+            == ["Default", "Irumakun - Default", "Irumakun - Flashback  Top"])
+        // `Main` inside a longer name; the group's other font stays out.
+        #expect(SubtitleStyle.dialogueStyles(fromHeader: header(
+            "GJM_Main_1080p,Gandhi Sans,75", "GJM_Overlap_1080p,Gandhi Sans,75", "OP,Cute Dino,58"))
+            == ["GJM_Main_1080p", "GJM_Overlap_1080p"])
+        // No dialogue-sounding name at all: the first style anchors.
+        #expect(SubtitleStyle.dialogueStyles(fromHeader: header(
+            "BD DX,Arial,20", "BD Top DX,Arial,20", "BD Top Right,Verdana Bold,20"))
+            == ["BD DX", "BD Top DX"])
+        // A sign style in the dialogue's own font is still a sign style.
+        #expect(SubtitleStyle.dialogueStyles(fromHeader: header(
+            "Default,Alegreya Fake,72", "Alt,Alegreya Fake,72", "MarySigns,Alegreya Fake,72"))
+            == ["Default", "Alt"])
+        // A plain-text track has no header.
+        #expect(SubtitleStyle.dialogueStyles(fromHeader: "").isEmpty)
     }
 
     @Test("Boxed draws a box, the others an outline")
@@ -127,6 +168,14 @@ struct SubtitleStyleMpvTests {
                 #expect(status >= 0, "\(style): \(name)=\(value) -> \(String(cString: mpv_error_string(status)))")
             }
         }
+        // Most names the header finds carry spaces ("On Top", "BD DX",
+        // "Irumakun - Flashback  Top"); a list that split or trimmed them
+        // would select those styles and restyle none.
+        let spaced = SubtitleStyle.simulcast.assOverrides(styles: ["On Top", "Irumakun - Flashback  Top"])
+        #expect(mpv_set_property_string(handle, "sub-ass-style-overrides", spaced) >= 0)
+        let readBack = try #require(mpv_get_property_string(handle, "sub-ass-style-overrides"))
+        defer { mpv_free(readBack) }
+        #expect(String(cString: readBack) == spaced)
     }
 }
 #endif

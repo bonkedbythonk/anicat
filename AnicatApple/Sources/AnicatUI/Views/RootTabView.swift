@@ -729,26 +729,34 @@ struct ContinueWatchingRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(model.upNextItems) { entry in
+                        // To the show's page, not straight into a stream: a
+                        // tap on a card started a resolve the viewer had not
+                        // asked for (owner, 2026-09-23). The page's own
+                        // Continue button plays it; the long press keeps the
+                        // one-tap route for whoever wants it.
                         Button {
-                            // Chapters have no player to open; the reader
-                            // lives on the detail page.
-                            if entry.unit == "CH" {
-                                onOpen(entry.id, entry.title, entry.thumbnailURL, true)
-                            } else {
-                                model.playGuardedByCellular {
-                                    playFromShelf(
-                                        model: model,
-                                        catalogId: entry.id,
-                                        episode: entry.nextEpisodeOrChapter,
-                                        title: entry.title,
-                                        coverURL: entry.thumbnailURL
-                                    )
-                                }
-                            }
+                            onOpen(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH")
                         } label: {
                             ContinueWatchingCard(entry: entry)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            if entry.unit != "CH" {
+                                Button {
+                                    model.playGuardedByCellular {
+                                        playFromShelf(
+                                            model: model,
+                                            catalogId: entry.id,
+                                            episode: entry.nextEpisodeOrChapter,
+                                            title: entry.title,
+                                            coverURL: entry.thumbnailURL
+                                        )
+                                    }
+                                } label: {
+                                    Label("Play EP \(entry.nextEpisodeOrChapter)", systemImage: "play.fill")
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 16)

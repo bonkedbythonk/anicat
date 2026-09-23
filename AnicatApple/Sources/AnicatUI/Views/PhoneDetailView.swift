@@ -63,6 +63,10 @@ struct PhoneDetailView: View {
                 if let details = model.selectedMediaDetails {
                     Hero(details: details)
 
+                    if !isManga, !isNovel {
+                        watchButton
+                    }
+
                     Picker("", selection: $section) {
                         ForEach(Section.allCases) {
                             Text($0 == .episodes ? listLabel : $0.rawValue).tag($0)
@@ -435,6 +439,37 @@ struct PhoneDetailView: View {
             } label: {
                 Label("Play on \(node.name)", systemImage: "macbook")
             }
+        }
+    }
+
+    /// The page's one primary action, where a streaming app puts it: the
+    /// next episode to watch, under the hero. Without it the only way to play
+    /// from here was scrolling to the episode row, which is why Continue
+    /// Watching used to skip the page and play on tap.
+    @ViewBuilder
+    private var watchButton: some View {
+        let aired = model.selectedEpisodes.filter(\.isAired)
+        if let first = aired.first {
+            let next = aired.first { !$0.isWatched }
+            let target = next ?? first
+            let label: String = {
+                if aired.count == 1 { return "Play" }
+                if next == nil { return "Watch again from EP \(first.number)" }
+                if target.number == first.number, (target.progressPercent ?? 0) == 0 { return "Start watching EP \(target.number)" }
+                return "Continue EP \(target.number)"
+            }()
+            Button {
+                model.playGuardedByCellular { play(target.number) }
+            } label: {
+                Label(label, systemImage: "play.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .foregroundStyle(SumiTheme.background)
+                    .background(SumiTheme.indigo, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
         }
     }
 

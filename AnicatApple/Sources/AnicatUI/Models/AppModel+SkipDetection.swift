@@ -165,6 +165,9 @@ extension AppModel {
             if storedMissed {
                 print("[skipdetect] stored op for \(catalogId) not in ep \(episode); learning it again from ep \(neighbour)")
             }
+            guard await self.subtitlesLeaveRoom(kind: "op", catalogId: catalogId, episode: episode, url: url,
+                                                start: 0, length: Self.skipHeadSeconds, neighbour: neighbour),
+                  !Task.isCancelled else { return }
             guard let otherURL = await self.resolveNeighbour(neighbour, catalogId: catalogId, episode: episode,
                                                             name: "opening", title: title, preferDub: preferDub)
             else { return }
@@ -288,6 +291,9 @@ extension AppModel {
             // Here with no stored ending and no next episode: the newest
             // episode of a weekly show, which the preload never serves.
             guard let neighbour,
+                  await self.subtitlesLeaveRoom(kind: "ed", catalogId: catalogId, episode: episode, url: url,
+                                                start: tailStart, length: Self.skipTailSeconds, neighbour: neighbour),
+                  !Task.isCancelled,
                   let otherURL = await self.resolveNeighbour(neighbour, catalogId: catalogId, episode: episode,
                                                             name: "ending", title: self.currentPlaybackTitle,
                                                             preferDub: preferDub)
@@ -419,6 +425,44 @@ extension AppModel {
         }.value
         print("[skipdetect] \(kind) pair for \(catalogId) ep \(episode): \(span.map { "\(Int($0.start))-\(Int($0.end))s" } ?? "nothing shared") in \(Int(Date().timeIntervalSince(began)))s")
         apply(span, kind: kind, catalogId: catalogId, episode: episode, source: "compared with another episode")
+    }
+
+    /// Asked before another episode is fetched to learn a segment from:
+    /// false when this episode's subtitles show no pause long enough for
+    /// one, which makes the fetch pointless (`SubtitleGaps`). Watari-kun
+    /// ep 24 fetched ep 25 to compare with and found "nothing shared" in an
+    /// episode that has neither an opening nor an ending. Anything short of
+    /// that answer -- no ASS track, too little dialogue, a read that failed
+    /// or timed out -- is true, and the fetch goes ahead as before.
+    private func subtitlesLeaveRoom(kind: String, catalogId: Int64, episode: Int64, url: String,
+                                    start: Double, length: Double, neighbour: Int64) async -> Bool {
+        // A stream with no peers would hold the read to its timeout, and the
+        // comparison after it gives up on the same check anyway.
+        guard await streamCanServe(start: start, length: length) else { return true }
+        let name = kind == "op" ? "opening" : "ending"
+        playerController.skipDetectionStatus = "Reading this episode's subtitles for room for an \(name)"
+        let began = Date()
+        let tracks = await SubtitleExtractor.extract(url: url, start: start, length: length)
+        let elapsed = String(format: "%.1f", Date().timeIntervalSince(began))
+        let window = "\(Int(start))-\(Int(start + length))s"
+        guard let tracks else {
+            print("[skipdetect] \(kind) subtitle check for \(catalogId) ep \(episode) \(window): unreadable in \(elapsed)s")
+            return true
+        }
+        guard let chosen = SubtitleExtractor.dialogueTrack(tracks) else {
+            print("[skipdetect] \(kind) subtitle check for \(catalogId) ep \(episode): no ASS track")
+            return true
+        }
+        let (verdict, gap) = SubtitleGaps.verdict(dialogue: chosen.dialogue, from: start, to: start + length)
+        print("[skipdetect] \(kind) subtitle check for \(catalogId) ep \(episode) \(window): \(verdict), \(chosen.dialogue.count) dialogue lines, longest pause \(gap.map { "\(Int($0))s" } ?? "-") in \(elapsed)s")
+        guard verdict == .absent else { return true }
+        print("[skipdetect] no \(name) in \(catalogId) ep \(episode); not fetching ep \(neighbour) to compare")
+        guard !Task.isCancelled,
+              currentPlaybackCatalogId == catalogId, currentPlaybackEpisode == episode else { return false }
+        let label = kind == "op" ? "Opening" : "Ending"
+        playerController.skipDetectionStatus = "\(label): none in this episode (the dialogue never pauses for one)"
+        noteAudioSearchFailed("No \(name) in this episode")
+        return false
     }
 
     enum StoredSearch { case found, missed, failed }

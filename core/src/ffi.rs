@@ -1035,6 +1035,10 @@ pub struct SearchFilters {
     pub min_score: Option<i32>,
     pub status: Option<String>,
     pub sort: Option<String>,
+    /// AniList's `countryOfOrigin`: `JP`, `KR` or `CN`. What separates manga
+    /// from manhwa and manhua, and Japanese anime from donghua; AniList has
+    /// no format for either, only the country.
+    pub country: Option<String>,
 }
 
 /// The engine. One per app launch.
@@ -4763,6 +4767,14 @@ fn build_search_variables(
                 vars.insert("sort".to_string(), serde_json::json!([trimmed]));
             }
         }
+        if let Some(ref country) = f.country {
+            let trimmed = country.trim();
+            if !trimmed.is_empty() {
+                // Scalar `CountryCode`: the argument takes one country, not
+                // a list like `format_in`.
+                vars.insert("countryOfOrigin".to_string(), serde_json::json!(trimmed));
+            }
+        }
     }
 
     // Default sort when searching without a text query so AniList returns
@@ -5661,6 +5673,18 @@ mod tests {
         };
         let vars = build_search_variables(Some("Ghibli"), Some("ANIME"), Some(&filters), 1);
         assert_eq!(vars.get("format"), Some(&serde_json::json!(["MOVIE"])));
+    }
+
+    #[test]
+    fn country_filter_is_a_single_code() {
+        let filters = SearchFilters {
+            country: Some("KR".to_string()),
+            ..Default::default()
+        };
+        let vars = build_search_variables(None, Some("MANGA"), Some(&filters), 1);
+        assert_eq!(vars.get("countryOfOrigin"), Some(&serde_json::json!("KR")));
+        let vars = build_search_variables(None, Some("MANGA"), Some(&SearchFilters::default()), 1);
+        assert_eq!(vars.get("countryOfOrigin"), None);
     }
 
     #[test]

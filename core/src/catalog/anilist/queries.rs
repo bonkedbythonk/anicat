@@ -65,9 +65,9 @@ query ($id: Int, $type: MediaType) {
 "#;
 
 pub const MEDIA_SEARCH_QUERY: &str = r#"
-query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $genre: [String], $seasonYear: Int, $season: MediaSeason, $format: [MediaFormat], $status: MediaStatus, $sort: [MediaSort], $isAdult: Boolean, $averageScoreGreater: Int) {
+query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $genre: [String], $seasonYear: Int, $season: MediaSeason, $format: [MediaFormat], $status: MediaStatus, $sort: [MediaSort], $isAdult: Boolean, $averageScoreGreater: Int, $countryOfOrigin: CountryCode) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: $type, genre_in: $genre, seasonYear: $seasonYear, season: $season, format_in: $format, status: $status, sort: $sort, isAdult: $isAdult, averageScore_greater: $averageScoreGreater) {
+    media(search: $search, type: $type, genre_in: $genre, seasonYear: $seasonYear, season: $season, format_in: $format, status: $status, sort: $sort, isAdult: $isAdult, averageScore_greater: $averageScoreGreater, countryOfOrigin: $countryOfOrigin) {
       id type
       title { romaji english native }
       coverImage { large medium }

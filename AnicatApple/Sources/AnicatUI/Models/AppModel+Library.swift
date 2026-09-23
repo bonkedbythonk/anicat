@@ -752,7 +752,7 @@ extension AppModel {
             if append { isLoadingMoreSearchDiscover = false } else { isLoading = false }
         }
         do {
-            let filters = SearchFilters(genre: nil, year: nil, season: nil, format: nil, minScore: nil, status: nil, sort: "TRENDING_DESC")
+            let filters = SearchFilters(genre: nil, year: nil, season: nil, format: nil, minScore: nil, status: nil, sort: "TRENDING_DESC", country: nil)
             let summaries = try await engine.searchCatalog(query: "", mediaType: mediaType, filters: filters, page: page)
             await recordAniListSuccess()
             let cards = summaries.map { Self.card($0) }

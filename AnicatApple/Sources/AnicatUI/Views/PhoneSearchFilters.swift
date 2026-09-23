@@ -16,8 +16,9 @@ struct PhoneSearchFilters: Equatable {
     var minScore = ""
     var status = ""
     var sort = ""
+    var country = ""
 
-    enum Key: CaseIterable { case genre, year, season, format, minScore, status, sort }
+    enum Key: CaseIterable { case genre, year, season, format, minScore, status, sort, country }
 
     var isActive: Bool { !activeChips.isEmpty }
 
@@ -40,7 +41,8 @@ struct PhoneSearchFilters: Equatable {
             format: effectiveFormat.isEmpty ? nil : effectiveFormat,
             minScore: Int32(minScore),
             status: status.isEmpty ? nil : status,
-            sort: sort.isEmpty ? nil : sort
+            sort: sort.isEmpty ? nil : sort,
+            country: country.isEmpty ? nil : country
         )
     }
 
@@ -72,6 +74,7 @@ struct PhoneSearchFilters: Equatable {
         if !minScore.isEmpty { chips.append(Chip(key: .minScore, label: Self.label(minScore, in: Self.scoreOptions))) }
         if !status.isEmpty { chips.append(Chip(key: .status, label: Self.label(status, in: Self.statusOptions))) }
         if !sort.isEmpty { chips.append(Chip(key: .sort, label: Self.label(sort, in: Self.sortOptions))) }
+        if !country.isEmpty { chips.append(Chip(key: .country, label: Self.label(country, in: countryOptions))) }
         return chips
     }
 
@@ -84,6 +87,7 @@ struct PhoneSearchFilters: Equatable {
         case .minScore: minScore = ""
         case .status: status = ""
         case .sort: sort = ""
+        case .country: country = ""
         }
     }
 
@@ -94,6 +98,8 @@ struct PhoneSearchFilters: Equatable {
     static func label(_ value: String, in options: [(value: String, label: String)]) -> String {
         options.first { $0.value == value }?.label ?? value
     }
+
+    var countryOptions: [(value: String, label: String)] { SearchView.countryOptions(for: mediaType) }
 
     // The same lists `SearchView` carries; kept in step by hand.
     static let genreOptions: [(value: String, label: String)] = [
@@ -164,6 +170,7 @@ struct PhoneSearchFilterSheet: View {
                     if let formats = filters.formatOptions {
                         picker("Format", $filters.format, formats)
                     }
+                    picker("Origin", $filters.country, filters.countryOptions)
                     picker("Score", $filters.minScore, PhoneSearchFilters.scoreOptions)
                     picker("Status", $filters.status, PhoneSearchFilters.statusOptions)
                 }

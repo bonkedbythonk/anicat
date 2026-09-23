@@ -55,6 +55,7 @@ public struct SearchView: View {
     @State private var minScoreFilter: String = ""
     @State private var statusFilter: String = ""
     @State private var sortFilter: String = ""
+    @State private var countryFilter: String = ""
 
     // Keyboard navigation over whichever grid is showing. `nil` means the
     // caret is in the field; Down from there lands on the first card, Up
@@ -155,6 +156,15 @@ public struct SearchView: View {
         return formatFilter
     }
 
+    /// AniList's `countryOfOrigin`. Manga, manhwa and manhua are the same
+    /// `MANGA` format there, told apart only by country, so under Manga the
+    /// options carry the names readers know them by.
+    static func countryOptions(for type: String) -> [(value: String, label: String)] {
+        type == "MANGA"
+            ? [("", "Any"), ("JP", "Manga (Japan)"), ("KR", "Manhwa (Korea)"), ("CN", "Manhua (China)")]
+            : [("", "Any"), ("JP", "Japan"), ("KR", "Korea"), ("CN", "China")]
+    }
+
     private static let scoreOptions: [(value: String, label: String)] = [
         ("", "Any"), ("90", "90+"), ("80", "80+"), ("70", "70+"), ("60", "60+"), ("50", "50+")
     ]
@@ -196,13 +206,14 @@ public struct SearchView: View {
             format: effectiveFormat.isEmpty ? nil : effectiveFormat,
             minScore: Int32(minScoreFilter),
             status: statusFilter.isEmpty ? nil : statusFilter,
-            sort: sortFilter.isEmpty ? nil : sortFilter
+            sort: sortFilter.isEmpty ? nil : sortFilter,
+            country: countryFilter.isEmpty ? nil : countryFilter
         )
     }
 
     private var hasActiveFilters: Bool {
         !genreFilter.isEmpty || !yearFilter.isEmpty || !effectiveSeason.isEmpty || !effectiveFormat.isEmpty
-            || !minScoreFilter.isEmpty || !statusFilter.isEmpty || !sortFilter.isEmpty
+            || !minScoreFilter.isEmpty || !statusFilter.isEmpty || !sortFilter.isEmpty || !countryFilter.isEmpty
     }
 
     /// What "Clear filters" is for, which is not the same question as
@@ -366,6 +377,7 @@ public struct SearchView: View {
                         if let formatOptions {
                             SumiFilterDropdown(label: "Format", options: formatOptions, selected: $formatFilter)
                         }
+                        SumiFilterDropdown(label: "Origin", options: Self.countryOptions(for: searchType), selected: $countryFilter)
                         SumiFilterDropdown(label: "Score", options: Self.scoreOptions, selected: $minScoreFilter)
                         SumiFilterDropdown(label: "Status", options: Self.statusOptions, selected: $statusFilter)
                         SumiFilterDropdown(label: "Sort", options: Self.sortOptions, selected: $sortFilter)
@@ -380,6 +392,7 @@ public struct SearchView: View {
                                     minScoreFilter = ""
                                     statusFilter = ""
                                     sortFilter = ""
+                                    countryFilter = ""
                                 }
                             } label: {
                                 Text("Clear filters")

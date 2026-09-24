@@ -15,6 +15,10 @@ fn single_result_redirect_is_parsed_as_one_manga() {
     assert_eq!(out[0].title, "Tomodachi Game");
     assert_eq!(out[0].cover_image, "https://mangakatana.com/imgs/cover/c.jpg");
     assert!(!out[0].matches_anilist);
+    // Chained Soldier redirects to "Slave of the Magic Capital&#039;s Elite
+    // Troops", which reached the app with the entity in it.
+    let out = parse_single_result("<h1 class=\"heading\">Slave of the Magic Capital&#039;s Elite Troops</h1>", "u");
+    assert_eq!(out[0].title, "Slave of the Magic Capital's Elite Troops");
 }
 
 #[test]

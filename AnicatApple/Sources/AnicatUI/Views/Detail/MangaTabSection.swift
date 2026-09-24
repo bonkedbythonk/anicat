@@ -177,6 +177,10 @@ struct MangaTabSection: View {
 
     let chapters: [MediaDetailView.MangaChapterItem]
     let format: String?
+    /// AniList's chapter progress: its group opens by default.
+    var readProgress: Int?
+    // Which groups are open, keyed by their first row's index.
+    @State private var expandedGroups: Set<Int> = []
     var isLoading: Bool = false
     // `AppModel.isLnoriEnabled` owns the reader and the default (off);
     // `@AppStorage` needs a literal here, so the two must agree.
@@ -205,18 +209,77 @@ struct MangaTabSection: View {
             } else {
                 SumiEmptyState(headline: "No chapters found", detail: "No chapters were found for this title.")
             }
+        } else if let groups = chapterGroups {
+            LazyVStack(spacing: 8) {
+                ForEach(groups, id: \.start) { group in
+                    // `DisclosureGroup` is not in the tvOS SDK; the same
+                    // flat fallback the episode list uses.
+                    #if os(tvOS)
+                    VStack(alignment: .leading, spacing: 8) {
+                        groupLabel(group.chapters)
+                        chapterRows(group.chapters)
+                    }
+                    #else
+                    DisclosureGroup(
+                        isExpanded: Binding(
+                            get: { expandedGroups.contains(group.start) },
+                            set: { open in
+                                if open { expandedGroups.insert(group.start) } else { expandedGroups.remove(group.start) }
+                            }
+                        )
+                    ) {
+                        chapterRows(group.chapters)
+                    } label: {
+                        groupLabel(group.chapters)
+                    }
+                    #endif
+                }
+            }
+            // Added, never swapped in, so a group the reader opened stays
+            // open when progress moves on.
+            .task(id: [chapters.count, readProgress ?? -1]) {
+                let next = Double((readProgress ?? 0) + 1)
+                let owning = groups.first { group in
+                    group.chapters.contains { (Double($0.number) ?? -1) >= next }
+                } ?? groups.last
+                if let owning { expandedGroups.insert(owning.start) }
+            }
         } else {
             LazyVStack(spacing: 8) {
-                ForEach(chapters) { chapter in
-                    MediaDetailView.ChapterRowView(
-                        chapter: chapter,
-                        offline: offlineStates[chapter.id] ?? .none,
-                        onDownload: onDownloadChapter.map { action in { action(chapter) } },
-                        onDeleteDownload: onDeleteChapterDownload.map { action in { action(chapter) } }
-                    ) {
-                        onReadChapter(chapter)
-                    }
-                }
+                chapterRows(chapters[...])
+            }
+        }
+    }
+
+    /// The episode list's grouping, for chapters (owner: "bundle manga
+    /// chapters like it does with anime so its not a huge list"). 50 rather
+    /// than 26: chapters are read in minutes, not watched in 24, and a
+    /// long-runner goes to 1,000 and more (Martial Peak lists 3,844).
+    private static let groupSize = 50
+
+    private var chapterGroups: [(start: Int, chapters: ArraySlice<MediaDetailView.MangaChapterItem>)]? {
+        guard chapters.count > Self.groupSize else { return nil }
+        return stride(from: 0, to: chapters.count, by: Self.groupSize).map { start in
+            (start, chapters[start..<min(start + Self.groupSize, chapters.count)])
+        }
+    }
+
+    private func groupLabel(_ group: ArraySlice<MediaDetailView.MangaChapterItem>) -> some View {
+        Text("Chapters \(group.first?.number ?? "")-\(group.last?.number ?? "")")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 4)
+    }
+
+    private func chapterRows(_ rows: ArraySlice<MediaDetailView.MangaChapterItem>) -> some View {
+        ForEach(rows) { chapter in
+            MediaDetailView.ChapterRowView(
+                chapter: chapter,
+                offline: offlineStates[chapter.id] ?? .none,
+                onDownload: onDownloadChapter.map { action in { action(chapter) } },
+                onDeleteDownload: onDeleteChapterDownload.map { action in { action(chapter) } }
+            ) {
+                onReadChapter(chapter)
             }
         }
     }

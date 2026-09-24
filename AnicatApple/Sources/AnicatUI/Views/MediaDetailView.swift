@@ -2073,6 +2073,7 @@ public struct MediaDetailView: View {
             MangaTabSection(
                 chapters: mangaChapters,
                 format: details.format,
+                readProgress: details.listProgress,
                 isLoading: isLoading,
                 novelVolumes: novel.volumes,
                 isLoadingNovelVolumes: novel.isLoading,

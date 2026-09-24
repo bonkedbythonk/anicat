@@ -124,7 +124,7 @@ fn first_capture(re: &Regex, haystack: &str) -> Option<String> {
 fn parse_single_result(html: &str, url: &str) -> Vec<MangaSummary> {
     let title_re = Regex::new(r"<h1[^>]*>([^<]+)</h1>").unwrap();
     let cover_re = Regex::new(r#"class="cover"[^>]*>(?s:.*?)<img[^>]+src="([^"]+)""#).unwrap();
-    let title = first_capture(&title_re, html).unwrap_or_else(|| "Unknown".to_string());
+    let title = first_capture(&title_re, html).map(|t| html_unescape(t.trim())).unwrap_or_else(|| "Unknown".to_string());
     let cover_image = first_capture(&cover_re, html).unwrap_or_default();
     vec![MangaSummary { id: url.to_string(), title, cover_image, matches_anilist: false }]
 }

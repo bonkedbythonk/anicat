@@ -22,6 +22,8 @@ use super::mangadex::{ChapterRow, MangaDetail, MangaSummary};
 
 const BASE_URL: &str = "https://mangakatana.com";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+/// See `get_html`.
+const THROTTLED_RETRY: Duration = Duration::from_secs(3);
 const USER_AGENT: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -34,7 +36,25 @@ impl MangaKatanaClient {
         Self { http }
     }
 
+    /// An empty `200` is MangaKatana saying "too fast": a search sent within
+    /// about two seconds of the previous one came back with no body at all
+    /// (0 bytes, 2026-09-24; 3 s apart never did), which read as "no
+    /// results" and lost SSS-Class Revival Hunter's 151 chapters. One retry
+    /// after the gap, then an error rather than an empty answer.
     async fn get_html(&self, url: &str) -> Result<(String, String), String> {
+        let (html, final_url) = self.fetch_html(url).await?;
+        if !html.trim().is_empty() {
+            return Ok((html, final_url));
+        }
+        tokio::time::sleep(THROTTLED_RETRY).await;
+        let (html, final_url) = self.fetch_html(url).await?;
+        if html.trim().is_empty() {
+            return Err(format!("mangakatana answered an empty page twice for {url}"));
+        }
+        Ok((html, final_url))
+    }
+
+    async fn fetch_html(&self, url: &str) -> Result<(String, String), String> {
         let resp = self
             .http
             .get(url)
@@ -117,12 +137,23 @@ fn parse_search_results(html: &str) -> Vec<MangaSummary> {
     // which sits earlier in the same item's markup.
     let title_re = Regex::new(r#"class="title"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([^<]+)</a>"#).unwrap();
     let cover_re = Regex::new(r#"<img[^>]+src="([^"]+)""#).unwrap();
+    // Results only, never the "hot" sidebar after them, which uses the same
+    // title markup. A search with no hits is an empty `#book_list` beside a
+    // full sidebar, and the reader took its first entry ("Pick Me Up!") as
+    // the answer for any title the site does not carry.
+    let html = match html.find(r#"id="book_list""#) {
+        Some(start) => {
+            let rest = &html[start..];
+            &rest[..rest.find(r#"id="col_right""#).unwrap_or(rest.len())]
+        }
+        None => html,
+    };
 
     let mut out = Vec::new();
     for cap in title_re.captures_iter(html) {
         let start = cap.get(0).unwrap().start();
         let href = cap[1].to_string();
-        let title = cap[2].trim().to_string();
+        let title = html_unescape(cap[2].trim());
         // `start` always lands on a boundary (it is a regex match start),
         // but subtracting a fixed byte count can land mid-codepoint when a
         // multibyte title sits in the preceding 600 bytes, so the cut point
@@ -245,6 +276,9 @@ fn html_unescape(s: &str) -> String {
     s.replace("&quot;", "\"")
         .replace("&amp;", "&")
         .replace("&#39;", "'")
+        // "A Returner&#039;s Magic Should Be Special" came through as-is,
+        // and no title comparison could match it.
+        .replace("&#039;", "'")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
 }

@@ -272,19 +272,38 @@ impl MangaDexClient {
     /// were: they are readable on their own, and a title that opened before
     /// must keep opening while the fallback site is down.
     async fn fill_from_katana(&self, titles: &[String], rows: Vec<ChapterRow>, why: SparseFeed) -> Vec<ChapterRow> {
-        let Some(query) = titles.first() else { return rows };
-        let results = match self.katana.search(query).await {
-            Ok(r) => r,
-            Err(e) => {
-                log::warn!("[mangadex] \"{query}\" feed is sparse ({why}); mangakatana search failed: {e}");
-                return rows;
+        // Up to three titles, English first and without an edition label.
+        // One title was asked before, and for a Korean or Chinese series it
+        // is the romanization ("Jeonjijeok Dokja Sijeom"), which MangaKatana
+        // never answers; for a colored edition it was "Demon Slayer: Kimetsu
+        // no Yaiba (Official Colored)", which matched none of 36 results
+        // while the plain title redirects straight to the series.
+        let mut wanted: Vec<String> = titles.to_vec();
+        let mut queries: Vec<String> = Vec::new();
+        for title in titles {
+            let plain = strip_edition(title);
+            if !plain.is_empty() && !wanted.contains(&plain) {
+                wanted.push(plain.clone());
             }
-        };
-        let Some(hit) = pick_fallback(&results, titles) else {
-            log::info!(
-                "[mangadex] \"{query}\" feed is sparse ({why}); none of {} mangakatana results share its title",
-                results.len()
-            );
+            if !plain.is_empty() && !queries.contains(&plain) && queries.len() < 3 {
+                queries.push(plain);
+            }
+        }
+        let Some(query) = queries.first().cloned() else { return rows };
+        let mut hit = None;
+        for q in &queries {
+            match self.katana.search(q).await {
+                Ok(results) => {
+                    if let Some(found) = pick_fallback(&results, &wanted) {
+                        hit = Some(found.clone());
+                        break;
+                    }
+                }
+                Err(e) => log::warn!("[mangadex] \"{q}\" feed is sparse ({why}); mangakatana search failed: {e}"),
+            }
+        }
+        let Some(hit) = hit else {
+            log::info!("[mangadex] \"{query}\" feed is sparse ({why}); no mangakatana result shares its title (asked {queries:?})");
             return rows;
         };
         let fill = match self.katana.detail(&hit.id).await {
@@ -552,7 +571,11 @@ fn group_name(relationships: &[Relationship]) -> Option<String> {
 /// MangaKatana page keeps the romaji only matches through the alternates.
 fn all_titles(attrs: &MangaAttributes, display: &str) -> Vec<String> {
     let mut out = vec![display.to_string()];
-    let more = attrs.title.values().chain(attrs.alt_titles.iter().flat_map(|m| m.values()));
+    // English ones first: `fill_from_katana` searches with the first few,
+    // and MangaKatana files a manhwa under its English name.
+    let every = || attrs.title.iter().chain(attrs.alt_titles.iter().flat_map(|m| m.iter()));
+    let english = every().filter(|(lang, _)| lang.as_str() == "en").map(|(_, t)| t);
+    let more = english.chain(every().filter(|(lang, _)| lang.as_str() != "en").map(|(_, t)| t));
     for t in more {
         if !out.iter().any(|seen| seen == t) {
             out.push(t.clone());
@@ -608,6 +631,19 @@ fn sparse_feed(rows: &[ChapterRow], declared_last: Option<f64>) -> Option<Sparse
     let starts_late = lowest > 1.0;
     let mostly_missing = (count as f64) * 2.0 < expected;
     (starts_late || mostly_missing).then_some(SparseFeed { count, lowest, expected })
+}
+
+/// A title without a trailing edition label: "Demon Slayer: Kimetsu no
+/// Yaiba (Official Colored)" -> "Demon Slayer: Kimetsu no Yaiba".
+fn strip_edition(title: &str) -> String {
+    let mut t = title.trim();
+    while t.ends_with(')') {
+        match t.rfind('(') {
+            Some(open) if open > 0 => t = t[..open].trim_end(),
+            _ => break,
+        }
+    }
+    t.to_string()
 }
 
 /// The MangaKatana result that is this manga, by title, or none.

@@ -42,6 +42,25 @@ fn search_results_pair_each_title_with_its_own_cover() {
 }
 
 #[test]
+fn the_sidebar_is_not_a_search_result() {
+    // The page's shape on 2026-09-24: results in `#book_list`, then
+    // `#col_right` with the "hot" list in the same title markup. With no hit
+    // the results list is empty and only the sidebar has titles.
+    let item = |slug: &str, title: &str| format!(
+        r#"<div class="item"><div class="media"><img src="https://mangakatana.com/imgs/{slug}.jpg"></div>
+        <h3 class="title"><a href="https://mangakatana.com/manga/{slug}">{title}</a></h3></div>"#
+    );
+    let page = |results: String| format!(
+        r#"<div id="book_list">{results}</div><div id="col_right"><div id="hot_book">{}</div></div>"#,
+        item("pick-me-up.1", "Pick Me Up!")
+    );
+    assert!(parse_search_results(&page(String::new())).is_empty());
+    let out = parse_search_results(&page(item("berserk.2", "A Returner&#039;s Magic")));
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].title, "A Returner's Magic");
+}
+
+#[test]
 fn chapter_list_is_reordered_ascending_and_entities_decoded() {
     // The site lists newest first and leaves title text HTML-escaped —
     // readers expect oldest-to-newest and plain text.

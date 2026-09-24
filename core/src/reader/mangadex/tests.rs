@@ -360,3 +360,11 @@ async fn live_one_piece_reads_from_chapter_one() {
     assert!(nums.windows(2).all(|w| w[0] < w[1]), "chapter numbers repeat or are out of order");
     assert!(from_mangadex >= 1, "the MangaDex chapter was lost in the merge");
 }
+
+#[test]
+fn an_edition_label_comes_off_the_end() {
+    assert_eq!(strip_edition("Demon Slayer: Kimetsu no Yaiba (Official Colored)"), "Demon Slayer: Kimetsu no Yaiba");
+    assert_eq!(strip_edition("Vagabond (Hong Kong Colored Version) (Digital)"), "Vagabond");
+    assert_eq!(strip_edition("(G) Idle"), "(G) Idle");
+    assert_eq!(strip_edition("Horimiya"), "Horimiya");
+}

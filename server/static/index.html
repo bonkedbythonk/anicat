@@ -901,20 +901,22 @@ function contextMenu(x, y, items) {
 // with no pointer position; the menu then opens at the element's corner.
 function attachMenu(node, itemsFn) {
   node.addEventListener("contextmenu", async (e) => {
+    if (e.shiftKey) return;
     e.preventDefault();
     e.stopPropagation();
     let { clientX: x, clientY: y } = e;
     if (!x && !y) { const r = node.getBoundingClientRect(); x = r.left + 12; y = r.top + 12; }
     const items = await itemsFn();
-    contextMenu(x, y, items);
+    if (items && items.length) contextMenu(x, y, items);
   });
 }
 
 // What a title's own menu offers, wherever its card sits. `hooks.status(s)`
 // and `hooks.removed()` let the view drop a card that no longer belongs there;
-// `hooks.noPlay` is for a card whose own menu already leads with Play.
+// `hooks.noPlay` is for a card whose own menu already leads with Play, and
+// `hooks.here` for the title's own page, where Open goes nowhere.
 async function titleMenuItems(catalog, id, summary, hooks = {}) {
-  const items = [{ label: "Open", run: () => { location.hash = titleHref(catalog, id); } }];
+  const items = [hooks.here ? null : { label: "Open", run: () => { location.hash = titleHref(catalog, id); } }];
   const done = () => { listMemo.clear(); detailMemo.delete(`${catalog}:${id}`); };
   if (catalog === "anilist") {
     let d = null;
@@ -1414,9 +1416,12 @@ function hero(host) {
   const copy = el("div", { class: "copy" });
   const node = el("section", { class: "hero skeleton" }, art, copy);
   host.append(node);
+  let shown = null;
+  attachMenu(node, () => shown ? titleMenuItems(shown.catalog, shown.id) : []);
   return {
     fill({ eyebrow, detail, catalog, primary, secondary }) {
       node.classList.remove("skeleton");
+      shown = { catalog, id: detail.catalog_id };
       const banner = detail.banner_image || detail.cover_image;
       if (banner) art.replaceChildren(img(banner, { loading: "eager" }));
       const meta = [formatLabel(detail.format), detail.year, detail.studio, detail.average_score ? `${detail.average_score}%` : null,
@@ -1892,7 +1897,10 @@ async function viewTitle(host, token, catalog, id, tabArg) {
     el("div", { class: "meta" }, meta.map((m, i) => el("span", { class: i ? "dot" : null }, m))),
     d.genres && d.genres.length ? el("div", { class: "meta", style: "margin-top:.25rem" }, d.genres.join(", ")) : null,
     syn, more, actions);
-  loading.replaceWith(el("div", { class: "tp" }, el("div", { class: "cover" }, img(cover, { loading: "eager" })), info));
+  const header = el("div", { class: "tp" }, el("div", { class: "cover" }, img(cover, { loading: "eager" })), info);
+  // Re-rendered after a change so the page's own buttons and ticks agree.
+  attachMenu(header, () => titleMenuItems(catalog, catalogId, d, { here: true, noPlay: true, status: () => render(), removed: () => render() }));
+  loading.replaceWith(header);
   requestAnimationFrame(() => { if (syn.scrollHeight <= syn.clientHeight + 2) more.remove(); });
 
   // Primary action: resume, next, or the first aired episode.
@@ -2468,7 +2476,7 @@ async function viewSettings(host) {
 
   wrap.append(el("h2", {}, "Keyboard"));
   wrap.append(el("dl", { class: "facts", style: "margin-top:.8rem" },
-    [["/", "Search"], ["g h", "Home"], ["g s", "Schedule"], ["g l", "Library"], ["g t", "Stats"], ["Right-click or Menu key", "Actions for a title or episode"], ["Esc", "Close a dialog or menu"]]
+    [["/", "Search"], ["g h", "Home"], ["g s", "Schedule"], ["g l", "Library"], ["g t", "Stats"], ["Right-click or Menu key", "Actions for a title or episode"], ["Shift+right-click", "The browser's own menu"], ["Esc", "Close a dialog or menu"]]
       .flatMap(([k, v]) => [el("dt", { class: "num" }, k), el("dd", {}, v)])));
 }
 
@@ -2561,6 +2569,16 @@ function drawWho() {
 }
 
 // ---- keyboard ---------------------------------------------------------------
+
+// The page is an app: the browser's own menu (Back, Save as, Inspect) over a
+// poster or the page background is noise. Text boxes and selected text keep
+// it for copy and paste, and Shift+right-click reaches it anywhere.
+document.addEventListener("contextmenu", (e) => {
+  if (e.shiftKey) return;
+  if (e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return;
+  if (String(getSelection() || "").trim()) return;
+  e.preventDefault();
+});
 
 let pendingG = 0;
 document.addEventListener("keydown", (e) => {

@@ -47,7 +47,6 @@ struct PhoneSettingsView: View {
     // `AppModel.isLnoriEnabled` owns the reader and the default (off).
     @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
     @AppStorage(FeedbackDefaults.hapticsKey) private var haptics: Bool = true
-    @AppStorage(FeedbackDefaults.soundsKey) private var sounds: Bool = false
     @State private var copyFeedback: String?
     @AppStorage(TmdbCredential.userKeyDefaultsKey) private var tmdbKey: String = ""
 
@@ -418,9 +417,8 @@ struct PhoneSettingsView: View {
     /// watched mark and every error with no way to say no.
     @ViewBuilder
     private var feedback: some View {
-        Section("Sound & Haptics") {
+        Section("Haptics") {
             Toggle("Haptics", isOn: $haptics)
-            Toggle("Interface sounds", isOn: $sounds)
         }
     }
 

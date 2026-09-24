@@ -23,10 +23,8 @@ struct PlaybackTabSection: View {
     @AppStorage("anicat_keyboard_dim_mode") private var keyboardDimMode: String = "night"
     @AppStorage("anicat_keyboard_dim_from") private var keyboardDimFrom: Int = 20
     @AppStorage("anicat_keyboard_dim_until") private var keyboardDimUntil: Int = 7
-    // `FeedbackDefaults` owns the readers and the defaults; the literals here
-    // and the ones there must agree.
-    @AppStorage("anicat_sounds") private var interfaceSounds: Bool = false
-    @AppStorage("anicat_sounds_volume") private var interfaceSoundVolume: Double = 0.3
+    // `FeedbackDefaults` owns the reader and the default; the literal here
+    // and the one there must agree.
     @AppStorage("anicat_haptics") private var haptics: Bool = true
     // `PlayerController.subtitleScaleKey` and `SubtitleStyle.key`; the phone
     // has had the size since its settings screen was built, the Mac had
@@ -237,43 +235,7 @@ struct PlaybackTabSection: View {
         }
         #endif
 
-        SettingsCard(title: "Sound & haptics") {
-            SettingField(
-                label: "Interface sounds",
-                description: "Short synthesised blips when a tab changes, the player opens or closes, a back swipe lands and an episode is marked watched. Off by default, because every one of them fires during ordinary navigation."
-            ) {
-                SumiSwitch(isOn: $interfaceSounds)
-            }
-
-            if interfaceSounds {
-                SettingField(
-                    label: "Sound volume",
-                    description: "Relative to the system output level. These play over a running episode, so the default sits low."
-                ) {
-                    HStack(spacing: 12) {
-                        // Not in the tvOS SDK; this Settings page is the
-                        // Mac's and is not mounted on the TV.
-                        #if !os(tvOS)
-                        Slider(value: $interfaceSoundVolume, in: 0...1)
-                            .frame(width: 130)
-                            .tint(SumiTheme.indigo)
-                        #endif
-
-                        Text("\(Int(interfaceSoundVolume * 100))%")
-                            .sumiTabularMono(size: 11)
-                            .foregroundColor(SumiTheme.muted)
-                            .frame(width: 38, alignment: .trailing)
-
-                        Button {
-                            AppSounds.tabChange.play()
-                        } label: {
-                            Text("Test")
-                        }
-                        .sumiSecondaryButton()
-                    }
-                }
-            }
-
+        SettingsCard(title: "Haptics") {
             SettingField(
                 label: "Haptic feedback",
                 description: "A trackpad tick when a back swipe crosses the distance that commits it, and when a seek snaps to a chapter or skip boundary. A Mac without a Force Touch trackpad feels nothing either way."

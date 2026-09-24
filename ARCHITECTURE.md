@@ -94,7 +94,7 @@ absent from its SDK whatever `if #available` says.
   reroots the tree on a switch), bundled Geist and IBM Plex Mono,
   `CachedAsyncImage` (decodes at display size off the main actor),
   `MotionPolicy` (springs that collapse to fades under Reduce Motion),
-  `SoundDesign` (synthesised feedback sounds and haptics, off by default),
+  `Haptics` (gesture and event haptics),
   an FPS and main-thread-stall HUD.
 - **Scrolling** (`DesignSystem/ResponsiveScrollingPatch.swift`,
   `ScrollEventTap.swift`): SwiftUI's `HostingScrollView` opts out of

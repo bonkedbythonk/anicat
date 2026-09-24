@@ -167,9 +167,7 @@ public struct SettingsView: View {
         .init(label: "Glow in windowed mode", card: "Video", tab: .playback),
         .init(label: "Dim keyboard backlight", card: "While watching", tab: .playback),
         .init(label: "Night hours", card: "While watching", tab: .playback),
-        .init(label: "Interface sounds", card: "Sound & haptics", tab: .playback),
-        .init(label: "Sound volume", card: "Sound & haptics", tab: .playback),
-        .init(label: "Haptic feedback", card: "Sound & haptics", tab: .playback),
+        .init(label: "Haptic feedback", card: "Haptics", tab: .playback),
 
         .init(label: "New episode alerts", card: "Notifications", tab: .sharing),
         .init(label: "Discord presence", card: "Presence", tab: .sharing),

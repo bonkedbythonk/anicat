@@ -192,7 +192,6 @@ struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 // cooldown set on the line above is what keeps the rest of
                 // one swipe's ticks from reaching here.
                 AppHaptics.swipeThreshold()
-                AppSounds.swipeBack.play()
                 model.popBackOne()
                 return
             }
@@ -201,9 +200,6 @@ struct GlobalKeyboardShortcutsModifier: ViewModifier {
             if tracker.accumulatedDeltaX < -threshold && isHorizontal && canGoForward {
                 tracker.reset()
                 tracker.isCooling = true
-                // Haptic but no sound: crossing the line feels the same in
-                // either direction, while the only sound there is says
-                // "back" and would be a lie on the way forward.
                 AppHaptics.swipeThreshold()
                 model.goForwardDetail()
                 return

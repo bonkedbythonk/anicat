@@ -99,8 +99,8 @@ extension AppModel {
         }
     }
 
-    func playFeedback(_ sound: AppSounds) {
-        sound.play()
+    func playFeedback(_ moment: AppHaptics.Moment) {
+        AppHaptics.play(moment)
     }
 
     func setupPlayerCallbacks() {
@@ -1301,11 +1301,6 @@ extension AppModel {
     }
 
     public func stopPlayback() {
-        // Read before the clear below, and gated on it: this method also
-        // runs on paths where no player was open (engine teardown, a
-        // stop for a play that never resolved), and an unconditional
-        // sound is a close blip from an idle app.
-        let wasPlaying = activeStreamURL != nil
         cancelOpeningWatchdog()
         stalledReleaseNames = []
         openingSwitchCount = 0
@@ -1353,9 +1348,6 @@ extension AppModel {
         playerController.onSetMuted?(true)
         self.activeStreamURL = nil
         flushWatchedDownloadRemovals()
-        if wasPlaying {
-            playFeedback(.playerClose)
-        }
         self.isPlayerMinimized = false
         // Leaving the key set would keep the row it names tagged as a
         // `matchedGeometryEffect` source for the rest of the session, so the

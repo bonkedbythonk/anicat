@@ -296,7 +296,8 @@ extension AppModel {
         id: Int64,
         title: String? = nil,
         coverURL: URL? = nil,
-        steppedBack: Bool = false
+        steppedBack: Bool = false,
+        isRestore: Bool = false
     ) async {
         guard let engine, catalog != .anilist else { return }
         detailSteppedBack = steppedBack
@@ -306,7 +307,12 @@ extension AppModel {
         // side -- otherwise a recommendation or a cast credit opened from
         // here had no way back to what opened it, and Back popped whatever
         // AniList page was last on the stack instead.
-        if let current = selectedMediaDetails, current.id != id, !isDetailLoading {
+        //
+        // Not on a Back or Forward step: `closeDetail`/`goForwardDetail` have
+        // already moved both stacks, and pushing here again would put the page
+        // being left back on history and empty the forward stack, so a
+        // second Back would return to it and Forward would do nothing.
+        if !isRestore, let current = selectedMediaDetails, current.id != id, !isDetailLoading {
             detailHistory.append(currentDetailStep(current))
             detailForwardStack = []
         }

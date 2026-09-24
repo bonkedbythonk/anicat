@@ -126,7 +126,8 @@ extension AppModel {
                     catalog: step.catalog,
                     id: step.id,
                     title: self.cinemaKnownTitles[CinemaTitleKey(catalog: step.catalog, id: step.id)],
-                    steppedBack: steppedBack
+                    steppedBack: steppedBack,
+                    isRestore: true
                 )
             }
             activeDetailTask = task

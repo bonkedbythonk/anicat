@@ -796,9 +796,11 @@ extension AppModel {
         var seen = (UserDefaults.standard.dictionary(forKey: Self.lastSeenChapterKey) as? [String: Double]) ?? [:]
 
         for item in mangaReading.prefix(8) {
-            guard let manga = try? await engine.searchManga(query: item.title, anilistId: item.id),
-                  let first = manga.first else { continue }
-            let chapters = (try? await engine.getMangaChapters(mangaId: first.id)) ?? []
+            // The reader's own choice of source, not MangaDex's first
+            // result, which can be another series or a colored fragment.
+            guard let chapters = await engine.mangaSource(
+                catalogId: item.id, titles: [item.title], finishedChapters: nil
+            )?.chapters else { continue }
             // Chapters number fractionally and arrive in feed order, so the
             // newest is the largest number rather than the last row.
             guard let newest = chapters.compactMap({ Double($0.number) }).max() else { continue }

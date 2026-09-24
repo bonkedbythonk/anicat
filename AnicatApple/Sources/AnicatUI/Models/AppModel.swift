@@ -1230,6 +1230,12 @@ public final class AppModel {
     /// longer means anything.
     var detailForwardStack: [DetailStep] = []
 
+    /// Whether the last page-to-page step was a Back, so the arriving page
+    /// comes from the side a right swipe points to. `restore` hands it to
+    /// `openCinemaDetail` rather than letting that reset it: Back to a film
+    /// goes through there, and it arrived from the forward side.
+    var detailSteppedBack = false
+
     /// Kept live by `MediaDetailView`'s own tab-change callback so that
     /// whichever navigation site pushes onto `detailHistory`/`detailForwardStack`
     /// next can capture "what tab was the page I'm leaving on". Without this,

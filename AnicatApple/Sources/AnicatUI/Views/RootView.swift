@@ -1279,8 +1279,19 @@ public struct RootView: View {
         // The travel is bounce-free for the same reason the feed's is: a page
         // that settles past its resting position and comes back reads as a
         // wobble, not as a page.
+        //
+        // Page to page (a relation, Back, Forward) it used to rise from below
+        // like an open from the feed, so a sideways swipe was answered with
+        // vertical motion. It comes from the side the swipe points to, a
+        // right swipe being Back. Both stacks are empty when a page opens from
+        // the feed (and after a step taken mid-load, which skips the push).
+        // The removal cannot follow suit: a leaving view keeps the transition
+        // of its last render, before the step was known.
+        let travel: AnyTransition = model.detailHistory.isEmpty && model.detailForwardStack.isEmpty
+            ? .offset(y: 24)
+            : .offset(x: model.detailSteppedBack ? -24 : 24)
         return .asymmetric(
-            insertion: AnyTransition.offset(y: 24).animation(.sumi(.page)).combined(with: arrive),
+            insertion: travel.animation(.sumi(.page)).combined(with: arrive),
             // Less travel than it arrived with: a page being dismissed that
             // slides as far as it came reads as being thrown away rather than
             // as the layer above closing.

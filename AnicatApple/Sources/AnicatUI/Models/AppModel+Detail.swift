@@ -41,6 +41,7 @@ extension AppModel {
             detailHistory.append(currentDetailStep(current))
         }
         detailForwardStack = []
+        detailSteppedBack = false
         // A fresh forward navigation (a relation click, not a back/forward
         // step) should use the new page's own default tab, not whatever a
         // previous back-step happened to leave here.
@@ -92,6 +93,7 @@ extension AppModel {
         // Stepping back to a previous entry in `detailHistory`, not a card
         // tap — no source card to morph from, so this is a plain fade.
         openingDetailSourceKey = nil
+        detailSteppedBack = true
         if let current = selectedMediaDetails, !isDetailLoading {
             detailForwardStack.append(currentDetailStep(current))
         }
@@ -117,12 +119,14 @@ extension AppModel {
     /// whatever anime shares its number.
     func restore(_ step: DetailStep) {
         if step.catalog != .anilist {
+            let steppedBack = detailSteppedBack
             let task = Task { [weak self] () -> Void in
                 guard let self else { return }
                 await self.openCinemaDetail(
                     catalog: step.catalog,
                     id: step.id,
-                    title: self.cinemaKnownTitles[CinemaTitleKey(catalog: step.catalog, id: step.id)]
+                    title: self.cinemaKnownTitles[CinemaTitleKey(catalog: step.catalog, id: step.id)],
+                    steppedBack: steppedBack
                 )
             }
             activeDetailTask = task
@@ -153,6 +157,7 @@ extension AppModel {
         activeDetailExtrasTask?.cancel()
         guard let next = detailForwardStack.popLast() else { return }
         openingDetailSourceKey = nil
+        detailSteppedBack = false
         if let current = selectedMediaDetails, !isDetailLoading {
             detailHistory.append(currentDetailStep(current))
         }
@@ -489,6 +494,7 @@ extension AppModel {
                 // Roll back provisional screen so viewer isn't left on an empty zombie page
                 if self.selectedMediaDetails?.id == id {
                     if let previous = self.detailHistory.popLast() {
+                        self.detailSteppedBack = true
                         self.restoredDetailTab = previous.tab
                         // Through its own catalog, like every other restore.
                         self.restore(previous)

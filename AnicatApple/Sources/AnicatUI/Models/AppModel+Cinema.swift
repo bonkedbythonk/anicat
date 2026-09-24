@@ -295,9 +295,11 @@ extension AppModel {
         catalog: MediaCard.CardCatalog,
         id: Int64,
         title: String? = nil,
-        coverURL: URL? = nil
+        coverURL: URL? = nil,
+        steppedBack: Bool = false
     ) async {
         guard let engine, catalog != .anilist else { return }
+        detailSteppedBack = steppedBack
         let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
 
         // The page being left is a step back, exactly as it is on the anime

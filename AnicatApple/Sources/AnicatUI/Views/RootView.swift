@@ -56,6 +56,27 @@ public struct RootView: View {
         self.model = model
     }
 
+    private var errorPillCoversWindow: Bool {
+        (model.activeStreamURL != nil && !model.isPlayerMinimized)
+            || model.activeReadingSession != nil
+            || model.novelReaderOpen
+    }
+
+    /// Above the full-size player's bottom bar, and above the mini-player
+    /// parked in the corner, so the pill never lands on either.
+    private var errorPillBottomInset: CGFloat {
+        guard model.activeStreamURL != nil else { return 24 }
+        if model.isPlayerMinimized { return 24 + PlayerView.miniSize.height + 12 }
+        return PlayerView.minBottomBarHeight + 12
+    }
+
+    private func dismissError() {
+        withAnimation(.snappy) {
+            model.errorMessage = nil
+            model.errorRetryAction = nil
+        }
+    }
+
     public var body: some View {
         ZStack {
             SumiTheme.background
@@ -452,56 +473,65 @@ public struct RootView: View {
                 .zIndex(35)
             }
 
-            // A line across the top of the page, not a card dropping in with
-            // an amber border and a shadow: that read as a web toast.
+            // A pill at the foot of the content column. Two shapes before it
+            // were rejected: a card dropping in with an amber border and a
+            // shadow read as a web toast, and a strip across the whole
+            // window under the title bar, over the sidebar, as ugly.
             if let error = model.errorMessage {
-                VStack(spacing: 0) {
-                    HStack(spacing: 12) {
-                        Text(error)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundColor(SumiTheme.warning)
-                            .lineLimit(2)
-                            .sumiTextSelectable()
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(SumiTheme.warning)
+                        .frame(width: 6, height: 6)
 
-                        Spacer()
+                    Text(error)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundColor(SumiTheme.foreground)
+                        .lineLimit(2)
+                        .sumiTextSelectable()
 
-                        // Only for failures retrying might actually fix (a
-                        // resolve timeout, a dead candidate) — see
-                        // `errorRetryAction`'s doc comment.
-                        if let retry = model.errorRetryAction {
-                            Button(action: retry) {
-                                Text("Retry")
-                                    .font(.system(size: 12.5, weight: .semibold))
-                                    .foregroundColor(SumiTheme.indigo)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.sumiPressable)
-                        }
-
-                        Button(action: {
-                            withAnimation(.snappy) {
-                                model.errorMessage = nil
-                                model.errorRetryAction = nil
-                            }
-                        }) {
-                            Text("Dismiss")
-                                .font(.system(size: 12.5))
-                                .foregroundColor(SumiTheme.muted)
+                    // Only for failures retrying might actually fix (a
+                    // resolve timeout, a dead candidate) — see
+                    // `errorRetryAction`'s doc comment.
+                    if let retry = model.errorRetryAction {
+                        Button(action: retry) {
+                            Text("Retry")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundColor(SumiTheme.indigo)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.sumiPressable)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 9)
-                    .background(SumiTheme.background)
-                    .overlay(alignment: .bottom) {
-                        Rectangle().fill(SumiTheme.border).frame(height: 1)
-                    }
-                    .padding(.top, 28)
 
-                    Spacer()
+                    Button(action: dismissError) {
+                        Text("Dismiss")
+                            .font(.system(size: 12.5))
+                            .foregroundColor(SumiTheme.muted)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.sumiPressable)
                 }
-                .transition(.opacity)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .sumiMaterialBackground(.regularMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                .frame(maxWidth: 560)
+                .padding(.bottom, errorPillBottomInset)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                // Centred on the content column, past the 200pt rail and its
+                // hairline, unless a player or reader covers the window.
+                .padding(.leading, errorPillCoversWindow ? 0 : 201)
+                // A failure with Retry waits to be answered; anything else
+                // is read in a glance and should not stay on screen.
+                .task(id: error) {
+                    guard model.errorRetryAction == nil else { return }
+                    try? await Task.sleep(for: .seconds(8))
+                    if model.errorMessage == error, model.errorRetryAction == nil {
+                        dismissError()
+                    }
+                }
+                .transition(.opacity.combined(with: .offset(y: 8)))
                 .zIndex(60)
             }
 

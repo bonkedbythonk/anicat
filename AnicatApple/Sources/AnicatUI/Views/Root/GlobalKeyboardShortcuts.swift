@@ -13,7 +13,8 @@ final class SwipeGestureTracker {
     var accumulatedDeltaY: CGFloat = 0
     var isCooling = false
     var gestureDisqualified = false
-    var lastSwipeEventAt: Date = .distantPast
+    /// `NSEvent.timestamp` of the last tick, not the time it was handled.
+    var lastSwipeEventAt: TimeInterval = 0
     /// Whether this gesture started over something that scrolls sideways.
     /// Decided once, when the gesture begins, and held for its whole length:
     /// a strip that has run out of travel stops looking scrollable halfway
@@ -132,12 +133,19 @@ struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 return
             }
 
-            let now = Date()
+            // When the event happened, not when it reached us. The Back it
+            // fires swaps the page on the main thread, which has stalled for
+            // 1.1 s after a swipe ("detail first moved 1172.8ms after gesture
+            // began"). Timed on arrival, the rest of the same swipe, queued
+            // behind that stall, reads as a new gesture after an idle gap; a
+            // hard swipe has travel enough left to cross the threshold again,
+            // and Back from a related entry went on home.
+            let now = event.timestamp
 
             // Cooldown: stay cooling until the gesture goes idle (> 0.15s gap) so one
             // physical swipe fires exactly once.
             if tracker.isCooling {
-                if now.timeIntervalSince(tracker.lastSwipeEventAt) > 0.15 {
+                if now - tracker.lastSwipeEventAt > 0.15 {
                     tracker.isCooling = false
                 } else {
                     tracker.lastSwipeEventAt = now
@@ -146,7 +154,7 @@ struct GlobalKeyboardShortcutsModifier: ViewModifier {
             }
 
             // Fresh gesture start on began phase or after an idle pause
-            if event.phase == .began || now.timeIntervalSince(tracker.lastSwipeEventAt) > 0.15 {
+            if event.phase == .began || now - tracker.lastSwipeEventAt > 0.15 {
                 tracker.reset()
                 let hitStart = CFAbsoluteTimeGetCurrent()
                 tracker.startedOverHorizontalScroller = pointerIsOverHorizontalScroller()

@@ -2554,43 +2554,16 @@ private struct EpisodeListSection: View {
             } else if let groups = episodeGroups {
                 LazyVStack(spacing: 8) {
                     ForEach(groups, id: \.firstNumber) { group in
-                        // `DisclosureGroup` is not in the tvOS SDK. This page
-                        // is not mounted on the TV (`TVDetailView` is); the
-                        // flat fallback only keeps it compiling there.
-                        #if os(tvOS)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(groupLabel(firstNumber: group.firstNumber, count: group.episodes.count))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 4)
-                            if selectedViewMode == .compact {
-                                compactRows(for: group.episodes)
-                            } else {
-                                regularRows(for: group.episodes, downloadStates: downloadStates)
-                            }
-                        }
-                        #else
-                        DisclosureGroup(
-                            isExpanded: Binding(
-                                get: { expandedGroups.contains(group.firstNumber) },
-                                set: { isExpanded in
-                                    if isExpanded { expandedGroups.insert(group.firstNumber) }
-                                    else { expandedGroups.remove(group.firstNumber) }
-                                }
-                            )
+                        ExpandableGroup(
+                            title: groupLabel(firstNumber: group.firstNumber, count: group.episodes.count),
+                            isExpanded: Binding(member: group.firstNumber, of: $expandedGroups)
                         ) {
                             if selectedViewMode == .compact {
                                 compactRows(for: group.episodes)
                             } else {
                                 regularRows(for: group.episodes, downloadStates: downloadStates)
                             }
-                        } label: {
-                            Text(groupLabel(firstNumber: group.firstNumber, count: group.episodes.count))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 4)
                         }
-                        #endif
                     }
                 }
                 // Only the group holding the resume target opens by default,

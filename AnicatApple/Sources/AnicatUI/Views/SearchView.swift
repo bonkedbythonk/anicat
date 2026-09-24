@@ -152,7 +152,7 @@ public struct SearchView: View {
     /// AniList's `countryOfOrigin`. Manga, manhwa and manhua are the same
     /// `MANGA` format there, told apart only by country, so under Manga the
     /// options carry the names readers know them by.
-    static func countryOptions(for type: String) -> [(value: String, label: String)] {
+    nonisolated static func countryOptions(for type: String) -> [(value: String, label: String)] {
         type == "MANGA"
             ? [("", "Any"), ("JP", "Manga (Japan)"), ("KR", "Manhwa (Korea)"), ("CN", "Manhua (China)")]
             : [("", "Any"), ("JP", "Japan"), ("KR", "Korea"), ("CN", "China")]

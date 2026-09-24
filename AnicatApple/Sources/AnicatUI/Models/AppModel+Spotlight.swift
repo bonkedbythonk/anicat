@@ -1,7 +1,7 @@
 // CoreSpotlight imports on tvOS but every type in it is marked
 // unavailable there; the TV has no system search to index into.
 #if !os(tvOS)
-import CoreSpotlight
+@preconcurrency import CoreSpotlight
 import Foundation
 #if canImport(UIKit)
 import UIKit
@@ -41,7 +41,7 @@ extension AppModel {
         for (id, title) in knownTitles { add(id: id, title: title, cover: knownCovers[id], isManga: false, subtitle: "On Anicat") }
         guard !items.isEmpty else { return }
         let index = CSSearchableIndex.default()
-        index.deleteSearchableItems(withDomainIdentifiers: [Self.spotlightDomain]) { _ in
+        index.deleteSearchableItems(withDomainIdentifiers: [Self.spotlightDomain]) { [items] _ in
             index.indexSearchableItems(items) { error in
                 if let error { AppLog.write("[spotlight] index failed: \(error.localizedDescription)") }
             }

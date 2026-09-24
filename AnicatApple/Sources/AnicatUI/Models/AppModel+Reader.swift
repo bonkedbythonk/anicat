@@ -916,11 +916,11 @@ extension AppModel {
                 score: nil,
                 progress: Int64(progress)
             )
-            await recordAniListSuccess()
+            recordAniListSuccess()
             refreshListsAfterEdit()
             return .sent
         } catch {
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
             return .failed
         }
     }

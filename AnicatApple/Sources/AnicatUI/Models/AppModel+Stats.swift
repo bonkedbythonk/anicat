@@ -41,13 +41,13 @@ extension AppModel {
                 fromUnix: Int64(from.timeIntervalSince1970),
                 toUnix: Int64(to.timeIntervalSince1970)
             )
-            await recordAniListSuccess()
+            recordAniListSuccess()
             calendarMonths[key] = slots
         } catch {
             // Deliberately leaves the key unset: caching the empty result
             // would make one failed request mean the month stays blank for
             // the rest of the session, with no way to ask again.
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
         }
     }
 

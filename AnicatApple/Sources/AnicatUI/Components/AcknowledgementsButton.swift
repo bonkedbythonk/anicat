@@ -43,7 +43,7 @@ struct AcknowledgementsButton<Label: View>: View {
 
     /// Through `anicatResources`, never `Bundle.module`: the generated
     /// accessor fatalErrors inside a packaged Anicat.app.
-    static var noticesURL: URL? {
+    nonisolated static var noticesURL: URL? {
         Bundle.anicatResources.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "txt", subdirectory: "Legal")
             ?? Bundle.anicatResources.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "txt")
     }

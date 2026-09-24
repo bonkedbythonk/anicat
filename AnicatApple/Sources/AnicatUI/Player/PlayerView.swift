@@ -311,20 +311,20 @@ public struct PlayerView: View {
     /// following that shot to shot would be the scrim hopping on and off
     /// the picture. A 2.35:1 scene in a 16:9 file is 12% top and bottom;
     /// 4% is well under that and well over noise.
-    static let chromeInsetFloor = 0.04
+    nonisolated static let chromeInsetFloor = 0.04
     /// The deepest letterbox a real film has: 2.76:1 (Ben-Hur) in a 16:9
     /// file is 18% top and bottom. The detector goes to 40% because the
     /// glow wants the fade case caught; the chrome does not, and a 40%
     /// "bar" is a dark shot with the subject in the middle.
-    static let chromeInsetCeiling = 0.2
+    nonisolated static let chromeInsetCeiling = 0.2
     /// A letterbox is centred, so its two bars are the same height. A
     /// scene on black (a hand reaching out of the dark, one line of
     /// dialogue on a black cut) is bar on one edge only, or bars of two
     /// different heights, and that is what put the controls' scrim
     /// halfway up the picture in the tester's report.
-    static let chromeInsetAsymmetry = 0.02
+    nonisolated static let chromeInsetAsymmetry = 0.02
 
-    static func chromeInset(_ inset: AmbientContentInset) -> AmbientContentInset {
+    nonisolated static func chromeInset(_ inset: AmbientContentInset) -> AmbientContentInset {
         let letterbox = inset.top >= chromeInsetFloor && inset.bottom >= chromeInsetFloor
             && inset.top <= chromeInsetCeiling && inset.bottom <= chromeInsetCeiling
             && abs(inset.top - inset.bottom) <= chromeInsetAsymmetry

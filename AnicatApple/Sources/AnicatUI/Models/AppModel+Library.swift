@@ -377,11 +377,11 @@ extension AppModel {
                 rows = ScreenshotFixtures.list(status: libraryStatus, from: pool)
             }
             guard !Task.isCancelled else { return }
-            await recordAniListSuccess()
+            recordAniListSuccess()
             libraryItems = rows.map(Self.card)
         } catch {
             guard !Task.isCancelled else { return }
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
             libraryItems = []
             print("Library load failed: \(error)")
         }
@@ -750,13 +750,13 @@ extension AppModel {
         do {
             let filters = SearchFilters(genre: nil, year: nil, season: nil, format: nil, minScore: nil, status: nil, sort: "TRENDING_DESC", country: nil)
             let summaries = try await engine.searchCatalog(query: "", mediaType: mediaType, filters: filters, page: page)
-            await recordAniListSuccess()
+            recordAniListSuccess()
             let cards = summaries.map { Self.card($0) }
             searchDiscoverItems = append ? searchDiscoverItems + cards : cards
             searchDiscoverPage = page
             searchDiscoverHasMorePages = cards.count >= 25
         } catch {
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
             print("Search discover failed: \(error)")
         }
     }
@@ -790,7 +790,7 @@ extension AppModel {
         }
         trendingItems = trending.map(Self.card)
         if profile != nil || !trending.isEmpty || !watching.isEmpty {
-            await recordAniListSuccess()
+            recordAniListSuccess()
         }
         isSignedIn = profile != nil
         viewer = profile
@@ -1018,14 +1018,14 @@ extension AppModel {
                     ?? (self.currentNavSection == .novels ? "NOVEL" : (self.currentNavSection == .manga ? "MANGA" : "ANIME"))
                 let summaries = try await engine.searchCatalog(query: trimmedQuery, mediaType: resolvedType, filters: filters, page: page)
                 guard !Task.isCancelled else { return }
-                await self.recordAniListSuccess()
+                self.recordAniListSuccess()
                 let cards = summaries.map { Self.card($0) }
                 self.searchResults = append ? self.searchResults + cards : cards
                 self.searchCurrentPage = page
                 self.searchHasMorePages = cards.count >= 25
             } catch {
                 guard !Task.isCancelled else { return }
-                await self.recordAniListFailure(error)
+                self.recordAniListFailure(error)
                 print("Search failed: \(error)")
             }
         }

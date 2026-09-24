@@ -429,7 +429,7 @@ extension AppModel {
                 self.selectedMediaDetails = freshDetails
                 self.isDetailLoading = false
             }
-            await recordAniListSuccess()
+            recordAniListSuccess()
             persistDetailCache(id: id, isManga: isManga)
 
             // Asynchronously load real Cast & Staff and Discussions from AniList if not already populated
@@ -485,7 +485,7 @@ extension AppModel {
         } catch {
             guard !Task.isCancelled else { return }
             self.isDetailLoading = false
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
             // A cached snapshot is already on screen (from the top of this
             // function) — a failed refresh shouldn't blank it out from under
             // the viewer, just quietly leave what's already showing.
@@ -576,7 +576,7 @@ extension AppModel {
         do {
             try await engine.updateListEntry(catalogId: details.id, status: status, score: score, progress: progress)
             AppLog.write("[list] \(details.id) status=\(status ?? "-") score=\(score.map { "\($0)" } ?? "-") progress=\(progress.map { "\($0)" } ?? "-") saved in \(String(format: "%.1f", Date().timeIntervalSince(began)))s")
-            await recordAniListSuccess()
+            recordAniListSuccess()
             // Off the Up Next shelf at once when the title leaves the
             // watching list; the background re-read below confirms it.
             if let status, status != "CURRENT", status != "REPEATING" {
@@ -601,7 +601,7 @@ extension AppModel {
             if status != nil, selectedMediaDetails?.id == details.id {
                 selectedMediaDetails?.listStatus = previousStatus
             }
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
             errorMessage = "Could not update AniList: \(error.localizedDescription)"
         }
     }
@@ -612,7 +612,7 @@ extension AppModel {
         do {
             let now = try await engine.toggleFavourite(
                 catalogId: details.id, isManga: isManga, currentlyFavourite: details.isFavourite)
-            await recordAniListSuccess()
+            recordAniListSuccess()
             PlayerLog.write("[favourite] \(details.id): was \(details.isFavourite), now \(now)")
             // Taken from the mutation's answer, not from a refetch: seven
             // presses in a row logged "was true, now true" because the
@@ -626,7 +626,7 @@ extension AppModel {
                 DetailCache.save(snapshot, id: details.id, isManga: isManga)
             }
         } catch {
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
             errorMessage = "Could not update favourite: \(error.localizedDescription)"
         }
     }
@@ -639,14 +639,14 @@ extension AppModel {
         guard let engine, let entryId = item.listEntryId else { return }
         do {
             try await engine.removeFromList(listEntryId: entryId)
-            await recordAniListSuccess()
+            recordAniListSuccess()
             mangaReading.removeAll { $0.id == item.id }
             novelReading.removeAll { $0.id == item.id }
             mangaPlanning.removeAll { $0.id == item.id }
             novelPlanning.removeAll { $0.id == item.id }
             refreshListsAfterEdit()
         } catch {
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
             errorMessage = "Could not remove from AniList: \(error.localizedDescription)"
         }
     }
@@ -656,7 +656,7 @@ extension AppModel {
         guard let engine, let details = selectedMediaDetails, let entryId = details.listEntryId else { return }
         do {
             try await engine.removeFromList(listEntryId: entryId)
-            await recordAniListSuccess()
+            recordAniListSuccess()
             upNextItems.removeAll { $0.id == details.id }
             watchingSummaries.removeAll { $0.catalogId == details.id }
             watchingItems.removeAll { $0.id == details.id }
@@ -668,7 +668,7 @@ extension AppModel {
             // menu kept showing the removed entry's old status.
             await loadDetail(id: details.id, isManga: currentDetailIsManga(), forceRefresh: true)
         } catch {
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
             errorMessage = "Could not remove from AniList: \(error.localizedDescription)"
         }
     }
@@ -722,10 +722,10 @@ extension AppModel {
                 score: nil,
                 progress: Int64(progress)
             )
-            await recordAniListSuccess()
+            recordAniListSuccess()
             refreshListsAfterEdit()
         } catch {
-            await recordAniListFailure(error)
+            recordAniListFailure(error)
         }
     }
 

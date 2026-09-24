@@ -1501,7 +1501,7 @@ private func playEpisode(
         model.activeResolveTask = Task { await model.playDownloadedFile(download) }
         return
     }
-    model.activeResolveTask = Task {
+    model.activeResolveTask = Task { [model] in
         do {
             _ = try await model.resolveAndPlay(
                 catalog: catalog,

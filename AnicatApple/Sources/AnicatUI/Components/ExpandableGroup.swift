@@ -38,7 +38,7 @@ struct ExpandableGroup<Content: View>: View {
 
 extension Binding where Value == Bool {
     /// Whether `key` is in `set`, written back by inserting or removing it.
-    init<Key: Hashable>(member key: Key, of set: Binding<Set<Key>>) {
+    init<Key: Hashable & Sendable>(member key: Key, of set: Binding<Set<Key>>) {
         self.init(
             get: { set.wrappedValue.contains(key) },
             set: { open in

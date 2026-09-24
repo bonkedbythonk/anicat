@@ -1519,9 +1519,9 @@ private struct SearchTab: View {
 /// same column width and the row would read as a table.
 struct FlowChips: Layout {
     let items: [String]
-    let onTap: (String) -> Void
+    let onTap: @MainActor (String) -> Void
 
-    init(items: [String], onTap: @escaping (String) -> Void) {
+    init(items: [String], onTap: @escaping @MainActor (String) -> Void) {
         self.items = items
         self.onTap = onTap
     }

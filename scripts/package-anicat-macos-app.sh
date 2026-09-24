@@ -144,6 +144,10 @@ if [ -d "$SRC/Sources/AnicatUI/Resources/Fonts" ]; then
     cp -R "$SRC/Sources/AnicatUI/Resources/Fonts/"* "$APP/Contents/Resources/Fonts/"
 fi
 
+# The Update now button runs the copy that shipped with the build, not
+# whatever sits on master at the moment of the click.
+cp "$ROOT/scripts/install_macos.sh" "$APP/Contents/Resources/install_macos.sh"
+
 # Contents/Resources is the only place codesign accepts extra content —
 # anything loose at the bundle root (sibling of Contents/) fails signing
 # with "unsealed contents present in the bundle root". Anime4KPreset's

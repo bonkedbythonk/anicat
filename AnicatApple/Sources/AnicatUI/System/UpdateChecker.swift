@@ -16,7 +16,8 @@ import Foundation
 /// -- its validator accepts an update on an EdDSA signature alone when the
 /// host has no Developer ID (read from `SUUpdateValidator`, never tried
 /// here) -- but because a signing key, an appcast and an updater's failure
-/// modes are more than this distribution wants to carry.
+/// modes are more than this distribution wants to carry. Update now runs
+/// that same installer, the copy packaged into the bundle (`install`).
 public enum UpdateChecker {
     public struct Release: Sendable, Equatable {
         /// Tag with the leading `v` stripped, so it compares against
@@ -212,3 +213,63 @@ public enum UpdateChecker {
         return release
     }
 }
+
+#if os(macOS)
+extension UpdateChecker {
+    /// The installer packaged into this bundle, when this copy is the one it
+    /// would replace. The installer always writes `/Applications`, or
+    /// `~/Applications` when that is not writable; run from anywhere else --
+    /// `dist/`, a Downloads folder -- it would install a second copy beside
+    /// this one and quit this one by name. Nil for a `dev-run.sh` build too,
+    /// which copies only the binary and so has no script.
+    static let bundledInstaller: URL? = {
+        guard let script = Bundle.main.url(forResource: "install_macos", withExtension: "sh") else { return nil }
+        let fm = FileManager.default
+        let folder = fm.isWritableFile(atPath: "/Applications")
+            ? URL(fileURLWithPath: "/Applications")
+            : fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        let target = folder.appendingPathComponent("Anicat.app").standardizedFileURL.path
+        return Bundle.main.bundleURL.standardizedFileURL.path == target ? script : nil
+    }()
+
+    /// Runs the bundled installer for `release`. On success the installer
+    /// quits this app and opens the new one, so this only ever returns a
+    /// failure: the installer's last line, and the app is still running,
+    /// because it quits the app only after the download and checksum passed.
+    ///
+    /// `--nightly` follows the release on offer, not the running build: a
+    /// nightly install offered a stable release has to get the stable zip,
+    /// and the plain installer is what moves a nightly back to stable.
+    static func install(_ release: Release, using script: URL) async -> String {
+        let logURL = AppLog.directoryURL.appendingPathComponent("update.log")
+        try? FileManager.default.createDirectory(at: AppLog.directoryURL, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        guard let log = try? FileHandle(forWritingTo: logURL) else {
+            return "could not open \(logURL.path)"
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [script.path] + (isPrerelease(release.version) ? ["--nightly"] : [])
+        process.standardInput = FileHandle.nullDevice
+        // A file, never a Pipe: the installer quits this app halfway through,
+        // and with nobody left reading a pipe its next echo is a SIGPIPE that
+        // kills it between removing the old bundle and copying in the new one.
+        process.standardOutput = log
+        process.standardError = log
+        let status: Int32 = await withCheckedContinuation { continuation in
+            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+            do {
+                try process.run()
+            } catch {
+                process.terminationHandler = nil
+                continuation.resume(returning: -1)
+            }
+        }
+        try? log.close()
+        let output = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+        let lastLine = output.split(separator: "\n").last.map(String.init) ?? "the installer did not start"
+        AppLog.write("[update] installer for \(release.version) exited \(status): \(lastLine)")
+        return lastLine
+    }
+}
+#endif

@@ -68,4 +68,24 @@ struct UpdateCheckerTests {
         #expect(UpdateChecker.isNewer("6.1.0", than: UpdateChecker.currentVersion) ||
                 !UpdateChecker.isNewer("6.1.0", than: UpdateChecker.currentVersion))
     }
+
+    #if os(macOS)
+    /// The installer's flag follows the release on offer: a nightly install
+    /// offered a stable release has to be given the stable zip.
+    @Test("Update now asks for the nightly only when the nightly is on offer")
+    func installerFlagFollowsTheOffer() async throws {
+        let script = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fake-installer-\(UUID().uuidString).sh")
+        try "echo downloading\necho \"args:$*\" >&2\nexit 1\n".write(to: script, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: script) }
+        let page = URL(string: "https://example.com")!
+
+        let nightly = await UpdateChecker.install(
+            .init(version: "6.2.1-nightly.202609240300", pageURL: page, notes: nil), using: script)
+        #expect(nightly == "args:--nightly")
+        let stable = await UpdateChecker.install(
+            .init(version: "6.3.0", pageURL: page, notes: nil), using: script)
+        #expect(stable == "args:")
+    }
+    #endif
 }

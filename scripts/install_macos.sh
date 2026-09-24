@@ -181,10 +181,13 @@ echo "Step 3: Installing..."
 # leaves a half-old app that crashes on the next window. Quit it first, but
 # ask: the owner was mid-episode more than once when the installer ran on
 # the same Mac. `curl | bash` leaves stdin as the pipe, so the question goes
-# to the terminal directly; with no terminal (a script driving this one) the
-# old behaviour, quit without asking, stays.
+# to the terminal directly; with no terminal (the app's own Update button)
+# it quits without asking. The probe has to open /dev/tty: the node is
+# rw-rw-rw- even with no controlling terminal, so `[ -r /dev/tty ]` passed,
+# the printf failed with "Device not configured" and `set -e` ended the
+# install before anything was quit.
 if pgrep -x Anicat >/dev/null 2>&1; then
-    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    if { : < /dev/tty; } 2>/dev/null; then
         printf 'Anicat is running and has to quit to be replaced. Quit it now? [Y/n] ' > /dev/tty
         read -r answer < /dev/tty || answer=""
         case "$answer" in
@@ -195,7 +198,17 @@ if pgrep -x Anicat >/dev/null 2>&1; then
         esac
     fi
     osascript -e 'tell application "Anicat" to quit' 2>/dev/null || true
-    sleep 2
+    # A quit that was refused or is still saving must not be installed over:
+    # the rm below would pull the bundle out from under a live process. Wait
+    # for it, and stop here if it never goes.
+    for _ in $(seq 1 30); do
+        pgrep -x Anicat >/dev/null 2>&1 || break
+        sleep 0.5
+    done
+    if pgrep -x Anicat >/dev/null 2>&1; then
+        echo "Anicat did not quit, so it was not replaced. Quit it and run the installer again." >&2
+        exit 1
+    fi
 fi
 
 # ditto, not unzip: unzip drops the symlinks and extended attributes inside a

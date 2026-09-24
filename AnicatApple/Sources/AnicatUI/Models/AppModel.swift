@@ -325,6 +325,23 @@ public final class AppModel {
         if !force, dismissed != found.version { updatePromptOpen = true }
     }
 
+    #if os(macOS)
+    public var isInstallingUpdate = false
+    public var canInstallUpdate: Bool { UpdateChecker.bundledInstaller != nil }
+
+    /// Update now. Returns only when the install failed; a successful one
+    /// quits this app from under the await.
+    public func installUpdate() async {
+        guard !isInstallingUpdate, let release = availableUpdate,
+              let script = UpdateChecker.bundledInstaller else { return }
+        isInstallingUpdate = true
+        let failure = await UpdateChecker.install(release, using: script)
+        isInstallingUpdate = false
+        errorRetryAction = nil
+        errorMessage = "Update failed: \(failure)"
+    }
+    #endif
+
     public func dismissUpdatePrompt() {
         if let version = availableUpdate?.version {
             UserDefaults.standard.set(version, forKey: UpdateChecker.dismissedVersionKey)

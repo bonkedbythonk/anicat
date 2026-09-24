@@ -8,6 +8,14 @@ public struct RootView: View {
     @Bindable public var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotionForPushBack
 
+    private var updatePromptHint: String {
+        #if os(macOS)
+        if model.canInstallUpdate {
+            return "Update now downloads it, quits Anicat and opens the new version."
+        }
+        #endif
+        return "The page has the zip to drop into Applications."
+    }
     // Shared between every card grid and the detail page so tapping a card
     // grows its poster into the detail page's poster rather than crossfading
     // two separate images. Which card (if any) actually gets tagged with
@@ -497,6 +505,35 @@ public struct RootView: View {
                 .zIndex(60)
             }
 
+            #if os(macOS)
+            // The prompt closes on Update now and the download takes about a
+            // minute; with nothing on screen, an episode started in that
+            // minute is the one the installer quits.
+            if model.isInstallingUpdate, let version = model.availableUpdate?.version {
+                VStack {
+                    HStack(spacing: 10) {
+                        ProgressView().controlSize(.small)
+                        Text("Updating to \(version). Anicat will quit and reopen.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(SumiTheme.foreground)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(SumiTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(SumiTheme.indigo.opacity(0.5), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.4), radius: 12, y: 4)
+                    .padding(.top, 44)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(60)
+            }
+            #endif
+
             // Loading Scrim — suppressed while the player is already up: an
             // episode switch (`resolveAndPlay` from Next/Prev) also drives
             // `isLoading`, and this scrim sits at zIndex 70, above the
@@ -601,13 +638,18 @@ public struct RootView: View {
                 set: { if !$0 { model.dismissUpdatePrompt() } }
             )
         ) {
+            #if os(macOS)
+            if model.canInstallUpdate {
+                Button("Update now") { Task { await model.installUpdate() } }
+            }
+            #endif
             Button("Open release page") {
                 if let url = model.availableUpdate?.pageURL { Platform.openExternal(url) }
                 model.dismissUpdatePrompt()
             }
             Button("Not now", role: .cancel) { model.dismissUpdatePrompt() }
         } message: {
-            Text("You are on \(UpdateChecker.currentVersion). Anicat does not replace itself -- the page has the zip to drop into Applications.")
+            Text("You are on \(UpdateChecker.currentVersion). \(updatePromptHint)")
         }
         .onContinueUserActivity(ContinuityManager.playbackActivityType) { activity in
             guard case .playback(let catalogId, let catalog, let title, _, _) =

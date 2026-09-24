@@ -127,13 +127,21 @@ struct MaintenanceTabSection: View {
 
             SettingField(
                 label: "Check for updates",
-                description: "Asks GitHub for the latest published release. Anicat does not update itself: the button opens the release page so you can replace the app yourself."
+                description: "Asks GitHub for the latest published release. Update now downloads it, quits Anicat and opens the new version; Open release shows the page to replace the app by hand."
             ) {
                 HStack(spacing: 10) {
                     if let update = AppModel.shared?.availableUpdate {
                         Text("\(update.version) available")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(SumiTheme.indigo)
+                        #if os(macOS)
+                        if AppModel.shared?.canInstallUpdate == true {
+                            Button(AppModel.shared?.isInstallingUpdate == true ? "Updating…" : "Update now") {
+                                Task { await AppModel.shared?.installUpdate() }
+                            }
+                            .disabled(AppModel.shared?.isInstallingUpdate == true)
+                        }
+                        #endif
                         Button("Open release") { Platform.openExternal(update.pageURL) }
                     } else {
                         if let checked = updateResult {

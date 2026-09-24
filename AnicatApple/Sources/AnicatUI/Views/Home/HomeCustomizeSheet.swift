@@ -1,85 +1,65 @@
 import SwiftUI
 import AnicatCoreKit
-#if os(macOS)
-import AppKit
-#endif
 
-/// Reorder/hide the home page's configurable rows — mirrors the "Customize
-/// home" modal in HomeView.tsx: arrows to move, an eye to toggle visibility,
-/// order is the list order itself.
+/// Reorder and hide the home page's configurable rows. Changes apply as they
+/// are made, so the sheet has Done and no Cancel.
 struct HomeCustomizeSheet: View {
     @Bindable var model: AppModel
     @Binding var isPresented: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "square.grid.2x2")
-                        .foregroundColor(SumiTheme.indigo)
-                    Text("Customize home")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(SumiTheme.foreground)
-                }
-                Spacer()
-                Button(action: { isPresented = false }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(SumiTheme.muted)
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-            }
-            .padding(.bottom, 4)
+            Text("Customize home")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(SumiTheme.foreground)
+                .padding(.bottom, 4)
 
-            Text("Reorder with the arrows, show or hide with the eye.")
+            Text("Drag to reorder.")
                 .font(.system(size: 11))
                 .foregroundColor(SumiTheme.muted)
                 .padding(.bottom, 12)
 
-            VStack(spacing: 2) {
-                ForEach(Array(model.homeRowConfig.enumerated()), id: \.element.id) { index, row in
+            List {
+                ForEach(model.homeRowConfig) { row in
                     HStack(spacing: 8) {
                         Text(row.title)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(row.visible ? SumiTheme.foreground : SumiTheme.muted)
                             .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Button(action: { withAnimation(.snappy) { model.moveHomeRow(at: index, by: -1) } }) {
-                            Image(systemName: "chevron.up")
-                                .foregroundColor(index == 0 ? SumiTheme.muted.opacity(0.3) : SumiTheme.muted)
-                                .frame(width: 20, height: 20)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.sumiPressable)
-                        .disabled(index == 0)
-
-                        Button(action: { withAnimation(.snappy) { model.moveHomeRow(at: index, by: 1) } }) {
-                            Image(systemName: "chevron.down")
-                                .foregroundColor(index == model.homeRowConfig.count - 1 ? SumiTheme.muted.opacity(0.3) : SumiTheme.muted)
-                                .frame(width: 20, height: 20)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.sumiPressable)
-                        .disabled(index == model.homeRowConfig.count - 1)
-
-                        Button(action: { withAnimation(.snappy) { model.toggleHomeRow(id: row.id) } }) {
-                            Image(systemName: row.visible ? "eye" : "eye.slash")
-                                .foregroundColor(row.visible ? SumiTheme.indigo : SumiTheme.muted.opacity(0.5))
-                                .frame(width: 20, height: 20)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.sumiPressable)
-                        .animation(.snappy, value: row.visible)
+                        SumiSwitch(isOn: Binding(
+                            get: { row.visible },
+                            set: { _ in model.toggleHomeRow(id: row.id) }
+                        ))
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
-                    .background(SumiTheme.card.opacity(0.4))
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .padding(.vertical, 4)
+                    .listRowBackground(Color.clear)
+                    #if !os(tvOS)
+                    .listRowSeparatorTint(SumiTheme.border)
+                    #endif
                 }
-                .animation(.snappy, value: model.homeRowConfig)
+                .onMove { from, to in
+                    model.homeRowConfig.move(fromOffsets: from, toOffset: to)
+                    model.persistHomeRowConfig()
+                }
             }
+            .listStyle(.plain)
+            #if !os(tvOS)
+            // The plain list otherwise paints the system control background,
+            // a grey slab against the Sumi paper and ink palettes.
+            .scrollContentBackground(.hidden)
+            #endif
+            // A List has no intrinsic height and a sheet sizes itself once,
+            // so the list gets one: about 38pt a row, from the row count so a
+            // new row (Watching joined as the seventh) is not cut off.
+            .frame(height: CGFloat(model.homeRowConfig.count) * 38 + 8)
+
+            HStack {
+                Spacer()
+                Button("Done") { isPresented = false }
+                    .sumiPrimaryButton()
+                    .sumiKeyboardShortcut(.escape, modifiers: [])
+            }
+            .padding(.top, 16)
         }
         .padding(20)
         .frame(width: 380)

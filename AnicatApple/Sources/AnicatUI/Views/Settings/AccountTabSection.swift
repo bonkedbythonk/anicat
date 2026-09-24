@@ -13,11 +13,9 @@ struct AccountTabSection: View {
     /// `TmdbCredential` is the reader; `@AppStorage` needs a literal here, so
     /// the two spellings have to agree.
     @AppStorage("anicat_tmdb_key") private var tmdbKeyInput: String = ""
-    /// `AppModel.offlineCapDefaultsKey`; `@AppStorage` needs a literal, so
-    /// the two spellings and the two defaults have to agree.
 
     var body: some View {
-    VStack(alignment: .leading, spacing: 20) {
+    VStack(alignment: .leading, spacing: 28) {
         SettingsCard(title: "AniList") {
             if isSignedIn {
                 // Profile Header with Avatar & Disconnect
@@ -38,9 +36,9 @@ struct AccountTabSection: View {
                         }
                     }
                     .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
 
@@ -74,34 +72,10 @@ struct AccountTabSection: View {
                     }
                 }
                 .padding(14)
-                .background(Color.white.opacity(0.02))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
                         .stroke(SumiTheme.border, lineWidth: 1)
                 )
-
-                Divider()
-                    .background(SumiTheme.border)
-
-                // Status
-                SettingField(
-                    label: "Status",
-                    description: "AniList account connection status."
-                ) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(SumiTheme.successLight)
-                            .frame(width: 8, height: 8)
-
-                        Text("Connected")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(SumiTheme.successLight)
-                    }
-                }
-
-                Divider()
-                    .background(SumiTheme.border)
 
                 // API Token
                 SettingField(
@@ -114,9 +88,9 @@ struct AccountTabSection: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(SumiTheme.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
                                 .stroke(SumiTheme.border, lineWidth: 1)
                         )
                 }
@@ -144,9 +118,6 @@ struct AccountTabSection: View {
                     .controlSize(.large)
                 }
 
-                Divider()
-                    .background(SumiTheme.border)
-
                 // API Token Input
                 SettingField(
                     label: "API token",
@@ -173,51 +144,51 @@ struct AccountTabSection: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(SumiTheme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
                     .frame(maxWidth: 340)
                 }
             }
+        }
 
-            // Cinema mode reads TMDB with a key the app carries, so this is
-            // an override and not a requirement -- the field says so, because
-            // an empty credential box otherwise reads as a thing to go and
-            // fill in before films will work. Takes effect on the next
-            // launch: the engine is handed its key when it is constructed.
-            SettingsCard(title: "Cinema (TMDB)") {
-                SettingField(
-                    label: "Your own TMDB key",
-                    description: "Optional. Films and series already work without one. Paste a v3 key or a v4 read token to send requests on your own account instead. It takes effect as you type it."
-                ) {
-                    SecureField("Leave empty to use the built-in key", text: $tmdbKeyInput)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .foregroundColor(SumiTheme.foreground)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(SumiTheme.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                        .frame(maxWidth: 340)
-                        // The engine holds the key in memory, so a paste has
-                        // to be handed over; before this it reached nothing
-                        // until the next launch and cinema mode stayed
-                        // hidden with the key sitting right there.
-                        .onChange(of: tmdbKeyInput) { _, _ in AppModel.shared?.applyTmdbKey() }
-                }
-
-                // Required by TMDB's API terms wherever their data is used,
-                // not a courtesy line: the mark and the wording are both
-                // theirs. See `TMDBAttribution`.
-                TMDBAttribution()
-                    .padding(.top, 4)
+        // Cinema mode reads TMDB with a key the app carries, so this is
+        // an override and not a requirement -- the field says so, because
+        // an empty credential box otherwise reads as a thing to go and
+        // fill in before films will work. Takes effect on the next
+        // launch: the engine is handed its key when it is constructed.
+        SettingsCard(title: "Cinema (TMDB)") {
+            SettingField(
+                label: "Your own TMDB key",
+                description: "Optional. Films and series already work without one. Paste a v3 key or a v4 read token to send requests on your own account instead. It takes effect as you type it."
+            ) {
+                SecureField("Leave empty to use the built-in key", text: $tmdbKeyInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.foreground)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(SumiTheme.background)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                            .stroke(SumiTheme.border, lineWidth: 1)
+                    )
+                    .frame(maxWidth: 340)
+                    // The engine holds the key in memory, so a paste has
+                    // to be handed over; before this it reached nothing
+                    // until the next launch and cinema mode stayed
+                    // hidden with the key sitting right there.
+                    .onChange(of: tmdbKeyInput) { _, _ in AppModel.shared?.applyTmdbKey() }
             }
+
+            // Required by TMDB's API terms wherever their data is used,
+            // not a courtesy line: the mark and the wording are both
+            // theirs. See `TMDBAttribution`.
+            TMDBAttribution()
+                .padding(.top, 4)
         }
     }
 }

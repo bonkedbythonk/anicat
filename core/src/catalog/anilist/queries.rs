@@ -64,6 +64,29 @@ query ($id: Int, $type: MediaType) {
 }
 "#;
 
+/// One level of a franchise walk (`catalog::franchise`): every id on the
+/// level in one request, with what the timeline shows and the edges to walk.
+pub const FRANCHISE_QUERY: &str = r#"
+query ($ids: [Int]) {
+  Page(page: 1, perPage: 50) {
+    media(id_in: $ids) {
+      id type isAdult
+      title { romaji english }
+      coverImage { large medium }
+      format status episodes season seasonYear
+      startDate { year month day }
+      mediaListEntry { status }
+      relations {
+        edges {
+          relationType(version: 2)
+          node { id type isAdult }
+        }
+      }
+    }
+  }
+}
+"#;
+
 pub const MEDIA_SEARCH_QUERY: &str = r#"
 query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $genre: [String], $seasonYear: Int, $season: MediaSeason, $format: [MediaFormat], $status: MediaStatus, $sort: [MediaSort], $isAdult: Boolean, $averageScoreGreater: Int, $countryOfOrigin: CountryCode) {
   Page(page: $page, perPage: $perPage) {

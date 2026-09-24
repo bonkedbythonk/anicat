@@ -2,12 +2,17 @@ import SwiftUI
 import AnicatCoreKit
 
 struct CharactersTabSection: View {
+    let titleId: Int64
     let characters: [MediaDetailView.CharacterItem]
     let onSelectCharacter: (Int64) -> Void
 
     var body: some View {
         if characters.isEmpty {
-            SumiEmptyState(headline: "Cast & Staff", detail: "Loading cast & staff details for this title...")
+            if AppModel.shared?.castSettledId == titleId {
+                SumiEmptyState(headline: "No cast listed", detail: "AniList has no characters or staff for this title.")
+            } else {
+                SumiEmptyState(headline: "Cast and staff", detail: "Loading…")
+            }
         } else {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 14)], spacing: 14) {
                 ForEach(characters) { char in
@@ -26,31 +31,20 @@ struct CharactersTabSection: View {
                             }
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 6))
-                            .overlay(
-                                ZStack(alignment: .topLeading) {
-                                    RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1)
-                                    Text(char.role.replacingOccurrences(of: "_", with: " ").capitalized)
-                                        .font(.system(size: 8.5, weight: .black))
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 2)
-                                        .background(Color.black.opacity(0.75))
-                                        .foregroundColor(.white.opacity(0.9))
-                                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                                        .padding(5)
-                                }
-                            )
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(SumiTheme.border, lineWidth: 1))
 
                         VStack(alignment: .leading, spacing: 1) {
                             Text(char.name)
                                 .font(.sumiHeading(size: 12, weight: .bold))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
-                            if let va = char.voiceActorName, !va.isEmpty {
-                                Text(va)
-                                    .font(.system(size: 10))
-                                    .foregroundColor(SumiTheme.muted)
-                                    .lineLimit(1)
-                            }
+                            // The role in the line under the name, not a black
+                            // badge stamped on the portrait.
+                            Text([MediaCard.displayRelation(char.role), char.voiceActorName]
+                                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                                .font(.system(size: 10))
+                                .foregroundColor(SumiTheme.muted)
+                                .lineLimit(1)
                         }
                     }
                     }
@@ -76,7 +70,7 @@ struct RelatedTabSection: View {
 
     var body: some View {
         if relations.isEmpty && prequel == nil && sequel == nil {
-            SumiEmptyState(headline: "No Related Titles", detail: "No prequel, sequel, manga, light novel, or related adaptations recorded.")
+            SumiEmptyState(headline: "No related titles", detail: "No prequel, sequel, manga, light novel, or related adaptations recorded.")
         } else {
             VStack(alignment: .leading, spacing: 20) {
                 SumiSegmentedControl(
@@ -160,7 +154,7 @@ struct DiscussionsTabSection: View {
 
     var body: some View {
         if discussions.isEmpty {
-            SumiEmptyState(headline: "Discussions", detail: "No community discussion threads found for this title.")
+            SumiEmptyState(headline: "No discussions", detail: "No community discussion threads found for this title.")
         } else {
             VStack(spacing: 8) {
                 ForEach(discussions) { thread in
@@ -179,7 +173,7 @@ struct RecommendationsTabSection: View {
 
     var body: some View {
         if recommendations.isEmpty {
-            SumiEmptyState(headline: "No Additional Content", detail: "No community recommendations found.")
+            SumiEmptyState(headline: "No recommendations", detail: "No community recommendations found.")
         } else {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Recommendations")

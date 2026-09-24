@@ -265,6 +265,10 @@ struct GlobalKeyboardShortcutsModifier: ViewModifier {
         // second explicit transaction here raced those with a different
         // curve every keypress.
         if event.keyCode == 53 {
+            // A sheet takes its own Escape (its Done button). Handled here
+            // first, Escape on the cast sheet closed the detail page under it
+            // and left the sheet up.
+            if NSApp.keyWindow?.sheetParent != nil { return event }
             let handled = model.handleEscapeKey()
             return handled ? nil : event
         }

@@ -30,6 +30,12 @@ public struct UpNextQueueView: View {
         /// title has never been opened (no detail snapshot to read it
         /// from); the cover stands in. Optional for the `HomeCache` reason.
         public let bannerURL: URL?
+        /// The next episode's title and still, read from the detail snapshot
+        /// of a title the viewer has opened, for the row's middle. Nil for a
+        /// title never opened; the row keeps its old shape then. Optional for
+        /// the `HomeCache` reason.
+        public var nextEpisodeTitle: String? = nil
+        public var nextEpisodeStillURL: URL? = nil
 
         /// Three nouns, not two: cinema's queue passes "FILM" as well as "EP".
         var countLabel: String {
@@ -144,7 +150,6 @@ public struct UpNextQueueView: View {
                 } else {
                 RowView(
                     entry: entry,
-                    isFirst: false,
                     // Never a real namespace here, deliberately: the
                     // thumbnail is a 104x60 landscape rect and the detail
                     // page's poster is portrait — matchedGeometryEffect
@@ -181,30 +186,42 @@ public struct UpNextQueueView: View {
                 }
             }
         }
-        // No fill on the container: only the first row carries `bg-surface`.
-        // Filling the whole card flattened the queue's one piece of hierarchy
-        // — the primary row stopped standing out from the rest.
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
     }
 
     /// The queue's first row as a wide card: the banner behind, the still,
     /// the title at heading size, the meta line, the progress capsule and
-    /// the Resume button. Same callbacks and the same still-to-video morph as
-    /// a plain row, so playing from it looks like playing from any row.
+    /// "Resume Ep 4" as words. The whole banner is the play button, a poster
+    /// you click; a pale filled button sat on the busy artwork and looked
+    /// pasted on. Open the title from its right-click menu, or from any row.
     private struct SpotlightRow: View {
         let entry: QueueEntry
         let morphSource: EpisodeMorphSource?
         let onSelect: () -> Void
         let onPlay: () -> Void
 
+        @State private var isInfoHovered = false
+        @State private var isActionHovered = false
+
         private static let height: CGFloat = 176
 
+        /// "Details" while the next episode has not aired: nothing to play,
+        /// so the words open the title instead.
+        private var action: () -> Void { entry.isAwaitingEpisode ? onSelect : onPlay }
+
+        private var actionLabel: String {
+            if entry.isAwaitingEpisode { return "Details" }
+            switch entry.unit {
+            case "CH": return "Continue Ch \(entry.nextEpisodeOrChapter)"
+            case "FILM": return "Resume"
+            default: return "Resume Ep \(entry.nextEpisodeOrChapter)"
+            }
+        }
+
+        // Two targets, split where the words start: the still and title open
+        // the page, the right side resumes. One banner-wide resume left no
+        // way into the title from its biggest picture on the home screen.
         var body: some View {
-            HStack(spacing: 20) {
+            HStack(spacing: 0) {
                 Button(action: onSelect) {
                     HStack(spacing: 20) {
                         still
@@ -212,7 +229,7 @@ public struct UpNextQueueView: View {
                             Text(entry.title)
                                 .font(.sumiHeading(size: 20, weight: .semibold))
                                 .tracking(-0.3)
-                                .foregroundColor(SumiTheme.foreground)
+                                .foregroundColor(isInfoHovered ? SumiTheme.indigo : SumiTheme.foreground)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                             metaLine
@@ -233,17 +250,43 @@ public struct UpNextQueueView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .padding(.leading, 20)
+                    .padding(.vertical, 20)
+                    .frame(minHeight: Self.height)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
+                .stableHover { isInfoHovered = $0 }
+                .accessibilityLabel("Open \(entry.title)")
 
-                playButton
+                Button(action: action) {
+                    Text("\(actionLabel) →")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(isActionHovered ? SumiTheme.indigo : SumiTheme.foreground)
+                        .underline(isActionHovered, color: SumiTheme.indigo.opacity(0.6))
+                        .padding(.leading, 28)
+                        .padding(.trailing, 20)
+                        .frame(minHeight: Self.height)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .stableHover { isActionHovered = $0 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 20)
-            .frame(minHeight: Self.height)
             .background(backdrop)
             .background(SumiTheme.card)
+            // Its own corners since the queue lost its bordered box: the
+            // banner otherwise ends in square corners on the page ground.
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+            .animation(.snappy, value: isInfoHovered)
+            .animation(.snappy, value: isActionHovered)
+            #if os(macOS)
+            .contextMenu {
+                if !entry.isAwaitingEpisode {
+                    Button(actionLabel, action: onPlay)
+                }
+                Button("Open", action: onSelect)
+            }
+            #endif
         }
 
         /// The banner, or the cover when the title has no snapshot yet,
@@ -282,9 +325,7 @@ public struct UpNextQueueView: View {
                         .frame(width: 160, height: 92)
                         .clipped()
                 } placeholder: {
-                    Image(systemName: "photo")
-                        .font(.system(size: 18))
-                        .foregroundColor(SumiTheme.muted)
+                    SumiTheme.card
                 }
             }
             .frame(width: 160, height: 92)
@@ -321,24 +362,10 @@ public struct UpNextQueueView: View {
                 }
             }
         }
-
-        private var playButton: some View {
-            Button(action: onPlay) {
-                if entry.isAwaitingEpisode {
-                    Text("Details").fontWeight(.semibold)
-                } else {
-                    Label(entry.unit == "CH" ? "Continue" : "Resume", systemImage: entry.unit == "CH" ? "book.fill" : "play.fill")
-                        .fontWeight(.semibold)
-                }
-            }
-            .sumiPrimaryButton()
-            .controlSize(.large)
-        }
     }
 
     private struct RowView: View {
         let entry: QueueEntry
-        let isFirst: Bool
         let namespace: Namespace.ID?
         /// Non-nil on exactly the row whose Play was just pressed.
         let morphSource: EpisodeMorphSource?
@@ -347,34 +374,71 @@ public struct UpNextQueueView: View {
 
         @State private var isHovered = false
 
+        /// The episode the Play button plays, in the middle of the row that
+        /// otherwise stood empty between the progress bar and the button.
+        /// Drawn only when the title's detail snapshot has it.
+        @ViewBuilder
+        private var nextEpisode: some View {
+            if entry.nextEpisodeStillURL != nil || entry.nextEpisodeTitle != nil {
+                HStack(spacing: 12) {
+                    CachedAsyncImage(url: entry.nextEpisodeStillURL, maxPixelSize: 192) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Rectangle().fill(SumiTheme.card)
+                    }
+                    .frame(width: 96, height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusSm).stroke(SumiTheme.border, lineWidth: 1))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Next · Ep \(entry.nextEpisodeOrChapter)")
+                            .sumiTabularMono(size: 11, weight: .semibold)
+                            .foregroundColor(SumiTheme.muted)
+                        // One line, truncated: at 180pt and two lines,
+                        // "Triangle... of Missed Encounters" broke after its
+                        // second word.
+                        Text(entry.nextEpisodeTitle ?? entry.countLabel)
+                            .font(.system(size: 12.5))
+                            .foregroundColor(SumiTheme.foreground)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .frame(width: 240, alignment: .leading)
+                }
+            }
+        }
+
         var body: some View {
             HStack(spacing: 16) {
                 // Clickable Body: Thumbnail + Text
                 Button(action: onSelect) {
                     HStack(spacing: 16) {
-                        // 104x60 Thumbnail
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(SumiTheme.card)
+                        CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 208) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
                                 .frame(width: 104, height: 60)
-
-                            CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 208) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 104, height: 60)
-                                    .clipped()
-                            } placeholder: {
-                                Rectangle()
-                                    .fill(SumiTheme.background)
-                                    .overlay(
-                                        Image(systemName: "photo")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(SumiTheme.muted)
-                                    )
-                            }
+                                .clipped()
+                        } placeholder: {
+                            SumiTheme.card
                         }
                         .frame(width: 104, height: 60)
+                        // Progress on the still's bottom edge, as on the
+                        // detail page's episode stills. A full-width bar under
+                        // the text sat right above the row's divider, and the
+                        // row read as double-ruled.
+                        .overlay(alignment: .bottom) {
+                            if entry.totalCount > 0 {
+                                let pct = min(max(CGFloat(entry.progressPercent / 100.0), 0), 1)
+                                ZStack(alignment: .leading) {
+                                    Rectangle().fill(Color.black.opacity(0.45))
+                                    Rectangle()
+                                        .fill(SumiTheme.indigo)
+                                        .scaleEffect(x: pct, y: 1, anchor: .leading)
+                                }
+                                .frame(height: 3)
+                            }
+                        }
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                         .ifLet(namespace) { view, namespace in
                             view.matchedGeometryEffect(id: entry.id, in: namespace)
@@ -386,7 +450,7 @@ public struct UpNextQueueView: View {
                         // Info Column
                         VStack(alignment: .leading, spacing: 0) {
                             Text(entry.title)
-                                .font(.system(size: isFirst ? 15 : 13.5, weight: isFirst ? .semibold : .medium))
+                                .font(.system(size: 13.5, weight: .medium))
                                 .foregroundColor(SumiTheme.foreground)
                                 .lineLimit(1)
 
@@ -421,38 +485,35 @@ public struct UpNextQueueView: View {
                                 }
                             }
                             .padding(.top, 6)
-
-                            // 2px Progress Bar
-                            if entry.totalCount > 0 {
-                                let pct = min(max(CGFloat(entry.progressPercent / 100.0), 0), 1)
-                                ZStack(alignment: .leading) {
-                                    Capsule()
-                                        .fill(SumiTheme.foreground.opacity(0.1))
-                                    Capsule()
-                                        .fill(SumiTheme.indigo)
-                                        .scaleEffect(x: pct, y: 1, anchor: .leading)
-                                        .animation(.smooth, value: pct)
-                                }
-                                .frame(maxWidth: 420)
-                                .frame(height: 2)
-                                .padding(.top, 8)
-                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+
+                        nextEpisode
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
                 .contentShape(Rectangle())
 
-                Button(entry.isAwaitingEpisode ? "Details" : isFirst ? (entry.unit == "CH" ? "Continue" : "Resume") : (entry.unit == "CH" ? "Read" : "Play"), action: onPlay)
-                    .sumiSecondaryButton()
-                    .controlSize(.large)
+                // "Details" stays: it says the episode has not aired, which is
+                // news. Play and Read only on hover, and hidden rather than
+                // removed so the middle block does not shift when it appears.
+                let showsAction = isHovered || entry.isAwaitingEpisode
+                Button(action: onPlay) {
+                    Text(entry.isAwaitingEpisode ? "Details" : entry.unit == "CH" ? "Read" : "Play")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundColor(SumiTheme.indigo)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .opacity(showsAction ? 1 : 0)
+                .allowsHitTesting(showsAction)
             }
-            .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(isFirst ? SumiTheme.card : (isHovered ? SumiTheme.card.opacity(0.6) : Color.clear))
-            .animation(.snappy, value: isHovered)
+            // The Spotlight's own inset, so the thumbnails line up under its
+            // poster and the banner reads as the first row, drawn larger.
+            .padding(.horizontal, 20)
+            .contentShape(Rectangle())
             .stableHover { hovering in
                 isHovered = hovering
             }

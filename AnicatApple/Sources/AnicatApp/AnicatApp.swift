@@ -354,7 +354,15 @@ struct MenuBarPopoverContent: View {
             lastWatchedEpisode: model.activeStreamURL != nil
                 ? Int(model.currentPlaybackEpisode ?? Int64(model.playerController.episodeNumber))
                 : model.upNextItems.first.map { Int($0.nextEpisodeOrChapter) },
-            lastWatchedThumbnailURL: model.upNextItems.first?.thumbnailURL,
+            // The playing title's poster while something plays, like the
+            // title and episode beside it; `upNextItems.first` alone drew a
+            // different show's poster next to the playing one's name.
+            lastWatchedThumbnailURL: model.activeStreamURL != nil
+                ? model.currentPlaybackCatalogId.flatMap { id in
+                    model.upNextItems.first { $0.id == id }?.thumbnailURL
+                        ?? model.watchingItems.first { $0.id == id }?.coverImageURL
+                }
+                : model.upNextItems.first?.thumbnailURL,
             // "Airing today", not "airing at some point": `scheduleItems`
             // is the whole forward schedule, so without the date test
             // this listed episodes a fortnight out under a heading that

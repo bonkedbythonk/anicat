@@ -7,12 +7,14 @@ public struct MangaReaderView: View {
         case webtoon = "Vertical Scroll"
         
         public var id: String { rawValue }
-        
-        public var iconName: String {
+
+        /// The raw values are what `ReaderPreferences` stores, so the words on
+        /// screen live here; recasing a raw value would reset every saved mode.
+        var label: String {
             switch self {
-            case .single: return "doc"
-            case .double: return "book"
-            case .webtoon: return "scroll"
+            case .single: return "Single page"
+            case .double: return "Double page"
+            case .webtoon: return "Vertical scroll"
             }
         }
     }
@@ -652,20 +654,18 @@ public struct MangaReaderView: View {
         }
     }
 
+    /// On the page's own ground colour: with the controls hidden it sits
+    /// straight on the page art, and bare text vanished over a light page.
+    /// A plain rectangle with a hairline, not a capsule with a check.
     private var syncedBadge: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12))
-                .foregroundColor(SumiTheme.success)
-            Text("Synced to AniList")
-                .sumiTabularMono(size: 11, weight: .medium)
-                .foregroundColor(SumiTheme.foreground)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .background(SumiTheme.card.opacity(0.95))
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+        Text("Synced to AniList")
+            .sumiTabularMono(size: 11, weight: .medium)
+            .foregroundColor(SumiTheme.foreground)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(SumiTheme.background.opacity(0.92))
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+            .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusSm).stroke(SumiTheme.border, lineWidth: 1))
     }
 
     private func exitReader() {
@@ -797,110 +797,18 @@ public struct MangaReaderView: View {
 
     // MARK: - Top Bar
     private var topBar: some View {
-        HStack {
-            Button(action: exitReader) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(SumiTheme.foreground)
-                    .frame(width: 32, height: 32)
-                    .background(SumiTheme.card.opacity(0.85))
-                    .clipShape(Circle())
+        // Two rows when one does not fit: the phone shows this same bar, and
+        // the mode words alone take most of an iPhone's width.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                barTitle
+                Spacer()
+                barControls
             }
-            .buttonStyle(.sumiPressable)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.sumiHeading(size: 14, weight: .semibold))
-                    .foregroundColor(SumiTheme.foreground)
-                Text(chapterTitle)
-                    .sumiTabularMono(size: 11)
-                    .foregroundColor(SumiTheme.muted)
+            VStack(alignment: .leading, spacing: 10) {
+                barTitle
+                barControls
             }
-            .padding(.leading, 8)
-
-            Spacer()
-
-            // Fullscreen Toggle Button. macOS only: on the phone the reader
-            // already fills the screen, and the button rendered with an
-            // empty action.
-            #if os(macOS)
-            Button(action: {
-                if let window = NSApp.keyWindow ?? NSApp.mainWindow { FullScreenGuard.toggle(on: window) }
-            }) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 13))
-                    .foregroundColor(SumiTheme.foreground.opacity(0.8))
-                    .frame(width: 32, height: 32)
-                    .background(SumiTheme.card.opacity(0.85))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.sumiPressable)
-            .padding(.trailing, 4)
-            #endif
-
-            // Only meaningful while pages are being paired, and a toggle that
-            // changes nothing visible is worse than an absent one.
-            if readingMode == .double {
-                Button(action: { offsetCover.toggle() }) {
-                    Label("Offset cover", systemImage: offsetCover ? "book.closed.fill" : "book.closed")
-                        .labelStyle(.iconOnly)
-                        .font(.system(size: 12))
-                        .foregroundColor(offsetCover ? SumiTheme.background : SumiTheme.muted)
-                        .frame(width: 32, height: 32)
-                        .background(offsetCover ? SumiTheme.indigo : SumiTheme.card.opacity(0.85))
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.sumiPressable)
-                .help("Show the first page alone so the spreads after it match the printed pairing.")
-                .animation(.snappy, value: offsetCover)
-                .padding(.trailing, 4)
-            }
-
-            // Reading Direction Toggle
-            Button(action: {
-                readingDirection = readingDirection == .rtl ? .ltr : .rtl
-            }) {
-                Text(readingDirection == .rtl ? "RTL" : "LTR")
-                    .sumiTabularMono(size: 11, weight: .semibold)
-                    .foregroundColor(SumiTheme.foreground.opacity(0.8))
-                    .frame(width: 40, height: 32)
-                    .background(SumiTheme.card.opacity(0.85))
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.sumiPressable)
-            .animation(.snappy, value: readingDirection)
-            .padding(.trailing, 4)
-
-            // Reading Mode Picker
-            HStack(spacing: 4) {
-                ForEach(ReadingMode.allCases) { mode in
-                    Button(action: { readingMode = mode }) {
-                        Image(systemName: mode.iconName)
-                            .font(.system(size: 12))
-                            .foregroundColor(readingMode == mode ? SumiTheme.background : SumiTheme.muted)
-                            .padding(6)
-                            .background(readingMode == mode ? SumiTheme.indigo : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                    }
-                    .buttonStyle(.sumiPressable)
-                    .animation(.snappy, value: readingMode)
-                }
-            }
-            .padding(4)
-            .background(SumiTheme.card.opacity(0.85))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-            .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
         }
         .padding(SumiTheme.spaceMd)
         // Clear of the window's transparent title strip, which takes the
@@ -917,6 +825,72 @@ public struct MangaReaderView: View {
                 endPoint: .bottom
             )
         )
+    }
+
+    private var barTitle: some View {
+        HStack(spacing: 8) {
+            Button(action: exitReader) {
+                barGlyph("xmark")
+            }
+            .buttonStyle(.sumiPressable)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.sumiHeading(size: 14, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(1)
+                Text(chapterTitle)
+                    .sumiTabularMono(size: 11)
+                    .foregroundColor(SumiTheme.muted)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var barControls: some View {
+        HStack(spacing: 14) {
+            // macOS only: on the phone the reader already fills the screen,
+            // and the button rendered with an empty action.
+            #if os(macOS)
+            Button(action: {
+                if let window = NSApp.keyWindow ?? NSApp.mainWindow { FullScreenGuard.toggle(on: window) }
+            }) {
+                barGlyph("arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.sumiPressable)
+            #endif
+
+            // Only meaningful while pages are being paired, and a toggle that
+            // changes nothing visible is worse than an absent one.
+            if readingMode == .double {
+                Button(action: { offsetCover.toggle() }) {
+                    Label {
+                        Text("Offset cover")
+                    } icon: {
+                        barGlyph("book.closed", isOn: offsetCover)
+                    }
+                    .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.sumiPressable)
+                .help("Show the first page alone so the spreads after it match the printed pairing.")
+            }
+
+            SumiSlashToggle([(ReadingDirection.rtl, "RTL"), (.ltr, "LTR")], selection: readingDirection) {
+                readingDirection = $0
+            }
+
+            SumiSlashToggle(ReadingMode.allCases.map { ($0, $0.label) }, selection: readingMode) {
+                readingMode = $0
+            }
+        }
+    }
+
+    private func barGlyph(_ systemName: String, isOn: Bool = false) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundColor(isOn ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
     }
 
     /// Names both pages of a spread rather than only its first: "Page 11 / 40"
@@ -993,7 +967,7 @@ public struct MangaReaderView: View {
     private var bottomBar: some View {
         HStack(spacing: 16) {
             Button(action: onPrevChapter) {
-                Text("Prev Chapter")
+                Text("Previous chapter")
                     .sumiTabularMono(size: 11, weight: .medium)
                     .foregroundColor(SumiTheme.foreground)
             }
@@ -1012,7 +986,7 @@ public struct MangaReaderView: View {
             Spacer()
 
             Button(action: onNextChapter) {
-                Text("Next Chapter")
+                Text("Next chapter")
                     .sumiTabularMono(size: 11, weight: .medium)
                     .foregroundColor(SumiTheme.indigo)
             }

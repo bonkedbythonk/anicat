@@ -145,7 +145,10 @@ public struct SidebarView: View {
     /// toggle doesn't work" for a toggle that was never drawn.
     public let switchModeLocked: Bool
     public let onSwitchMode: () -> Void
-    @Namespace private var sidebarNavNamespace
+    /// Off while nothing on the viewer's Watching list is airing: the
+    /// calendar then only lists shows they do not follow, and the owner does
+    /// not use it in that state. The section itself stays on Go > Cmd-2.
+    public let showsSchedule: Bool
     @State private var isModeHovered = false
 
     public init(
@@ -157,6 +160,7 @@ public struct SidebarView: View {
         modeCaption: String = "Anime",
         switchModeCaption: String? = nil,
         switchModeLocked: Bool = false,
+        showsSchedule: Bool = true,
         onSwitchMode: @escaping () -> Void = {},
         onOpenSearchPalette: @escaping () -> Void
     ) {
@@ -165,6 +169,7 @@ public struct SidebarView: View {
         self.modeCaption = modeCaption
         self.switchModeCaption = switchModeCaption
         self.switchModeLocked = switchModeLocked
+        self.showsSchedule = showsSchedule
         self.onSwitchMode = onSwitchMode
         self.onOpenSearchPalette = onOpenSearchPalette
     }
@@ -178,7 +183,10 @@ public struct SidebarView: View {
             // Nav Groups
             VStack(alignment: .leading, spacing: 0) {
                 // Group: Browse
-                navGroup(title: "Browse", items: NavSection.browseItems(for: mode))
+                navGroup(
+                    title: "Browse",
+                    items: NavSection.browseItems(for: mode).filter { showsSchedule || $0 != .schedule || currentView == .schedule }
+                )
 
                 // Group: System
                 navGroup(title: "System", items: NavSection.systemItems)
@@ -210,29 +218,24 @@ public struct SidebarView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 8)
 
-                // Search Bar Button (⌘K)
+                // A row, not a box: outlined, it posed as a text field that
+                // opened a palette instead of taking typing.
                 Button(action: onOpenSearchPalette) {
                     HStack {
                         Text("Search anything")
-                            .font(.system(size: 12))
+                            .font(.system(size: 12.5))
                             .foregroundColor(SumiTheme.muted)
-
                         Spacer()
-
-                        // Bare text, no chip. The web's ⌘K here carries
-                        // `meta-mono` and nothing else; boxing it made the
-                        // control read as two nested buttons.
                         Text("⌘K")
-                            .sumiTabularMono(size: 9)
-                            .foregroundColor(SumiTheme.muted)
+                            .sumiTabularMono(size: 11)
+                            .foregroundColor(SumiTheme.muted.opacity(0.7))
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
+                    .padding(.horizontal, 4)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(SumiTheme.border).frame(height: 1)
+                    }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
@@ -260,7 +263,7 @@ public struct SidebarView: View {
     }
 
     private func navItemButton(_ item: NavSection) -> some View {
-        NavItemButton(item: item, mode: mode, isActive: currentView == item, namespace: sidebarNavNamespace) {
+        NavItemButton(item: item, mode: mode, isActive: currentView == item) {
             if currentView != item {
                 SumiHaptics.selection()
                 AppSounds.tabChange.play()
@@ -280,7 +283,6 @@ public struct SidebarView: View {
         let item: NavSection
         let mode: AppModel.AppMode
         let isActive: Bool
-        let namespace: Namespace.ID
         let onSelect: () -> Void
 
         @State private var isHovered = false
@@ -295,27 +297,20 @@ public struct SidebarView: View {
                     Spacer()
                 }
                 .frame(minHeight: 23)
-                .padding(.leading, 20)
-                .padding(.trailing, 16)
+                .padding(.leading, 12)
+                .padding(.trailing, 8)
                 .padding(.vertical, 7)
+                // A rounded wash inset from the rail's edges, where a source
+                // list marks its row. It was an indigo band with a 2pt bar on
+                // the left edge that slid from row to row, an admin-dashboard
+                // nav more than a Mac sidebar.
                 .background {
-                    if isActive {
-                        SumiTheme.indigo.opacity(0.10)
-                            .matchedGeometryEffect(id: "sidebarNavBackground", in: namespace)
-                    } else if isHovered {
-                        SumiTheme.foreground.opacity(0.04)
+                    if isActive || isHovered {
+                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                            .fill(SumiTheme.foreground.opacity(isActive ? 0.08 : 0.04))
                     }
                 }
-                .overlay(alignment: .leading) {
-                    if isActive {
-                        Rectangle()
-                            .fill(SumiTheme.indigo)
-                            .frame(width: 2)
-                            .matchedGeometryEffect(id: "sidebarNavIndicator", in: namespace)
-                    }
-                }
-                .animation(.snappy, value: isHovered)
-                .animation(.snappy(duration: 0.3), value: isActive)
+                .padding(.horizontal, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)

@@ -1,86 +1,15 @@
 import SwiftUI
+import Charts
 import AnicatCoreKit
 
-/// What the local registry knows about a year of watching: totals, a streak
-/// heat map, the titles that took the most of it, and a plain-language
-/// summary.
+/// What the local registry knows about a year of watching: one sentence with
+/// the headline, hours per month, the hours of the day, the titles that took
+/// the most of it, and a plain-language summary.
 ///
 /// Everything here comes out of `watchStats`, which reads the registry and
 /// never the network — so this page works signed out and during an AniList
 /// outage, which is most of the reason it is worth having.
 public struct StatsView: View {
-    /// One day of the heat map. Its own type rather than `FfiDayCount` so the
-    /// layout maths below can be exercised without constructing uniffi values,
-    /// and so a date is a `Date` rather than a string that has to be parsed
-    /// again at every call site.
-    public struct DayTally: Sendable, Equatable {
-        public let date: Date
-        public let episodes: Int
-        public let seconds: Int64
-
-        public init(date: Date, episodes: Int, seconds: Int64) {
-            self.date = date
-            self.episodes = episodes
-            self.seconds = seconds
-        }
-    }
-
-    /// Which of the five ink steps a day's cell takes, 0 (untouched) to 4.
-    ///
-    /// Scaled against the busiest day rather than a fixed episode count: a
-    /// fixed scale renders a light viewer's whole year at step 1 and a heavy
-    /// one's at step 4, and in both cases the map stops saying anything.
-    nonisolated public static func heatBucket(episodes: Int, max: Int) -> Int {
-        guard episodes > 0, max > 0 else { return 0 }
-        let ratio = Double(episodes) / Double(max)
-        if ratio <= 0.25 { return 1 }
-        if ratio <= 0.5 { return 2 }
-        if ratio <= 0.75 { return 3 }
-        return 4
-    }
-
-    /// The tallies as GitHub-shaped columns: one column per week, seven rows
-    /// with Monday at the top. `nil` is a cell outside the range — the days
-    /// before the first tally in the opening week, and after the last in the
-    /// closing one.
-    ///
-    /// The leading pad is the whole point. Without it the first tally lands on
-    /// row 0 whatever weekday it actually is, and every row of the map is then
-    /// labelled with the wrong day.
-    nonisolated public static func heatColumns(
-        _ tallies: [DayTally],
-        calendar: Calendar = .current
-    ) -> [[DayTally?]] {
-        guard let first = tallies.first else { return [] }
-        // Sunday is 1 in every calendar, whatever its own `firstWeekday` says,
-        // so Monday maps to row 0 without reading the locale.
-        let leading = (calendar.component(.weekday, from: first.date) + 5) % 7
-        var cells: [DayTally?] = Array(repeating: nil, count: leading)
-        cells.append(contentsOf: tallies.map { Optional($0) })
-        while cells.count % 7 != 0 { cells.append(nil) }
-        return stride(from: 0, to: cells.count, by: 7).map { Array(cells[$0..<($0 + 7)]) }
-    }
-
-    /// Where each month's name goes along the top of the map: the column that
-    /// holds that month's first cell. Only the first column of a month gets a
-    /// label, so a month that starts mid-week is not written twice.
-    nonisolated public static func monthLabels(
-        for columns: [[DayTally?]],
-        calendar: Calendar = .current
-    ) -> [Int: String] {
-        var labels: [Int: String] = [:]
-        var lastMonth = -1
-        for (index, column) in columns.enumerated() {
-            guard let day = column.compactMap({ $0 }).first else { continue }
-            let month = calendar.component(.month, from: day.date)
-            if month != lastMonth {
-                lastMonth = month
-                labels[index] = Self.monthAbbreviations[month - 1]
-            }
-        }
-        return labels
-    }
-
     /// The "Year in review" card's two sentences. Templated, not generated:
     /// the numbers are already on the page, and this is here to say what they
     /// add up to.
@@ -107,16 +36,6 @@ public struct StatsView: View {
         return first + second
     }
 
-    nonisolated private static let monthAbbreviations = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-    ]
-
-    /// The five ink steps a heat cell takes. Index 0 is the untouched track,
-    /// which is a foreground wash rather than the accent at low alpha — the
-    /// accent at 5% still reads as "a little bit of watching" on a day with
-    /// none.
-    private static let heatOpacities: [Double] = [0, 0.22, 0.42, 0.68, 1.0]
-
     /// `YYYY-MM-DD` as the engine writes it, parsed back with a fixed locale
     /// and calendar. `DateFormatter` with no locale set follows the device's,
     /// and an Arabic or Persian one turns these into unparseable nil.
@@ -128,11 +47,11 @@ public struct StatsView: View {
         return f
     }()
 
-    nonisolated private static let tooltipFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEE d MMM yyyy"
-        return f
-    }()
+    private struct MonthHours: Identifiable {
+        let month: Date
+        let hours: Double
+        var id: Date { month }
+    }
 
     let stats: FfiWatchStats?
     /// Names and covers for the top-titles list. `FfiTitleCount` carries an
@@ -167,21 +86,33 @@ public struct StatsView: View {
         self.onResolveTitle = onResolveTitle
     }
 
-    private var tallies: [DayTally] {
-        (stats?.perDay ?? []).compactMap { row in
-            guard let date = Self.dayParser.date(from: row.date) else { return nil }
-            return DayTally(date: date, episodes: Int(row.episodes), seconds: row.seconds)
+    /// `perDay` summed by month. It is the last 365 days, not a calendar
+    /// year, so both ends are the same month partly: bucketing by month name
+    /// rather than by the month's first day folded the two into one bar.
+    /// Untouched days are present and zeroed, so every month gets a bar.
+    private func monthHours(_ stats: FfiWatchStats) -> [MonthHours] {
+        let calendar = Calendar.current
+        var order: [Date] = []
+        var seconds: [Date: Int64] = [:]
+        for row in stats.perDay {
+            guard let day = Self.dayParser.date(from: row.date),
+                  let month = calendar.dateInterval(of: .month, for: day)?.start else { continue }
+            if seconds[month] == nil { order.append(month) }
+            seconds[month, default: 0] += row.seconds
         }
+        return order.map { MonthHours(month: $0, hours: Double(seconds[$0] ?? 0) / 3600) }
     }
 
     public var body: some View {
+        GeometryReader { viewport in
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: SumiTheme.spaceLg) {
                 header
 
                 if let stats, stats.episodesWatched > 0 || stats.totalWatchSeconds > 0 {
-                    summaryRow(stats)
-                    heatMapCard
+                    let months = monthHours(stats)
+                    summary(stats, months: months)
+                    monthChart(months)
                     habitCard(stats)
                     topTitlesCard(stats)
                     yearInReviewCard(stats)
@@ -193,10 +124,14 @@ public struct StatsView: View {
                     .padding(.top, 40)
                 }
             }
-            .padding(.horizontal, SumiTheme.spaceLg)
-            .padding(.vertical, SumiTheme.spaceLg)
-            .frame(maxWidth: 1100, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // The page gutters and column every other section uses; at 24pt
+            // and pinned left, Stats started to the left of its neighbours.
+            .padding(.horizontal, 40)
+            .padding(.top, 40)
+            .padding(.bottom, 32)
+            .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
         }
         .background(SumiTheme.background)
         .onAppear(perform: onLoad)
@@ -213,131 +148,57 @@ public struct StatsView: View {
         }
     }
 
-    private func summaryRow(_ stats: FfiWatchStats) -> some View {
-        // Five across is a Mac row; at 402pt each tile got 66pt and the
-        // "Longest streak" label wrapped onto three lines under a number it
-        // no longer sat next to. A grid of at least 150pt tiles is two
-        // across on a phone and still one row on the Mac.
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], alignment: .leading, spacing: 12) {
-            statTile("Hours", String(format: "%.1f", Double(stats.totalWatchSeconds) / 3600))
-            statTile("Episodes", "\(stats.episodesWatched)")
-            statTile("Titles", "\(stats.titlesStarted)")
-            statTile("Current streak", "\(stats.currentStreakDays)d")
-            statTile("Longest streak", "\(stats.longestStreakDays)d")
-        }
+    /// "In the last year", not "this year": `totalWatchSeconds` and `perDay`
+    /// are a rolling 365 days, and in March "this year" would claim ten
+    /// months of last year's watching.
+    private func summary(_ stats: FfiWatchStats, months: [MonthHours]) -> some View {
+        let hours = Double(stats.totalWatchSeconds) / 3600
+        let hoursText = hours < 10 ? String(format: "%.1f", hours) : String(format: "%.0f", hours)
+        let titles = Int(stats.titlesStarted)
+        let busiest = months.max(by: { $0.hours < $1.hours }).flatMap { $0.hours > 0 ? $0.month : nil }
+        let accent = { (text: String) in Text(text).bold().foregroundStyle(SumiTheme.indigo) }
+        let tail = busiest.map { ", most of it in \($0.formatted(.dateTime.month(.wide)))." } ?? "."
+        return Text("You watched \(accent("\(hoursText) hours")) across \(accent("\(titles) title\(titles == 1 ? "" : "s")")) in the last year\(tail)")
+            .font(.system(size: 17))
+            .foregroundStyle(SumiTheme.foreground)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func statTile(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(value)
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(SumiTheme.foreground)
-                .contentTransition(.numericText())
-            Text(label)
-                .sumiTabularMono(size: 10)
-                .foregroundColor(SumiTheme.muted)
+    private func monthChart(_ months: [MonthHours]) -> some View {
+        Chart(months) { month in
+            BarMark(
+                x: .value("Month", month.month, unit: .month),
+                y: .value("Hours", month.hours)
+            )
+            .foregroundStyle(SumiTheme.indigo.opacity(0.7))
+            .cornerRadius(2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(SumiTheme.card.opacity(0.4))
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
-    }
-
-    private var heatMapCard: some View {
-        let days = tallies
-        let columns = Self.heatColumns(days)
-        let labels = Self.monthLabels(for: columns)
-        let busiest = days.map(\.episodes).max() ?? 0
-
-        return card(title: "Activity") {
-            // Horizontal scroll rather than a smaller cell: a year is 53
-            // columns, and shrinking them to fit a narrow window took the
-            // squares below the size a pointer can pick one out of.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 4) {
-                    weekdayGutter
-                    VStack(alignment: .leading, spacing: 3) {
-                        monthRow(columns: columns, labels: labels)
-                        HStack(spacing: 3) {
-                            ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
-                                VStack(spacing: 3) {
-                                    ForEach(Array(column.enumerated()), id: \.offset) { _, day in
-                                        heatCell(day, busiest: busiest)
-                                    }
-                                }
-                            }
-                        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .month)) { _ in
+                AxisValueLabel(format: .dateTime.month(.abbreviated), centered: true)
+                    .font(.system(size: 10))
+                    .foregroundStyle(SumiTheme.muted)
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
+                AxisValueLabel {
+                    if let hours = value.as(Double.self) {
+                        // Whole hours read "0 h" on every tick of a first
+                        // week, when the axis runs 0.2, 0.4, 0.6.
+                        Text(hours < 10 ? String(format: "%.1f h", hours) : "\(Int(hours)) h")
+                            .sumiTabularMono(size: 10)
+                            .foregroundColor(SumiTheme.muted)
                     }
                 }
-                .padding(.vertical, 2)
-            }
-
-            legend
-        }
-    }
-
-    private var weekdayGutter: some View {
-        VStack(alignment: .trailing, spacing: 3) {
-            // The month row's own height, so the gutter starts level with the
-            // first square rather than the first label.
-            Color.clear.frame(height: 12)
-            ForEach(Array(["Mon", "", "Wed", "", "Fri", "", "Sun"].enumerated()), id: \.offset) { _, label in
-                Text(label)
-                    .sumiTabularMono(size: 8)
-                    .foregroundColor(SumiTheme.muted)
-                    .frame(height: 11, alignment: .center)
             }
         }
-        .frame(width: 26, alignment: .trailing)
-    }
-
-    private func monthRow(columns: [[DayTally?]], labels: [Int: String]) -> some View {
-        HStack(spacing: 3) {
-            ForEach(0..<max(columns.count, 1), id: \.self) { index in
-                Text(labels[index] ?? "")
-                    .sumiTabularMono(size: 8)
-                    .foregroundColor(SumiTheme.muted)
-                    .fixedSize()
-                    .frame(width: 11, height: 12, alignment: .leading)
+        .chartPlotStyle { plot in
+            plot.overlay(alignment: .bottom) {
+                Rectangle().fill(SumiTheme.border).frame(height: 1)
             }
         }
-    }
-
-    private func heatCell(_ day: DayTally?, busiest: Int) -> some View {
-        let bucket = day.map { Self.heatBucket(episodes: $0.episodes, max: busiest) } ?? 0
-        // Two values, not one: a day outside the range keeps `bucket` at 0 and
-        // moves only its opacity, so animating on the bucket alone left every
-        // empty cell popping in while the filled ones faded.
-        return RoundedRectangle(cornerRadius: 2)
-            .fill(bucket == 0 ? SumiTheme.foregroundWash : SumiTheme.indigo.opacity(Self.heatOpacities[bucket]))
-            .frame(width: 11, height: 11)
-            .opacity(day == nil ? 0 : 1)
-            .animation(.sumi(.pop), value: bucket)
-            .animation(.sumi(.pop), value: day == nil)
-            .help(day.map { tally in
-                "\(Self.tooltipFormatter.string(from: tally.date)) — \(tally.episodes) episode\(tally.episodes == 1 ? "" : "s")"
-            } ?? "")
-    }
-
-    private var legend: some View {
-        HStack(spacing: 4) {
-            Spacer()
-            Text("Less")
-                .sumiTabularMono(size: 9)
-                .foregroundColor(SumiTheme.muted)
-            ForEach(0..<5, id: \.self) { step in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(step == 0 ? SumiTheme.foregroundWash : SumiTheme.indigo.opacity(Self.heatOpacities[step]))
-                    .frame(width: 11, height: 11)
-            }
-            Text("More")
-                .sumiTabularMono(size: 9)
-                .foregroundColor(SumiTheme.muted)
-        }
+        .frame(height: 160)
     }
 
     private func habitCard(_ stats: FfiWatchStats) -> some View {
@@ -472,6 +333,7 @@ public struct StatsView: View {
         }
     }
 
+    /// A section under a hairline, not a filled and stroked box.
     @ViewBuilder
     private func card<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -482,13 +344,10 @@ public struct StatsView: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(SumiTheme.card.opacity(0.4))
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
+        .padding(.top, 16)
+        .overlay(alignment: .top) {
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
+        }
     }
 }
 

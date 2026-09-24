@@ -612,6 +612,25 @@ pub struct FfiRelation {
     pub average_score: Option<i32>,
 }
 
+/// One title of a franchise's watch order (`AnicatEngine::franchise`).
+/// Unlike `FfiRelation` it carries the start date and episode count the
+/// timeline sorts and labels by.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiFranchiseEntry {
+    pub catalog_id: i64,
+    pub title: String,
+    pub format: Option<String>,
+    pub cover_image: String,
+    pub year: Option<i32>,
+    pub month: Option<i32>,
+    pub season: Option<String>,
+    pub episodes: Option<i32>,
+    pub list_status: Option<String>,
+    /// `None` on the prequel/sequel line; the relation type of a side story,
+    /// spin-off or alternative version otherwise.
+    pub aside: Option<String>,
+}
+
 #[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiRecommendation {
     pub catalog_id: i64,
@@ -3539,6 +3558,44 @@ impl AnicatEngine {
             stop_time: e.stop_time,
             duration: e.duration,
         }))
+    }
+
+    /// The whole franchise around an AniList id, for the Related tab's
+    /// timeline: its prequel/sequel line walked to both ends, and the side
+    /// stories off it. See `catalog::franchise`.
+    pub async fn franchise(&self, catalog_id: i64) -> FfiResult<Vec<FfiFranchiseEntry>> {
+        let entries = self
+            .catalogs
+            .franchise(catalog_id)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(entries
+            .into_iter()
+            .map(|e| {
+                let m = e.media;
+                let start = m.start_date.as_ref();
+                FfiFranchiseEntry {
+                    catalog_id: m.id,
+                    title: m
+                        .title
+                        .as_ref()
+                        .and_then(|t| t.english.clone().or_else(|| t.romaji.clone()))
+                        .unwrap_or_default(),
+                    format: m.format.clone(),
+                    cover_image: m
+                        .cover_image
+                        .as_ref()
+                        .and_then(|c| c.large.clone().or_else(|| c.medium.clone()))
+                        .unwrap_or_default(),
+                    year: start.and_then(|d| d.year).or(m.season_year),
+                    month: start.and_then(|d| d.month),
+                    season: m.season.clone(),
+                    episodes: m.episodes,
+                    list_status: m.media_list_entry.as_ref().and_then(|l| l.status.clone()),
+                    aside: e.aside,
+                }
+            })
+            .collect())
     }
 
     /// Fetches the cast and staff for an AniList media id.

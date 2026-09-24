@@ -401,6 +401,7 @@ extension AppModel {
             // started it: a newer page owns the flag once it has begun.
             if self.detailGeneration == generation {
                 self.isCinemaExtrasLoading = false
+                self.castSettledId = id
             }
             // currentDetailCatalog/selectedMediaDetails?.id alone are not
             // enough: loadDetail's own "already showing this id" fast path
@@ -607,6 +608,14 @@ extension AppModel {
 
     /// One cast member, for the sheet. Cached by the engine for a day, so
     /// reopening the same face costs nothing.
+    /// The whole franchise around an AniList title, for the Related tab's
+    /// timeline. Nil when the walk fails; the timeline then falls back to the
+    /// title's own relations, one step deep.
+    public func franchise(id: Int64) async -> [FfiFranchiseEntry]? {
+        guard let engine else { return nil }
+        return try? await engine.franchise(catalogId: id)
+    }
+
     public func cinemaPerson(id: Int64) async -> CinemaPerson? {
         guard let engine, cinemaAvailable else { return nil }
         return try? await engine.cinemaPerson(personId: id)

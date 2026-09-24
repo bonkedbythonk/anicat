@@ -148,24 +148,13 @@ public struct CommandPalette: View {
                     highlighted = max(highlighted - 1, 0)
                     return .handled
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .overlay(
-                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                        .stroke(SumiTheme.indigo.opacity(0.7), lineWidth: 1)
-                )
 
             Text("esc")
-                .sumiTabularMono(size: 10)
+                .sumiTabularMono(size: 11)
                 .foregroundColor(SumiTheme.muted)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(SumiTheme.border, lineWidth: 1)
-                )
         }
-        .padding(14)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
     }
 
     private var results: some View {

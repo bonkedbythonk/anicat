@@ -322,7 +322,7 @@ public struct RootTabView: View {
 
 /// Anime or cinema, in the header of all three tabs.
 ///
-/// A two-segment control rather than a fourth tab or a sidebar item: the
+/// A two-word toggle rather than a fourth tab or a sidebar item: the
 /// mode changes what every tab means, so it has to be visible from all of
 /// them, and switching it from inside Library should leave you in Library.
 /// Hidden entirely when the engine reports no TMDB access — a dead segment
@@ -332,15 +332,10 @@ struct ModeToggle: View {
 
     var body: some View {
         if model.cinemaAvailable {
-            Picker("", selection: Binding(
-                get: { model.appMode },
-                set: { model.setAppMode($0) }
-            )) {
-                Text("Anime").tag(AppModel.AppMode.anime)
-                Text("Films & TV").tag(AppModel.AppMode.cinema)
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 210)
+            SumiSlashToggle(
+                [(AppModel.AppMode.anime, "Anime"), (.cinema, "Films & TV")],
+                selection: model.appMode
+            ) { model.setAppMode($0) }
         }
     }
 }
@@ -436,13 +431,13 @@ private struct UpNextTab: View {
 
                     let newEpisodes = model.upNextItems.filter(\.hasNewEpisode)
                     if !newEpisodes.isEmpty {
-                        SectionHeader("New Episodes")
+                        SectionHeader("New episodes")
                         VStack(spacing: 0) {
                             ForEach(newEpisodes) { entry in
                                 NewEpisodeRow(entry: entry) {
                                     open(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH")
                                 }
-                                Divider().overlay(SumiTheme.border)
+                                Rectangle().fill(SumiTheme.border).frame(height: 1)
                             }
                         }
                     }
@@ -456,8 +451,8 @@ private struct UpNextTab: View {
                     // here" rather than "you are up to date". These rows are
                     // already fetched by `refreshAll` — only the rendering
                     // was missing.
-                    PosterShelf(title: "Because You Watched", items: model.becauseYouWatched, onOpen: open)
-                    PosterShelf(title: "This Season", items: model.seasonalItems, onOpen: open)
+                    PosterShelf(title: "Because you watched", items: model.becauseYouWatched, onOpen: open)
+                    PosterShelf(title: "This season", items: model.seasonalItems, onOpen: open)
                     PosterShelf(title: "Trending", items: model.trendingItems, onOpen: open)
                     PosterShelf(title: "Planning", items: model.planningItems, onOpen: open)
 
@@ -503,7 +498,7 @@ private struct UpNextTab: View {
     @ViewBuilder
     private var cinemaBody: some View {
         if !model.cinemaContinueWatching.isEmpty {
-            PosterShelf(title: "Continue Watching", items: model.cinemaContinueWatching, onOpen: openCinema)
+            PosterShelf(title: "Continue watching", items: model.cinemaContinueWatching, onOpen: openCinema)
         }
         ForEach(model.cinemaShelves) { shelf in
             PosterShelf(title: shelf.title, items: shelf.items, onOpen: openCinema)
@@ -618,8 +613,8 @@ struct AiringTodayStrip: View {
                 .sorted { ($0.isWatching ? 0 : 1, $0.airingAt) < ($1.isWatching ? 0 : 1, $1.airingAt) }
         }
         let today = on(calendar.isDateInToday)
-        if !today.isEmpty { return ("Airing Today", today) }
-        return ("Airing Tomorrow", on(calendar.isDateInTomorrow))
+        if !today.isEmpty { return ("Airing today", today) }
+        return ("Airing tomorrow", on(calendar.isDateInTomorrow))
     }
 
     var body: some View {
@@ -746,7 +741,7 @@ struct ContinueWatchingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader("Continue Watching")
+            SectionHeader("Continue watching")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(model.upNextItems) { entry in
@@ -1102,9 +1097,11 @@ private struct LibraryTab: View {
         } label: {
             HStack(spacing: 4) {
                 Text(currentLabel)
-                    .font(.system(size: 15))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(SumiTheme.foreground)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(SumiTheme.muted)
             }
         }
         }
@@ -1120,10 +1117,10 @@ private struct LibraryTab: View {
             }
         } label: {
             HStack(spacing: 3) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 11, weight: .semibold))
                 Text(sort.label)
                     .font(.system(size: 12))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
             }
             .foregroundStyle(SumiTheme.muted)
         }
@@ -1235,7 +1232,7 @@ struct PosterList: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                Divider().overlay(SumiTheme.border).padding(.leading, 72)
+                Rectangle().fill(SumiTheme.border).frame(height: 1).padding(.leading, 72)
             }
         }
     }
@@ -1309,7 +1306,7 @@ private struct SearchTab: View {
                         if !filters.isActive {
                             genreChips
                         }
-                        PosterShelf(title: "This Season", items: model.seasonalItems, onOpen: open)
+                        PosterShelf(title: "This season", items: model.seasonalItems, onOpen: open)
                         PosterShelf(title: "Trending", items: model.trendingItems, onOpen: open)
                     } else {
                         PosterGrid(items: model.searchResults, onOpen: open)

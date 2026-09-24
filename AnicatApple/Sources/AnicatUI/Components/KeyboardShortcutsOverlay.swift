@@ -4,9 +4,12 @@ public struct KeyboardShortcutsOverlay: View {
     public struct ShortcutItem: Identifiable, Sendable {
         public let id: String
         public let label: String
-        public let keys: [String]
+        /// One display string, not a list: the rows mean a chord ("⌘K"),
+        /// alternatives ("Return or S") or a range ("1–9"), and no single
+        /// join of parts renders all three.
+        public let keys: String
 
-        public init(id: String, label: String, keys: [String]) {
+        public init(id: String, label: String, keys: String) {
             self.id = id
             self.label = label
             self.keys = keys
@@ -66,17 +69,17 @@ public struct KeyboardShortcutsOverlay: View {
             id: "navigation",
             title: "Navigation",
             items: [
-                ShortcutItem(id: "palette", label: "Command palette", keys: ["⌘", "K"]),
-                ShortcutItem(id: "search", label: "Quick search", keys: ["/"]),
-                ShortcutItem(id: "sections", label: "Jump to section (1–9)", keys: ["1", "–", "9"]),
-                ShortcutItem(id: "home", label: "Anime", keys: ["H"]),
-                ShortcutItem(id: "library", label: "Library", keys: ["L"]),
-                ShortcutItem(id: "manga", label: "Manga", keys: ["M"]),
-                ShortcutItem(id: "novels", label: "Light Novels", keys: ["N"]),
-                ShortcutItem(id: "stats", label: "Stats", keys: ["T"]),
-                ShortcutItem(id: "downloads", label: "Downloads", keys: ["D"]),
-                ShortcutItem(id: "shortcuts", label: "Show keyboard shortcuts", keys: ["?"]),
-                ShortcutItem(id: "dismiss", label: "Dismiss overlay or view", keys: ["Esc"])
+                ShortcutItem(id: "palette", label: "Command palette", keys: "⌘K"),
+                ShortcutItem(id: "search", label: "Quick search", keys: "/"),
+                ShortcutItem(id: "sections", label: "Jump to section (1–9)", keys: "1–9"),
+                ShortcutItem(id: "home", label: "Anime", keys: "H"),
+                ShortcutItem(id: "library", label: "Library", keys: "L"),
+                ShortcutItem(id: "manga", label: "Manga", keys: "M"),
+                ShortcutItem(id: "novels", label: "Light Novels", keys: "N"),
+                ShortcutItem(id: "stats", label: "Stats", keys: "T"),
+                ShortcutItem(id: "downloads", label: "Downloads", keys: "D"),
+                ShortcutItem(id: "shortcuts", label: "Show keyboard shortcuts", keys: "?"),
+                ShortcutItem(id: "dismiss", label: "Dismiss overlay or view", keys: "Esc")
             ]
         ),
         ShortcutSection(
@@ -88,18 +91,18 @@ public struct KeyboardShortcutsOverlay: View {
             // release with nothing reading it -- the row was the only
             // place the chord existed.
             items: [
-                ShortcutItem(id: "playpause", label: "Play / pause", keys: ["Space"]),
-                ShortcutItem(id: "seekback", label: "Seek backward 5s", keys: ["←"]),
-                ShortcutItem(id: "seekfwd", label: "Seek forward 5s", keys: ["→"]),
-                ShortcutItem(id: "seekback30", label: "Seek backward 30s (60s with Shift)", keys: ["J"]),
-                ShortcutItem(id: "seekfwd30", label: "Seek forward 30s (60s with Shift)", keys: ["L"]),
-                ShortcutItem(id: "volume", label: "Volume up / down", keys: ["↑", "↓"]),
-                ShortcutItem(id: "mute", label: "Mute", keys: ["M"]),
-                ShortcutItem(id: "fullscreen", label: "Fullscreen", keys: ["F"]),
-                ShortcutItem(id: "nextepisode", label: "Next episode", keys: ["N"]),
-                ShortcutItem(id: "prevepisode", label: "Previous episode", keys: ["P"]),
-                ShortcutItem(id: "skip", label: "Skip intro / outro", keys: ["Return", "S"]),
-                ShortcutItem(id: "rotate", label: "Rotate video", keys: ["Shift", "V"])
+                ShortcutItem(id: "playpause", label: "Play / pause", keys: "Space"),
+                ShortcutItem(id: "seekback", label: "Seek backward 5s", keys: "←"),
+                ShortcutItem(id: "seekfwd", label: "Seek forward 5s", keys: "→"),
+                ShortcutItem(id: "seekback30", label: "Seek backward 30s (60s with Shift)", keys: "J"),
+                ShortcutItem(id: "seekfwd30", label: "Seek forward 30s (60s with Shift)", keys: "L"),
+                ShortcutItem(id: "volume", label: "Volume up / down", keys: "↑ ↓"),
+                ShortcutItem(id: "mute", label: "Mute", keys: "M"),
+                ShortcutItem(id: "fullscreen", label: "Fullscreen", keys: "F"),
+                ShortcutItem(id: "nextepisode", label: "Next episode", keys: "N"),
+                ShortcutItem(id: "prevepisode", label: "Previous episode", keys: "P"),
+                ShortcutItem(id: "skip", label: "Skip intro / outro", keys: "Return or S"),
+                ShortcutItem(id: "rotate", label: "Rotate video", keys: "⇧V")
             ]
         ),
         ShortcutSection(
@@ -109,69 +112,37 @@ public struct KeyboardShortcutsOverlay: View {
                 // The arrows have turned pages since the reader was written
                 // and were listed nowhere, so the only documented thing you
                 // could do in there was leave.
-                ShortcutItem(id: "readerturn", label: "Turn page", keys: ["←", "→"]),
-                ShortcutItem(id: "readerchrome", label: "Show controls", keys: ["Tap", "or edge"]),
-                ShortcutItem(id: "closereader", label: "Exit reader", keys: ["Esc"])
+                ShortcutItem(id: "readerturn", label: "Turn page", keys: "← →"),
+                ShortcutItem(id: "readerchrome", label: "Show controls", keys: "Tap or edge"),
+                ShortcutItem(id: "closereader", label: "Exit reader", keys: "Esc")
             ]
         )
     ]
 
     public var body: some View {
-        ZStack {
-            // Scrim provides an explicit tap target for dismiss without requiring Escape key awareness.
-            Color.black.opacity(0.45)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onDismiss)
-
-            VStack(spacing: 0) {
-                header
-                Rectangle().fill(SumiTheme.border).frame(height: 1)
-                shortcutsList
-            }
-            .frame(maxWidth: 540)
-            .background(SumiTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
-            .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusXl)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.5), radius: 30, y: 12)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                // Absorbs clicks within the card to prevent dismiss triggering through to the scrim.
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 40)
-        }
-        .sumiExitCommand(perform: onDismiss)
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "keyboard")
-                .font(.system(size: 15))
-                .foregroundColor(SumiTheme.indigo)
-
-            Text("Keyboard Shortcuts")
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Keyboard shortcuts")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(SumiTheme.foreground)
+                .padding(.bottom, 12)
 
-            Spacer()
+            shortcutsList
 
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(SumiTheme.muted)
-                    .frame(width: 24, height: 24)
-                    .background(SumiTheme.foregroundWash)
-                    .clipShape(Circle())
-                    .contentShape(Circle())
+            HStack {
+                Spacer()
+                // Return only: on the Mac, Escape is taken by the key monitor first, and
+                // its `handleEscapeKey` clears `shortcutsOpen` ahead of the
+                // palette, player and pages, so an Escape binding here would never fire.
+                Button("Done", action: onDismiss)
+                    .sumiPrimaryButton()
+                    .sumiKeyboardShortcut(.escape, modifiers: [])
             }
-            .buttonStyle(.sumiPressable)
-            .help("Close (Esc)")
+            .padding(.top, 16)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(20)
+        // A sheet sizes itself once; the list scrolls inside a fixed frame.
+        .frame(width: 480, height: 560)
+        .background(SumiTheme.background)
     }
 
     private var shortcutsList: some View {
@@ -192,17 +163,9 @@ public struct KeyboardShortcutsOverlay: View {
 
                                     Spacer()
 
-                                    HStack(spacing: 4) {
-                                        ForEach(Array(item.keys.enumerated()), id: \.offset) { _, key in
-                                            if key == "–" {
-                                                Text("–")
-                                                    .font(.system(size: 11))
-                                                    .foregroundColor(SumiTheme.muted)
-                                            } else {
-                                                KeyBadge(text: key)
-                                            }
-                                        }
-                                    }
+                                    Text(item.keys)
+                                        .sumiTabularMono(size: 12)
+                                        .foregroundColor(SumiTheme.muted)
                                 }
                                 .padding(.vertical, 7)
 
@@ -216,26 +179,6 @@ public struct KeyboardShortcutsOverlay: View {
                     }
                 }
             }
-            .padding(20)
         }
-        .frame(maxHeight: 460)
-    }
-}
-
-private struct KeyBadge: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundColor(SumiTheme.foreground)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(SumiTheme.foregroundWash)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-            .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
     }
 }

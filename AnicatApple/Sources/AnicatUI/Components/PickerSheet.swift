@@ -63,21 +63,10 @@ public struct PickerSheet: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Tonight's pick")
-                    .sumiTabularMono(size: 11.5, weight: .medium)
-                    .foregroundColor(SumiTheme.muted)
-                Spacer()
-                Button(action: { isPresented = false }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(SumiTheme.muted)
-                        .padding(4)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-            }
-            .padding(.bottom, 16)
+            Text("Tonight's pick")
+                .sumiTabularMono(size: 11.5, weight: .medium)
+                .foregroundColor(SumiTheme.muted)
+                .padding(.bottom, 16)
 
             if let pick = currentPick {
                 HStack(alignment: .top, spacing: 18) {
@@ -139,7 +128,7 @@ public struct PickerSheet: View {
 
                         Spacer(minLength: 14)
 
-                        filterChipsRow
+                        filterRow
 
                         HStack(spacing: 10) {
                             Button(action: { commit(pick.item) }) {
@@ -169,48 +158,55 @@ public struct PickerSheet: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(SumiTheme.muted)
 
-                    filterChipsRow
+                    filterRow
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, minHeight: 210)
             }
+
+            // Secondary, not primary: "Watch this" is the sheet's one
+            // indigo button, and two read as two equal choices.
+            HStack {
+                Spacer()
+                Button("Done") { isPresented = false }
+                    .sumiSecondaryButton()
+                    .sumiKeyboardShortcut(.escape, modifiers: [])
+            }
+            .padding(.top, 16)
         }
         .padding(20)
         .frame(width: 540)
         .background(SumiTheme.background)
     }
 
-    private var filterChipsRow: some View {
-        // Wraps rather than compresses. In an `HStack` the five chips were
+    private var filterRow: some View {
+        // Wraps rather than compresses. In an `HStack` the choices were
         // squeezed at a 1080pt window until their labels broke mid-word --
         // "Continu e", "Somethi ng new", "Intens e" -- because a `Text` with
         // no line limit gives up its width before its line count.
-        SumiWrapHStack(spacing: 6, lineSpacing: 6) {
-            PickerChip(title: "Continue", isActive: mood == .continue) {
+        SumiWrapHStack(spacing: 16, lineSpacing: 6) {
+            SumiSlashToggle(
+                [(PickerMood.continue, "Continue"), (.somethingNew, "Something new")],
+                selection: mood
+            ) { next in
                 withAnimation(.smooth) {
-                    mood = .continue
+                    mood = next
                     cursor = 0
                 }
             }
-            PickerChip(title: "Something new", isActive: mood == .somethingNew) {
-                withAnimation(.smooth) {
-                    mood = .somethingNew
-                    cursor = 0
-                }
-            }
-            PickerChip(title: "Short", isActive: filterShort) {
+            FilterWord(title: "Short", isActive: filterShort) {
                 withAnimation(.smooth) {
                     filterShort.toggle()
                     cursor = 0
                 }
             }
-            PickerChip(title: "Comfy", isActive: filterComfy) {
+            FilterWord(title: "Comfy", isActive: filterComfy) {
                 withAnimation(.smooth) {
                     filterComfy.toggle()
                     cursor = 0
                 }
             }
-            PickerChip(title: "Intense", isActive: filterIntense) {
+            FilterWord(title: "Intense", isActive: filterIntense) {
                 withAnimation(.smooth) {
                     filterIntense.toggle()
                     cursor = 0
@@ -421,32 +417,31 @@ public struct PickerSheet: View {
     }
 }
 
-private struct PickerChip: View {
+/// A filter that combines with the others, as a word: indigo and semibold
+/// when on, muted when off. Capsule chips read as the web's tag pills.
+private struct FilterWord: View {
     let title: String
     let isActive: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
+            // Sized by an invisible semibold copy, as in `SumiSlashToggle`:
+            // the weight change alone shifted the words after it sideways.
             Text(title)
-                // Sans, not the tabular-mono face: these are words, and mono
-                // is for figures. Fixed so the label sets the chip's width
-                // rather than the other way round.
-                .font(.system(size: 11, weight: .medium))
+                .fontWeight(.semibold)
+                .hidden()
+                .overlay {
+                    Text(title)
+                        .fontWeight(isActive ? .semibold : .regular)
+                        .foregroundColor(isActive ? SumiTheme.indigo : SumiTheme.muted)
+                }
+                .font(.system(size: 12.5))
                 .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundColor(isActive ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.55))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(isActive ? SumiTheme.indigo.opacity(0.15) : Color.clear)
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(isActive ? Color.clear : SumiTheme.border, lineWidth: 1)
-                )
-                .contentShape(Capsule())
+                .fixedSize()
+                .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)
-        .animation(.snappy, value: isActive)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }

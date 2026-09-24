@@ -80,7 +80,7 @@ struct PlaybackTabSection: View {
     }
 
     var body: some View {
-    VStack(alignment: .leading, spacing: 20) {
+    VStack(alignment: .leading, spacing: 28) {
         SettingsCard(
             title: "What plays",
             description: "Which track is chosen, and what happens at the edges of an episode."
@@ -91,13 +91,9 @@ struct PlaybackTabSection: View {
             ) {
                 SumiDropdown(
                     options: ["Subtitled", "Dubbed"],
-                    selected: $subDub,
-                    minWidth: 160
+                    selected: $subDub
                 )
             }
-
-            Divider()
-                .background(SumiTheme.border)
 
             SettingField(
                 label: "Auto-skip intros",
@@ -106,18 +102,12 @@ struct PlaybackTabSection: View {
                 SumiSwitch(isOn: $autoSkipIntro)
             }
 
-            Divider()
-                .background(SumiTheme.border)
-
             SettingField(
                 label: "Play the next episode",
                 description: "Starts the next episode as the current one ends. The player's own button toggles this too."
             ) {
                 SumiSwitch(isOn: $autoPlayNext)
             }
-
-            Divider()
-                .background(SumiTheme.border)
 
             SettingField(
                 label: "Next episode card",
@@ -138,18 +128,12 @@ struct PlaybackTabSection: View {
                 SumiSwitch(isOn: $gpuUpscaling)
             }
 
-            Divider()
-                .background(SumiTheme.border)
-
             SettingField(
                 label: "Hardware decoding",
                 description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
             ) {
                 SumiSwitch(isOn: $hardwareDecoding)
             }
-
-            Divider()
-                .background(SumiTheme.border)
 
             SettingField(
                 label: "Ambient glow",
@@ -159,9 +143,6 @@ struct PlaybackTabSection: View {
             }
 
             if ambientGlow {
-                Divider()
-                    .background(SumiTheme.border)
-
                 SettingField(
                     label: "Glow in windowed mode",
                     description: "Also light the bars when the player is a window, not only in fullscreen."
@@ -181,9 +162,6 @@ struct PlaybackTabSection: View {
             ) {
                 SumiSegmentedControl(options: Self.subtitleSizes, selection: subtitleSizeBinding)
             }
-
-            Divider()
-                .background(SumiTheme.border)
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("Style")
@@ -227,9 +205,6 @@ struct PlaybackTabSection: View {
             }
 
             if keyboardDim {
-                Divider()
-                    .background(SumiTheme.border)
-
                 SettingField(
                     label: "When",
                     description: "Night only leaves the keyboard alone during the day."
@@ -241,9 +216,6 @@ struct PlaybackTabSection: View {
                 }
 
                 if keyboardDimMode == "night" {
-                    Divider()
-                        .background(SumiTheme.border)
-
                     SettingField(
                         label: "Night hours",
                         description: "Local time. The window may cross midnight."
@@ -252,12 +224,12 @@ struct PlaybackTabSection: View {
                             Text("From")
                                 .font(.system(size: 12))
                                 .foregroundColor(SumiTheme.muted)
-                            SumiDropdown(options: Self.hourOptions, selected: hourBinding($keyboardDimFrom), minWidth: 88)
+                            SumiDropdown(options: Self.hourOptions, selected: hourBinding($keyboardDimFrom))
 
                             Text("Until")
                                 .font(.system(size: 12))
                                 .foregroundColor(SumiTheme.muted)
-                            SumiDropdown(options: Self.hourOptions, selected: hourBinding($keyboardDimUntil), minWidth: 88)
+                            SumiDropdown(options: Self.hourOptions, selected: hourBinding($keyboardDimUntil))
                         }
                     }
                 }
@@ -274,9 +246,6 @@ struct PlaybackTabSection: View {
             }
 
             if interfaceSounds {
-                Divider()
-                    .background(SumiTheme.border)
-
                 SettingField(
                     label: "Sound volume",
                     description: "Relative to the system output level. These play over a running episode, so the default sits low."
@@ -304,9 +273,6 @@ struct PlaybackTabSection: View {
                     }
                 }
             }
-
-            Divider()
-                .background(SumiTheme.border)
 
             SettingField(
                 label: "Haptic feedback",

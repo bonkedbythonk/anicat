@@ -276,12 +276,6 @@ public struct HistoryView: View {
                 }
             }
         }
-        .padding(16)
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
     }
 
     /// The count goes in the dialog's title because this is the one
@@ -317,11 +311,6 @@ public struct HistoryView: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
     }
 
     /// One log line, whichever kind it is.
@@ -365,7 +354,6 @@ public struct HistoryView: View {
                 .sumiTabularMono(size: 11)
                 .foregroundColor(SumiTheme.muted)
         }
-        .padding(.horizontal, 16)
         .padding(.vertical, 11)
         .contentShape(Rectangle())
         .onTapGesture { onOpenTitle?(row.catalogId, title, .anilist) }
@@ -390,7 +378,6 @@ public struct HistoryView: View {
                 .sumiTabularMono(size: 11.5)
                 .foregroundColor(SumiTheme.muted)
         }
-        .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
 

@@ -64,15 +64,18 @@ struct HomeSectionView: View {
 
                         Spacer()
 
-                        Button("Pick for me") { showPicker = true }
-                            .sumiSecondaryButton()
-
-                        // Reorders/hides the configurable rows below. Shown
-                        // even signed-out, same as HomeView.tsx: Trending,
-                        // Newly Releasing and Seasonal all work without a
-                        // token, only Planning needs one.
-                        Button("Customize") { showHomeCustomize = true }
-                            .sumiSecondaryButton()
+                        // Words, like the detail page's secondary actions:
+                        // two boxed buttons were the last boxes left on the
+                        // home screen once the queue lost its frame.
+                        HStack(spacing: 14) {
+                            headerAction("Pick for me") { showPicker = true }
+                            Rectangle().fill(SumiTheme.border).frame(width: 1, height: 14)
+                            // Reorders/hides the configurable rows below.
+                            // Shown even signed-out: Trending, Newly
+                            // releasing and Seasonal all work without a
+                            // token, only Planning needs one.
+                            headerAction("Customize") { showHomeCustomize = true }
+                        }
                     }
 
                     // Up Next Queue Container
@@ -142,12 +145,6 @@ struct HomeSectionView: View {
                     }
                 }
 
-                // Watching is fixed, not configurable — same split as
-                // HomeView.tsx (queue + Watching are the front page; the rest
-                // are rows the user can reorder or hide).
-                HomeShelf(model: model, title: "Watching", shelfKey: "watching", items: \.watchingItems,
-                          skeleton: .whenSignedInAndLoading, namespace: namespace, onOpenDetail: onOpenDetail)
-
                 // Configurable rows, in the user's saved order; hidden ones
                 // are skipped entirely rather than shown collapsed.
                 ForEach(model.homeRowConfig.filter(\.visible)) { row in
@@ -182,6 +179,16 @@ struct HomeSectionView: View {
             )
         }
         }
+    }
+
+    private func headerAction(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(SumiTheme.foreground)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
     }
 
     /// One configurable row, by id. Skeletons preserve the shelf layout
@@ -258,6 +265,20 @@ struct HomeShelf: View {
         }
     }
 
+    private func card(_ item: MediaCard.Item, key: String) -> some View {
+        MediaCard(
+            item: item,
+            namespace: model.openingDetailSourceKey == "\(key):\(item.id)" ? namespace : nil,
+            onPrefetch: {
+                model.prefetchDetail(id: item.id, isManga: item.isManga)
+            }
+        ) {
+            onOpenDetail(item.id, item.title, item.coverImageURL, item.isManga, "\(key):\(item.id)")
+        }
+        .equatable()
+        .frame(width: 180)
+    }
+
     private func shelf(items: [MediaCard.Item]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .bottom) {
@@ -268,7 +289,7 @@ struct HomeShelf: View {
 
                 Spacer()
 
-                Text("\(items.count) shows")
+                Text("\(items.count) show\(items.count == 1 ? "" : "s")")
                     .sumiTabularMono(size: 11.5)
                     .foregroundColor(SumiTheme.muted)
             }
@@ -276,17 +297,7 @@ struct HomeShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(items) { item in
-                        MediaCard(
-                            item: item,
-                            namespace: model.openingDetailSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil,
-                            onPrefetch: {
-                                model.prefetchDetail(id: item.id, isManga: item.isManga)
-                            }
-                        ) {
-                            onOpenDetail(item.id, item.title, item.coverImageURL, item.isManga, "\(shelfKey):\(item.id)")
-                        }
-                        .equatable()
-                        .frame(width: 180)
+                        card(item, key: shelfKey)
                     }
                 }
                 .padding(.vertical, 4)

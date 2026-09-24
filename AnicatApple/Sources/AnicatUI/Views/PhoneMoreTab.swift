@@ -328,9 +328,7 @@ private struct HistoryRowView: View {
 
 // MARK: - Stats and Downloads
 
-/// The Mac's `StatsView` fits a phone once its five summary tiles wrap
-/// (done in the view itself under `#if os(iOS)`); the heat map already
-/// scrolls sideways. Wrapped here only to hand it the model's closures.
+/// The Mac's `StatsView`, wrapped here only to hand it the model's closures.
 struct PhoneStatsView: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool

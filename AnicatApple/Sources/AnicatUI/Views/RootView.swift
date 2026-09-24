@@ -8,17 +8,6 @@ public struct RootView: View {
     @Bindable public var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotionForPushBack
 
-    /// How far above the window's bottom edge the resolving card sits.
-    /// Clear of the mini-player, which is parked in that corner, and above
-    /// the full-size player's bottom bar: at a flat 24pt a card raised
-    /// during an auto-next landed on the transport controls. The bar's
-    /// minimum height, since its real height follows a letterbox this view
-    /// does not measure; a deeper letterbox makes the bar taller than this.
-    private var cornerStackBottomInset: CGFloat {
-        guard model.activeStreamURL != nil else { return 24 }
-        if model.isPlayerMinimized { return 24 + PlayerView.miniSize.height + 12 }
-        return PlayerView.minBottomBarHeight + 12
-    }
     // Shared between every card grid and the detail page so tapping a card
     // grows its poster into the detail page's poster rather than crossfading
     // two separate images. Which card (if any) actually gets tagged with
@@ -100,6 +89,9 @@ public struct RootView: View {
                     // watermark instead, the switch was reported as broken by
                     // someone who had no way to tell it was never there.
                     switchModeLocked: !model.cinemaAvailable,
+                    // Signed out there is no Watching list to judge by, and
+                    // the calendar's global view is the whole point of it.
+                    showsSchedule: !model.isSignedIn || model.watchingItems.contains { $0.isAiring },
                     onSwitchMode: {
                         guard model.cinemaAvailable else {
                             model.clearPersonPages()
@@ -306,33 +298,6 @@ public struct RootView: View {
                     .transition(.opacity)
             }
 
-            // A cast member's page, over the detail page it was opened from.
-            if let personId = model.openCinemaPersonId {
-                CinemaPersonView(
-                    model: model,
-                    personId: personId,
-                    fallbackName: model.openCinemaPersonName,
-                    onDismiss: { model.openCinemaPersonId = nil }
-                )
-                .frame(maxWidth: 720, maxHeight: 640)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(SumiTheme.border, lineWidth: 1))
-                .shadow(color: .black.opacity(0.4), radius: 30, y: 10)
-                .padding(40)
-                .sumiTransition(.opacity.combined(with: .scale(scale: 0.97)))
-                .zIndex(45)
-            }
-
-            // Keyboard shortcuts overlay. Above palette and modal views.
-            if model.shortcutsOpen {
-                KeyboardShortcutsOverlay(mode: model.appMode) {
-                    withAnimation(.snappy) {
-                        model.shortcutsOpen = false
-                    }
-                }
-                .zIndex(60)
-                .transition(.opacity)
-            }
 
 
             // In-App Video Player Overlay — always mounted once a stream is
@@ -479,17 +444,14 @@ public struct RootView: View {
                 .zIndex(35)
             }
 
-            // Error Toast
+            // A line across the top of the page, not a card dropping in with
+            // an amber border and a shadow: that read as a web toast.
             if let error = model.errorMessage {
-                VStack {
+                VStack(spacing: 0) {
                     HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(SumiTheme.warning)
-                            .font(.system(size: 14))
-
                         Text(error)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(SumiTheme.foreground)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundColor(SumiTheme.warning)
                             .lineLimit(2)
                             .sumiTextSelectable()
 
@@ -501,12 +463,9 @@ public struct RootView: View {
                         if let retry = model.errorRetryAction {
                             Button(action: retry) {
                                 Text("Retry")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.system(size: 12.5, weight: .semibold))
                                     .foregroundColor(SumiTheme.indigo)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 4)
-                                    .background(SumiTheme.indigo.opacity(0.12))
-                                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.sumiPressable)
                         }
@@ -517,29 +476,24 @@ public struct RootView: View {
                                 model.errorRetryAction = nil
                             }
                         }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 11, weight: .bold))
+                            Text("Dismiss")
+                                .font(.system(size: 12.5))
                                 .foregroundColor(SumiTheme.muted)
-                                .padding(4)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.sumiPressable)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(SumiTheme.card)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                            .stroke(SumiTheme.warning.opacity(0.5), lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(0.4), radius: 12, y: 4)
-                    .padding(.top, 44)
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 9)
+                    .background(SumiTheme.background)
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(SumiTheme.border).frame(height: 1)
+                    }
+                    .padding(.top, 28)
 
                     Spacer()
                 }
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(.opacity)
                 .zIndex(60)
             }
 
@@ -569,7 +523,7 @@ public struct RootView: View {
             // used to have no ceiling at all — a stalled search or a dead
             // swarm hung here for as long as the viewer was willing to wait,
             // with no indication anything was even happening or a way out
-            // short of force-quitting. A small corner toast, not a centered
+            // short of force-quitting. A line across the top, not a centered
             // modal with a full-screen scrim: a modal in the middle of the
             // screen for something this routine (every single play press
             // shows it, if only for a moment) read as far more alarming than
@@ -578,8 +532,7 @@ public struct RootView: View {
             // zIndex 70 over the full-size player and its event catcher, and
             // it should be there only while it has something to show.
             if model.resolveStartedAt != nil {
-                VStack(alignment: .trailing, spacing: 10) {
-                    Spacer()
+                VStack(spacing: 0) {
                     // Not while the player itself is up for the wait: the status
             // line sits under the card there and this would be the same
             // words twice.
@@ -590,13 +543,13 @@ public struct RootView: View {
                             status: model.playerController.resolveStatus,
                             onCancel: { model.cancelResolve() }
                         )
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.opacity)
                     }
+                    Spacer()
                 }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.horizontal, 24)
-                .padding(.bottom, cornerStackBottomInset)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .frame(maxWidth: .infinity)
+                .padding(.top, 28)
+                .transition(.opacity)
                 .zIndex(70)
             }
         }
@@ -609,7 +562,25 @@ public struct RootView: View {
         .animation(.smooth, value: model.isAniListDown)
         .animation(.snappy, value: model.isLoading)
         .animation(.snappy, value: model.paletteOpen)
-        .animation(.snappy, value: model.shortcutsOpen)
+        // Real sheets rather than cards floating over the window with a
+        // scrim, a shadow and a round X: those read as a web modal.
+        .sheet(isPresented: $model.shortcutsOpen) {
+            KeyboardShortcutsOverlay(mode: model.appMode) { model.shortcutsOpen = false }
+        }
+        .sheet(isPresented: Binding(
+            get: { model.openCinemaPersonId != nil },
+            set: { if !$0 { model.openCinemaPersonId = nil } }
+        )) {
+            if let personId = model.openCinemaPersonId {
+                CinemaPersonView(
+                    model: model,
+                    personId: personId,
+                    fallbackName: model.openCinemaPersonName,
+                    onDismiss: { model.openCinemaPersonId = nil }
+                )
+                .frame(width: 720, height: 640)
+            }
+        }
 
         .globalKeyboardShortcuts(model: model)
         // `ContinuityManager` broadcasts Handoff activities on every page/time

@@ -4,11 +4,12 @@ import AnicatCoreKit
 /// The Related tab's Timeline: the title and everything around it in the
 /// order someone would watch them, grouped by year.
 ///
-/// `FfiRelation` carries no start date, episode count or list entry, so the
-/// years and the badges come from whatever detail snapshots are already on
-/// disk (see `DetailCache.peekFacts`). A relation the viewer has never
-/// opened simply has none, which is why the ordering leans on the relation
-/// type and not on dates — see `WatchOrder`.
+/// Built from the engine's franchise walk (`AppModel.franchise`), which
+/// follows the prequel/sequel line to both ends with start dates. The
+/// title's own relations are one step deep -- from Sword Art Online they
+/// reached SAO II and stopped short of Alicization -- so they are only the
+/// fallback when the walk fails, with years from whatever detail snapshots
+/// are on disk (`DetailCache.peekFacts`).
 struct WatchOrderTimeline: View {
     let details: HeroBanner.Details
     let relations: [MediaDetailView.RelationItem]
@@ -50,9 +51,65 @@ struct WatchOrderTimeline: View {
         // (it reads the array in its own body) and the timeline kept
         // showing the current title by itself.
         .task(id: "\(details.id)-\(relations.count)") {
+            if details.mediaCatalog == .anilist,
+               let franchise = await AppModel.shared?.franchise(id: details.id),
+               let entries = Self.entries(details: details, franchise: franchise) {
+                groups = WatchOrder.grouped(entries)
+                return
+            }
             let entries = await Self.entries(details: details, relations: relations)
             groups = WatchOrder.grouped(entries)
         }
+    }
+
+    /// The walk's entries in watch order. The main line carries no relation
+    /// type of its own, so each entry is placed before or after the open
+    /// title by start date, which is what `WatchOrder.sort` ranks on. Nil if
+    /// the walk did not include the open title, which would leave the rail
+    /// with no "you are here".
+    private static func entries(
+        details: HeroBanner.Details,
+        franchise: [FfiFranchiseEntry]
+    ) -> [WatchOrder.Entry]? {
+        guard let here = franchise.first(where: { $0.catalogId == details.id }) else { return nil }
+        func started(_ entry: FfiFranchiseEntry) -> Int? {
+            entry.year.map { Int($0) * 12 + Int(entry.month ?? 0) }
+        }
+        let hereStarted = started(here)
+        let current = WatchOrder.Entry(
+            id: details.id,
+            title: details.title,
+            relationType: nil,
+            format: details.format,
+            coverURL: details.coverURL,
+            year: here.year.map(Int.init) ?? details.year,
+            season: here.season,
+            episodeCount: details.episodeCount,
+            listStatus: details.listStatus,
+            isCurrent: true
+        )
+        let others = franchise.filter { $0.catalogId != details.id }.map { entry -> WatchOrder.Entry in
+            let placed: String
+            if let aside = entry.aside {
+                placed = aside
+            } else if let start = started(entry), let hereStart = hereStarted, start < hereStart {
+                placed = "PREQUEL"
+            } else {
+                placed = "SEQUEL"
+            }
+            return WatchOrder.Entry(
+                id: entry.catalogId,
+                title: entry.title,
+                relationType: placed,
+                format: entry.format,
+                coverURL: URL(string: entry.coverImage),
+                year: entry.year.map(Int.init),
+                season: entry.season,
+                episodeCount: entry.episodes.map(Int.init),
+                listStatus: entry.listStatus
+            )
+        }
+        return WatchOrder.sort(relations: others, current: current)
     }
 
     private static func entries(
@@ -143,7 +200,7 @@ struct WatchOrderRow: View {
                                 .foregroundColor(SumiTheme.muted.opacity(0.8))
                         }
                         if let status = entry.listStatus {
-                            Text(Self.sentenceCase(status))
+                            Text(MediaCard.displayRelation(status))
                                 .sumiTabularMono(size: 9.5)
                                 .foregroundColor(SumiTheme.indigo.opacity(0.8))
                         }
@@ -167,11 +224,6 @@ struct WatchOrderRow: View {
     private var badgeLabel: String {
         if entry.isCurrent { return "You are here" }
         guard let type = entry.relationType else { return "Related" }
-        return Self.sentenceCase(type)
-    }
-
-    private static func sentenceCase(_ raw: String) -> String {
-        let words = raw.replacingOccurrences(of: "_", with: " ").lowercased()
-        return words.prefix(1).uppercased() + words.dropFirst()
+        return MediaCard.displayRelation(type)
     }
 }

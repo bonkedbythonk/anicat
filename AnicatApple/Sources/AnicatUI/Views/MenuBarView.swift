@@ -18,7 +18,7 @@ public struct MenuBarView: View {
     }
 
     /// One entry of the viewer's own queue, for the list under the resume
-    /// card. Its own type rather than `UpNextQueueView.QueueEntry` so the
+    /// row. Its own type rather than `UpNextQueueView.QueueEntry` so the
     /// popover carries only what it draws.
     public struct UpNextItem: Identifiable, Sendable {
         public let id: Int64
@@ -35,7 +35,7 @@ public struct MenuBarView: View {
     }
 
     /// What the viewer picked from the sleep-timer row.
-    public enum SleepChoice: Equatable, Sendable {
+    public enum SleepChoice: Hashable, Sendable {
         case off
         case afterEpisode
         case minutes(Int)
@@ -99,24 +99,6 @@ public struct MenuBarView: View {
         self.onQuit = onQuit
     }
 
-    @ViewBuilder
-    private func sleepChoice(_ label: String, _ choice: SleepChoice, armed: Bool) -> some View {
-        Button {
-            onSetSleepTimer(choice)
-        } label: {
-            Text(label)
-                .font(.system(size: 10.5, weight: armed ? .semibold : .regular))
-                .foregroundColor(armed ? SumiTheme.background : SumiTheme.muted)
-                .padding(.horizontal, 8)
-                .frame(height: 22)
-                .background(armed ? SumiTheme.indigo : SumiTheme.card)
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(armed ? Color.clear : SumiTheme.border, lineWidth: 1))
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.sumiPressable)
-    }
-
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
@@ -149,16 +131,13 @@ public struct MenuBarView: View {
                         onOpenMainApp()
                     }) {
                         HStack(spacing: 12) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                    .fill(SumiTheme.background)
-                                    .frame(width: 44, height: 32)
-
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(SumiTheme.indigo)
+                            CachedAsyncImage(url: lastWatchedThumbnailURL, maxPixelSize: 96) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                SumiTheme.card
                             }
-                            .frame(width: 44, height: 32)
+                            .frame(width: 32, height: 46)
+                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(title)
@@ -171,18 +150,8 @@ public struct MenuBarView: View {
                             }
 
                             Spacer()
-
-                            Image(systemName: "arrow.right.circle.fill")
-                                .font(.system(size: 15))
-                                .foregroundColor(SumiTheme.indigo)
                         }
-                        .padding(8)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.sumiPressable)
 
@@ -221,9 +190,6 @@ public struct MenuBarView: View {
                                         .foregroundColor(SumiTheme.muted)
                                 }
                                 Spacer(minLength: 6)
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(SumiTheme.muted)
                             }
                             .padding(.vertical, 3)
                             .contentShape(Rectangle())
@@ -231,7 +197,6 @@ public struct MenuBarView: View {
                         .buttonStyle(.sumiPressable)
                     }
                 }
-                .padding(.horizontal, 12)
                 .padding(.bottom, 10)
             }
 
@@ -251,14 +216,23 @@ public struct MenuBarView: View {
                         }
                     }
 
-                    HStack(spacing: 6) {
-                        sleepChoice("Off", .off, armed: sleepTimerCaption == nil)
-                        sleepChoice("End of episode", .afterEpisode, armed: sleepTimerCaption == "After this episode")
-                        sleepChoice("30m", .minutes(30), armed: false)
-                        sleepChoice("60m", .minutes(60), armed: false)
+                    // Nil while a 30m or 60m timer runs: the caption is a
+                    // countdown then, and marking either word chosen would
+                    // stop a second tap from re-arming it.
+                    SumiSlashToggle(
+                        [
+                            (SleepChoice?.some(.off), "Off"),
+                            (.afterEpisode, "End of episode"),
+                            (.minutes(30), "30m"),
+                            (.minutes(60), "60m"),
+                        ],
+                        selection: sleepTimerCaption == nil ? .off
+                            : sleepTimerCaption == "After this episode" ? .afterEpisode
+                            : nil
+                    ) { choice in
+                        if let choice { onSetSleepTimer(choice) }
                     }
                 }
-                .padding(.horizontal, 12)
                 .padding(.bottom, 10)
             }
 
@@ -305,8 +279,9 @@ public struct MenuBarView: View {
                 }
             }
 
-            Divider()
-                .background(SumiTheme.border)
+            Rectangle()
+                .fill(SumiTheme.border)
+                .frame(height: 1)
 
             // Bottom Actions. Three equal-width slots (rather than one
             // `Spacer()` either side of the gear icon) so the gear actually

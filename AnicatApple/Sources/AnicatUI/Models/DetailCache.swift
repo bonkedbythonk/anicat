@@ -136,6 +136,17 @@ enum DetailCache {
         return peeked.details.bannerURL
     }
 
+    /// Episode `number`'s title and still, for an Up Next row. A title that is
+    /// only "Episode 7" is dropped: the row already says which episode.
+    static func peekEpisode(id: Int64, number: Int) -> (title: String?, stillURL: URL?)? {
+        guard let data = try? Data(contentsOf: fileURL(id: id, isManga: false)),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
+              let row = snapshot.episodes.first(where: { $0.number == number }) else { return nil }
+        let title = row.title.trimmingCharacters(in: .whitespaces)
+        let isGeneric = title.isEmpty || title.caseInsensitiveCompare("Episode \(number)") == .orderedSame
+        return (isGeneric ? nil : title, row.thumbnailURL)
+    }
+
     /// Whether `episode` exists yet, as far as the snapshot knows: the row's
     /// own `isAired` when the list has the row, the episode count when it
     /// does not, and `nil` when there is no snapshot to ask. `nil` is a

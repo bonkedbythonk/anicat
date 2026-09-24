@@ -81,7 +81,7 @@ public struct WeekStrip: View {
                     .tracking(-0.2)
                     .foregroundColor(SumiTheme.foreground)
 
-                HStack(alignment: .top, spacing: SumiTheme.spaceSm) {
+                HStack(alignment: .top, spacing: 0) {
                     ForEach(days) { day in
                         dayColumn(day)
                     }
@@ -114,12 +114,13 @@ public struct WeekStrip: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(day.isToday ? SumiTheme.card.opacity(0.6) : SumiTheme.card.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                .stroke(day.isToday ? SumiTheme.indigo.opacity(0.6) : SumiTheme.border, lineWidth: 1)
-        )
+        .overlay(alignment: .leading) {
+            if day.id > 0 {
+                Rectangle()
+                    .fill(SumiTheme.border)
+                    .frame(width: 1)
+            }
+        }
     }
 
     private struct ShowItemView: View {

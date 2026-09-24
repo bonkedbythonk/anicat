@@ -334,7 +334,9 @@ struct PlayerBottomBar: View {
 
                 // Upscaling (Anime4K)
                 Button(action: { controller.toggleAnime4K() }) {
-                    Image(systemName: "sparkles")
+                    // Filters, which is what Anime4K is: a chain of shaders.
+                    // "sparkles" now reads as an AI feature.
+                    Image(systemName: "camera.filters")
                     .font(.system(size: 14))
                     .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
                     .frame(width: 40, height: 40)

@@ -22,7 +22,7 @@ struct SharingTabSection: View {
     @State private var pairedCount = RemoteHost.pairedDevices().count
 
     var body: some View {
-    VStack(alignment: .leading, spacing: 20) {
+    VStack(alignment: .leading, spacing: 28) {
         SettingsCard(title: "Notifications") {
             SettingField(
                 label: "New episode alerts",

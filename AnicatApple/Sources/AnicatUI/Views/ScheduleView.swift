@@ -57,7 +57,6 @@ public struct ScheduleView: View {
     /// Owned here rather than in `CalendarView` so switching to the week tab
     /// and back returns to the month that was being looked at.
     @State private var calendarMonth: Date = Date()
-    @Namespace private var toggleNamespace
 
     // Cached result of the O(n log n) group+sort — rebuilt only when `items`
     // or `watchingOnly` changes, not on every body re-evaluation.
@@ -97,10 +96,10 @@ public struct ScheduleView: View {
 
     /// The filter and the list it produces change in one transaction. The
     /// list used to be rebuilt from an `onChange` on the next update, outside
-    /// the toggle's `withAnimation`, so the pill slid while every card
-    /// popped in place. Cards keep their identity across the filter, so
-    /// inside the transaction a survivor slides to its new slot and the
-    /// section it left collapses under it.
+    /// the toggle's `withAnimation`, so every row popped in place. Rows keep
+    /// their identity across the filter, so inside the transaction a
+    /// survivor slides to its new slot and the section it left collapses
+    /// under it.
     private func setWatchingOnly(_ value: Bool) {
         withAnimation(.sumi(.page)) {
             watchingOnly = value
@@ -117,81 +116,14 @@ public struct ScheduleView: View {
         GeometryReader { viewport in
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: SumiTheme.spaceLg) {
-                // Header Row
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Airing Schedule")
-                            .font(.sumiHeading(size: 28, weight: .bold))
-                            .foregroundColor(SumiTheme.foreground)
-                        Text(watchingOnly ? "\(groupedItems.reduce(0) { $0 + $1.items.count }) shows in your watchlist" : "Keep track of the latest releases and upcoming episodes")
-                            .font(.system(size: 14))
-                            .foregroundColor(SumiTheme.muted)
-                            .contentTransition(.numericText())
-                            .animation(.sumiSpring, value: watchingOnly)
-                    }
-
-                    Spacer()
-
-                    // Global vs Watching Only Toggle
-                    HStack(spacing: 2) {
-                        Button(action: {
-                            if watchingOnly {
-                                SumiHaptics.selection()
-                                setWatchingOnly(false)
-                            }
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "globe")
-                                Text("Global")
-                            }
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundColor(!watchingOnly ? SumiTheme.foreground : SumiTheme.muted)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background {
-                                if !watchingOnly {
-                                    RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                        .fill(SumiTheme.card)
-                                        .matchedGeometryEffect(id: "scheduleTogglePill", in: toggleNamespace)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.sumiPressable)
-
-                        Button(action: {
-                            if !watchingOnly {
-                                SumiHaptics.selection()
-                                setWatchingOnly(true)
-                            }
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "tv")
-                                Text("Watching")
-                            }
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundColor(watchingOnly ? SumiTheme.foreground : SumiTheme.muted)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background {
-                                if watchingOnly {
-                                    RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                                        .fill(SumiTheme.card)
-                                        .matchedGeometryEffect(id: "scheduleTogglePill", in: toggleNamespace)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.sumiPressable)
-                    }
-                    .animation(.sumiSpring, value: watchingOnly)
-                    .padding(3)
-                    .background(SumiTheme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
+                SumiPageHeader(
+                    title: "Schedule",
+                    subtitle: "\(groupedItems.reduce(0) { $0 + $1.items.count }) airing this week"
+                ) {
+                    SumiSlashToggle(
+                        [("global", "All"), ("watching", "Watching")],
+                        selection: watchingOnly ? "watching" : "global"
+                    ) { setWatchingOnly($0 == "watching") }
                 }
                 .padding(.horizontal, SumiTheme.spaceMd)
 
@@ -266,18 +198,22 @@ private struct ScheduleDaySection: View {
                 .foregroundColor(SumiTheme.indigo)
                 .padding(.horizontal, SumiTheme.spaceMd)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
+            VStack(spacing: 0) {
                 ForEach(group.items) { item in
-                    ScheduleItemCard(
-                        item: item,
-                        timeFormat: timeFormat,
-                        onSelect: { onSelectItem(item) }
-                    )
-                    // A card that leaves the filter shrinks out where it
-                    // stood; one that joins grows in. Without a transition a
-                    // removed card vanished on the first frame while its
-                    // neighbours were still travelling into its space.
-                    .sumiTransition(.opacity.combined(with: .scale(scale: 0.94)))
+                    VStack(spacing: 0) {
+                        ScheduleItemRow(
+                            item: item,
+                            timeFormat: timeFormat,
+                            onSelect: { onSelectItem(item) }
+                        )
+                        Rectangle()
+                            .fill(SumiTheme.border)
+                            .frame(height: 1)
+                    }
+                    // Without a transition a removed row vanished on the
+                    // first frame while its neighbours were still travelling
+                    // into its space.
+                    .sumiTransition(.opacity)
                 }
             }
             .padding(.horizontal, SumiTheme.spaceMd)
@@ -285,7 +221,7 @@ private struct ScheduleDaySection: View {
     }
 }
 
-private struct ScheduleItemCard: View {
+private struct ScheduleItemRow: View {
     let item: ScheduleView.ScheduleItem
     let timeFormat: String
     let onSelect: () -> Void
@@ -327,13 +263,7 @@ private struct ScheduleItemCard: View {
                 }
                 Spacer()
             }
-            .padding(8)
-            .background(SumiTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-            .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)

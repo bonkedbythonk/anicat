@@ -1,26 +1,20 @@
 import SwiftUI
 
+/// A headed list, not a boxed card. The hairlines are drawn here, between
+/// whatever rows the content resolves to, conditional rows included:
+/// hand-placed `Divider()`s had to be paired with every `if`, and the
+/// Presence and Devices groups had none at all.
 struct SettingsCard<Content: View>: View {
     let title: String
-    var badge: String? = nil
     var description: String? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header Bar
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(SumiTheme.foreground)
-
-                    if let badge {
-                        Text(badge)
-                            .font(.system(size: 11).smallCaps())
-                            .foregroundColor(SumiTheme.muted)
-                    }
-                }
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(SumiTheme.muted)
 
                 if let description {
                     Text(description)
@@ -29,27 +23,26 @@ struct SettingsCard<Content: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(Color.white.opacity(0.02))
+            .padding(.bottom, 4)
 
-            Rectangle()
-                .fill(SumiTheme.border)
-                .frame(height: 1)
-
-            // Body
-            VStack(alignment: .leading, spacing: 14) {
-                content()
+            Group(subviews: content()) { rows in
+                ForEach(rows) { row in
+                    if row.id != rows.first?.id {
+                        SettingsHairline()
+                    }
+                    row.padding(.vertical, 10)
+                }
             }
-            .padding(20)
         }
-        .background(SumiTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct SettingsHairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(SumiTheme.border)
+            .frame(height: 1)
     }
 }
 
@@ -234,22 +227,31 @@ struct SumiSwitch: View {
     }
 }
 
+/// A choice shown as its current value with the menu's own caret, the way
+/// the detail page shows a list status. It was a system pop-up button, grey
+/// stock chrome on a Sumi page.
 struct SumiDropdown: View {
     let options: [String]
     @Binding var selected: String
-    var minWidth: CGFloat = 160
 
     var body: some View {
-        Picker("", selection: $selected) {
-            ForEach(options, id: \.self) { Text($0).tag($0) }
+        Menu {
+            ForEach(options, id: \.self) { option in
+                Button {
+                    selected = option
+                } label: {
+                    if option == selected {
+                        Label(option, systemImage: "checkmark")
+                    } else {
+                        Text(option)
+                    }
+                }
+            }
+        } label: {
+            Text(selected)
+                .font(.system(size: 13, weight: .medium))
         }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .tint(SumiTheme.indigo)
-        .frame(minWidth: minWidth)
-        // A menu picker is horizontally flexible on macOS; unfixed it splits
-        // the row with `SettingField`'s `Spacer` instead of sizing to its
-        // label.
-        .fixedSize(horizontal: true, vertical: false)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 }

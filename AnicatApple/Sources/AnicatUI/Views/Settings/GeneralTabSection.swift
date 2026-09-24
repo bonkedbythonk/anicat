@@ -15,7 +15,7 @@ struct GeneralTabSection: View {
     @State private var themeStore = ThemeStore.shared
 
     var body: some View {
-    VStack(alignment: .leading, spacing: 20) {
+    VStack(alignment: .leading, spacing: 28) {
         SettingsCard(title: "Appearance") {
             SettingField(
                 label: "Theme",
@@ -28,9 +28,6 @@ struct GeneralTabSection: View {
             // OLED has no light half, so it gets no appearance control at all
             // rather than one whose Light quietly stays dark.
             if themeStore.skin.hasLight {
-                Divider()
-                    .background(SumiTheme.border)
-
                 SettingField(
                     label: "Follow system appearance",
                     description: "Light or dark to match macOS. Turning this off lands on whichever side the system was already showing, so nothing changes colour until you pick."
@@ -46,9 +43,6 @@ struct GeneralTabSection: View {
                 }
 
                 if themeStore.appearance != .system {
-                    Divider()
-                        .background(SumiTheme.border)
-
                     SettingField(
                         label: "Appearance",
                         description: "Which half of the skin to draw, regardless of macOS."
@@ -64,9 +58,6 @@ struct GeneralTabSection: View {
                 }
             }
 
-            Divider()
-                .background(SumiTheme.border)
-
             SettingField(
                 label: "Poster accent",
                 description: "Tint the accent to the cover of the title you have open. Off keeps the skin's own colour everywhere."
@@ -74,17 +65,13 @@ struct GeneralTabSection: View {
                 SumiSwitch(isOn: $posterAccentEnabled)
             }
 
-            Divider()
-                .background(SumiTheme.border)
-
             SettingField(
                 label: "Time format",
                 description: "How dates and times should be displayed."
             ) {
                 SumiDropdown(
                     options: ["24-hour", "12-hour (AM/PM)"],
-                    selected: $selectedTimeFormat,
-                    minWidth: 160
+                    selected: $selectedTimeFormat
                 )
             }
         }

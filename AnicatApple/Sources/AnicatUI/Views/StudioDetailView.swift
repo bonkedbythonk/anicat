@@ -43,7 +43,7 @@ struct StudioDetailView: View {
                 }
             } else {
                 SumiEmptyState(
-                    headline: "No Works Listed",
+                    headline: "No works listed",
                     detail: "AniList has no titles credited to this studio."
                 )
             }

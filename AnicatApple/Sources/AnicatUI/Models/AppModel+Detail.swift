@@ -434,6 +434,7 @@ extension AppModel {
                 activeDetailExtrasTask = Task { [weak self, weak engine] in
                     guard let self, let engine, !Task.isCancelled else { return }
                     if needsCharacters {
+                        defer { if !Task.isCancelled { self.castSettledId = id } }
                         if let chars = try? await engine.mediaCharacters(catalogId: id) {
                             guard !Task.isCancelled else { return }
                             let mapped = chars.map { c in

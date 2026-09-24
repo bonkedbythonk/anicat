@@ -102,6 +102,15 @@ public struct MediaCard: View, Equatable {
     /// the whole string gave "Tv short" and "Ova". The initialisms are named
     /// rather than guessed by length: "any word of three letters" also kept
     /// `ONE_SHOT` as "ONE Shot".
+    /// AniList's relation types (`SIDE_STORY`, `SPIN_OFF`) as words. Printed
+    /// raw, the Related tab showed "SIDE STORY" in capitals after the rest of
+    /// the app had moved to sentence case.
+    static func displayRelation(_ raw: String) -> String {
+        if raw == "SPIN_OFF" { return "Spin-off" }
+        let words = raw.replacingOccurrences(of: "_", with: " ").lowercased()
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+
     static func displayFormat(_ raw: String) -> String {
         raw.split(separator: "_")
             .map { ["TV", "ONA", "OVA", "OAD"].contains($0) ? String($0) : $0.capitalized }

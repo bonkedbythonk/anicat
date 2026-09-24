@@ -19,7 +19,7 @@ struct ThreadView: View {
 
             AniListMarkdownText(thread.body, font: .system(size: 13.5))
 
-            Divider().background(SumiTheme.border)
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
 
             VStack(alignment: .leading, spacing: 12) {
                 PersonSectionLabel("Comments", trailing: "\(thread.replyCount) replies")

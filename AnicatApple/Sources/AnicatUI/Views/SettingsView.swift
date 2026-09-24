@@ -24,7 +24,6 @@ public struct SettingsView: View {
     // Tab Navigation
     @State private var selectedTab: SettingsTab = .general
     @State private var searchQuery = ""
-    @Namespace private var settingsNavNamespace
 
     // Maintenance card's "Copy debug report" feedback also renders in
     // `headerSection` above the tab rail, so it stays here rather than
@@ -125,8 +124,11 @@ public struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 24)
+            // The same gutters as every other section; at 28/24 the Settings
+            // title sat up and to the left of the other pages' titles.
+            .padding(.horizontal, 40)
+            .padding(.top, 40)
+            .padding(.bottom, 32)
         }
         .background(SumiTheme.background)
     }
@@ -194,7 +196,7 @@ public struct SettingsView: View {
         let hits = Self.searchIndex.filter {
             $0.label.lowercased().contains(needle) || $0.card.lowercased().contains(needle)
         }
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 0) {
             if hits.isEmpty {
                 Text("Nothing matches \"\(searchQuery)\".")
                     .font(.system(size: 13))
@@ -202,6 +204,9 @@ public struct SettingsView: View {
                     .padding(.vertical, 12)
             } else {
                 ForEach(hits) { hit in
+                    if hit.id != hits.first?.id {
+                        SettingsHairline()
+                    }
                     Button {
                         selectedTab = hit.tab
                         searchQuery = ""
@@ -219,14 +224,7 @@ public struct SettingsView: View {
                                 .font(.system(size: 11.5))
                                 .foregroundColor(SumiTheme.muted)
                         }
-                        .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.sumiPressable)
@@ -265,9 +263,10 @@ public struct SettingsView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(SumiTheme.card)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(SumiTheme.border, lineWidth: 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                    .stroke(SumiTheme.border, lineWidth: 1)
+            )
 
             if let copyFeedback {
                 HStack(spacing: 6) {
@@ -291,9 +290,7 @@ public struct SettingsView: View {
                 Button {
                     if selectedTab != tab {
                         SumiHaptics.selection()
-                        withAnimation(.smooth) {
-                            selectedTab = tab
-                        }
+                        selectedTab = tab
                     }
                 } label: {
                     HStack(spacing: 10) {
@@ -311,9 +308,8 @@ public struct SettingsView: View {
                     .padding(.vertical, 8)
                     .background {
                         if isActive {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(SumiTheme.foreground.opacity(0.08))
-                                .matchedGeometryEffect(id: "settingsNavHighlight", in: settingsNavNamespace)
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                                .fill(SumiTheme.foreground.opacity(0.06))
                         }
                     }
                     .contentShape(Rectangle())
@@ -321,7 +317,6 @@ public struct SettingsView: View {
                 .buttonStyle(.sumiPressable)
             }
         }
-        .animation(.snappy, value: selectedTab)
     }
 
 }

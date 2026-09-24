@@ -96,9 +96,9 @@ public struct SearchView: View {
 
     private var searchPlaceholder: String {
         switch searchType {
-        case "MANGA": return "Search manga, authors, genres..."
-        case "NOVEL": return "Search light novels, authors, genres..."
-        default: return "Search anime, studios, genres..."
+        case "MANGA": return "Search manga, authors, genres…"
+        case "NOVEL": return "Search light novels, authors, genres…"
+        default: return "Search anime, studios, genres…"
         }
     }
 
@@ -226,9 +226,9 @@ public struct SearchView: View {
     /// Same arithmetic as the grid's `.adaptive(minimum: 165)` with 20pt
     /// gaps: how many 165pt columns plus gaps fit the measured width.
     private var keyboardColumns: Int {
-        // Content is capped at 1100pt and inset 40pt each side, the same
-        // frames the grids sit in.
-        let gridWidth = min(pageWidth, 1100) - 80
+        // The page column (`SumiContentWidth`) inset 40pt each side, the
+        // same frames the grids sit in.
+        let gridWidth = SumiContentWidth.forAvailable(pageWidth) - 80
         return max(1, Int((gridWidth + 20) / (165 + 20)))
     }
 
@@ -358,8 +358,8 @@ public struct SearchView: View {
                     // disclosure toggle — a hidden panel is easy to forget is
                     // holding a filter from an earlier search. It wraps
                     // instead of staying on one line: seven dropdowns showing
-                    // their longest labels overrun the 1020pt this page
-                    // leaves inside its 1100pt cap, and an `HStack` answered
+                    // their longest labels overran the 1020pt the page's old
+                    // 1100pt cap left, and an `HStack` answered
                     // that by pushing Sort and "Clear filters" off the edge.
                     SumiWrapHStack(spacing: 8, lineSpacing: 8) {
                         SumiFilterDropdown(label: "Genre", options: Self.genreOptions, selected: $genreFilter)
@@ -575,13 +575,8 @@ public struct SearchView: View {
                         MediaGridSkeleton(count: 12)
                             .padding(.horizontal, 40)
                     } else if !searchText.isEmpty || hasActiveFilters {
-                        VStack(spacing: 8) {
-                            BreathingIcon(systemName: "questionmark.folder")
-                            Text(searchText.isEmpty ? "No titles found" : "No titles found for \"\(searchText)\"")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(SumiTheme.foreground)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 200)
+                        SumiEmptyState(headline: searchText.isEmpty ? "No titles found" : "No titles found for \"\(searchText)\"")
+                            .padding(.horizontal, 40)
                     }
                 }
                 .animation(.smooth, value: results.isEmpty)
@@ -589,8 +584,8 @@ public struct SearchView: View {
             }
             .padding(.top, 40)
             .padding(.bottom, 32)
-            .frame(maxWidth: 1100, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: SumiContentWidth.forAvailable(page.size.width), alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .onChange(of: keyboardIndex) { _, index in
             guard let index, keyboardItems.indices.contains(index) else { return }
@@ -617,30 +612,6 @@ public struct SearchView: View {
         // already sitting in `discoverItems` from startup — and flashed the
         // global loading scrim on every visit to Search for no new data.
         .onAppear { if discoverItems.isEmpty { onLoadDiscover(searchType) } }
-    }
-}
-
-/// The empty state's glyph, breathing so the panel does not read as a frozen
-/// error. Its own view so the repeating animation is torn down with the empty
-/// state instead of being left running against a `@State` on `SearchView`,
-/// which outlives it.
-private struct BreathingIcon: View {
-    let systemName: String
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var expanded = false
-
-    var body: some View {
-        Image(systemName: systemName)
-            .font(.system(size: 36))
-            .foregroundColor(SumiTheme.muted.opacity(0.4))
-            .scaleEffect(expanded ? 1.04 : 1.0)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.smooth(duration: 1.8).repeatForever(autoreverses: true)) {
-                    expanded = true
-                }
-            }
     }
 }
 

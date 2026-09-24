@@ -408,29 +408,17 @@ public struct SyosetuReaderView: View {
         }
     }
 
-    private func picker<Option: Hashable & Identifiable>(
+    private func picker<Option: Hashable>(
         _ label: String,
         selection: Binding<Option>,
         options: [Option],
-        title: @escaping (Option) -> String
+        title: (Option) -> String
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(.system(size: 12, weight: .medium)).foregroundColor(SumiTheme.foreground)
-            HStack(spacing: 4) {
-                ForEach(options) { option in
-                    Button { selection.wrappedValue = option } label: {
-                        Text(title(option))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(selection.wrappedValue == option ? SumiTheme.background : SumiTheme.muted)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(selection.wrappedValue == option ? SumiTheme.indigo : SumiTheme.card)
-                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                    }
-                    .buttonStyle(.sumiPressable)
-                }
+            SumiSlashToggle(options.map { ($0, title($0)) }, selection: selection.wrappedValue) {
+                selection.wrappedValue = $0
             }
-            .animation(reduceMotion ? nil : .snappy, value: selection.wrappedValue)
         }
     }
 

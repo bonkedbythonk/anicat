@@ -8,6 +8,7 @@ pub mod anilist;
 pub mod anizip;
 pub mod cache;
 pub mod cinema;
+pub mod franchise;
 pub mod jikan;
 pub mod recommend;
 pub mod tmdb;
@@ -398,6 +399,32 @@ impl Catalogs {
             self.cache.set(key, v, "media_detail");
         }
         Ok(result)
+    }
+
+    /// The franchise around `anilist_id` in watch-order material: every
+    /// entry on its prequel/sequel line plus the side stories off it. See
+    /// `franchise::walk`. Cached whole, so reopening the tab costs nothing.
+    pub async fn franchise(&self, anilist_id: i64) -> Result<Vec<franchise::FranchiseEntry>, String> {
+        let key = AniListCache::key("franchise", &[("id", &anilist_id.to_string())]);
+        let entries = if let Some(hit) = self.cache.get(&key).and_then(|v| serde_json::from_value::<Vec<(anilist::types::MediaItem, Option<String>)>>(v).ok()) {
+            hit.into_iter().map(|(media, aside)| franchise::FranchiseEntry { media, aside }).collect()
+        } else {
+            let walked = franchise::walk(anilist_id, |ids| async move {
+                let mut vars = HashMap::new();
+                vars.insert("ids".to_string(), serde_json::json!(ids));
+                let page: anilist::responses::PageResponse<anilist::types::MediaItem> =
+                    self.anilist.execute(anilist::queries::FRANCHISE_QUERY, vars).await?;
+                Ok(page.page.media.unwrap_or_default())
+            })
+            .await?;
+            let stored: Vec<(&anilist::types::MediaItem, &Option<String>)> =
+                walked.iter().map(|e| (&e.media, &e.aside)).collect();
+            if let Ok(v) = serde_json::to_value(&stored) {
+                self.cache.set(key, v, "media_detail");
+            }
+            walked
+        };
+        Ok(entries)
     }
 
     /// Fetches the cast and staff (characters and voice actors) for an AniList media id.
@@ -906,6 +933,21 @@ mod tests {
 
     /// Live. `cargo test --lib catalog::tests -- --ignored --nocapture`
     ///
+    /// The case the walk exists for: from season 1, the line has to reach
+    /// Alicization, a sequel of a sequel of a sequel.
+    #[tokio::test]
+    #[ignore]
+    async fn live_franchise_reaches_alicization() {
+        let entries = catalogs().franchise(11757).await.expect("franchise 11757");
+        for e in &entries {
+            let title = e.media.title.as_ref().and_then(|t| t.romaji.clone()).unwrap_or_default();
+            let year = e.media.start_date.as_ref().and_then(|d| d.year);
+            println!("{:?} {:?} {} {}", year, e.aside, e.media.format.as_deref().unwrap_or("?"), title);
+        }
+        assert!(entries.iter().any(|e| e.aside.is_none()
+            && e.media.title.as_ref().and_then(|t| t.romaji.as_deref()).is_some_and(|t| t.contains("Alicization"))));
+    }
+
     /// These exist to prove the query strings are valid against the real
     /// schema and that the responses deserialize — neither of which any
     /// offline test can check, since a misspelled field is a server-side

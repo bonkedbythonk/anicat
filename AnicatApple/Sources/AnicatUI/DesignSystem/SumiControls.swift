@@ -43,11 +43,10 @@ public extension SumiPageHeader where Trailing == EmptyView {
     }
 }
 
-/// Status filter tabs. Plain words, the active one in indigo on a 15% wash —
-/// no underline and no pill border, which is what separates this from the
-/// segmented control below.
+/// Status filter tabs as words: the chosen one in ink and semibold, the rest
+/// muted, no background. It slid an indigo wash between tabs, the motion
+/// already removed from the sidebar and Settings.
 public struct SumiTabBar: View {
-    @Namespace private var tabNamespace
     let tabs: [(key: String, label: String)]
     @Binding var selection: String
 
@@ -57,42 +56,89 @@ public struct SumiTabBar: View {
     }
 
     public var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 16) {
             ForEach(tabs, id: \.key) { tab in
                 let isSelected = selection == tab.key
                 Button {
                     if selection != tab.key {
                         SumiHaptics.selection()
-                        withAnimation(.sumiSpring) {
-                            selection = tab.key
-                        }
+                        withAnimation(.snappy) { selection = tab.key }
                     }
                 } label: {
+                    // Sized by an invisible semibold copy, as in
+                    // `SumiSlashToggle`: the weight change alone shifted
+                    // every tab after the chosen one sideways.
                     Text(tab.label)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundColor(isSelected ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.5))
-                        .padding(.horizontal, 12)
+                        .fontWeight(.semibold)
+                        .hidden()
+                        .overlay {
+                            Text(tab.label)
+                                .fontWeight(isSelected ? .semibold : .regular)
+                                .foregroundColor(isSelected ? SumiTheme.foreground : SumiTheme.muted)
+                        }
                         .padding(.vertical, 6)
-                        .background {
-                            if isSelected {
-                                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                                    .fill(SumiTheme.indigo.opacity(0.15))
-                                    .matchedGeometryEffect(id: "sumiTabBarHighlight", in: tabNamespace)
-                            }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .font(.system(size: 12.5))
+    }
+}
+
+/// Two or three choices as words, "Sub / Dub": the chosen one in ink and
+/// semibold, the rest muted. It replaced the system segmented picker, grey
+/// stock chrome that did not look like the rest of Anicat, and before that
+/// a hand-drawn row with a sliding indigo highlight, the web's toggle-group.
+public struct SumiSlashToggle<Option: Hashable>: View {
+    let options: [(Option, String)]
+    let selection: Option
+    let select: (Option) -> Void
+
+    public init(_ options: [(Option, String)], selection: Option, select: @escaping (Option) -> Void) {
+        self.options = options
+        self.selection = selection
+        self.select = select
+    }
+
+    public var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+                if index > 0 {
+                    Text("/").foregroundColor(SumiTheme.muted.opacity(0.6))
+                }
+                let isOn = option.0 == selection
+                Button {
+                    if !isOn {
+                        SumiHaptics.selection()
+                        select(option.0)
+                    }
+                } label: {
+                    // Sized by an invisible semibold copy: the weight change
+                    // alone shifted every word after the chosen one sideways
+                    // on each switch.
+                    Text(option.1)
+                        .fontWeight(.semibold)
+                        .hidden()
+                        .overlay {
+                            Text(option.1)
+                                .fontWeight(isOn ? .semibold : .regular)
+                                .foregroundColor(isOn ? SumiTheme.foreground : SumiTheme.muted)
                         }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
+                .accessibilityAddTraits(isOn ? .isSelected : [])
             }
         }
-        .animation(.sumiSpring, value: selection)
+        .font(.system(size: 12.5))
+        .fixedSize()
     }
 }
 
-/// The joined toggle used for Anime/Manga and Grid/Table. A native
-/// segmented picker. It was a hand-drawn row of buttons with an
-/// indigo highlight sliding between them, the web's tabs/toggle-group look;
-/// the system control is what a Mac app offers for one-of-a-few choices.
+/// The joined toggle used for Anime/Manga, Grid/Table and the other
+/// one-of-a-few choices, keyed by string.
 public struct SumiSegmentedControl: View {
     let options: [(key: String, label: String)]
     @Binding var selection: String
@@ -103,14 +149,9 @@ public struct SumiSegmentedControl: View {
     }
 
     public var body: some View {
-        Picker("", selection: $selection) {
-            ForEach(options, id: \.key) { option in
-                Text(option.label).tag(option.key)
-            }
+        SumiSlashToggle(options.map { ($0.key, $0.label) }, selection: selection) { key in
+            withAnimation(.snappy) { selection = key }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
     }
 }
 
@@ -204,8 +245,9 @@ public struct SumiFilterDropdown: View {
     }
 }
 
-/// A dashed-outline panel for "this list is empty". Dashed rather than solid
-/// so an empty list never reads as a card with content that failed to paint.
+/// "This list is empty" as a plain sentence where the content would be. It
+/// was a dashed drop-zone box with 80pt of padding, a web upload target that
+/// about twenty screens drew.
 public struct SumiEmptyState: View {
     let headline: String
     let detail: String?
@@ -216,23 +258,18 @@ public struct SumiEmptyState: View {
     }
 
     public var body: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(headline)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13.5, weight: .semibold))
                 .foregroundColor(SumiTheme.foreground)
             if let detail {
                 Text(detail)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12.5))
                     .foregroundColor(SumiTheme.muted)
-                    .multilineTextAlignment(.center)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 80)
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
-                .strokeBorder(SumiTheme.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
     }
 }
 
@@ -304,8 +341,10 @@ public struct SumiPosterGrid: View {
     }
 }
 
-/// The standard page container: 40pt gutters, 40/32 top and bottom, capped at
-/// 1100pt so shelves do not stretch the full width of a large window.
+/// The standard page container: 40pt gutters, 40/32 top and bottom, and the
+/// same centred column as the home page (`SumiContentWidth`). It was pinned
+/// left under a flat 1200pt cap, so in a wide window Manga and Light Novels
+/// started at a different x from Anime next to them.
 public struct SumiPage<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
@@ -323,17 +362,19 @@ public struct SumiPage<Content: View>: View {
     }
 
     public var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 20) {
-                content()
+        GeometryReader { viewport in
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 20) {
+                    content()
+                }
+                // 40pt is a window gutter; on a 402pt phone it left 322pt for
+                // the person pages' grids, one column of a 190pt-minimum grid.
+                .padding(.horizontal, Self.horizontalInset)
+                .padding(.top, 40)
+                .padding(.bottom, 32)
+                .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            // 40pt is a window gutter; on a 402pt phone it left 322pt for
-            // the person pages' grids, one column of a 190pt-minimum grid.
-            .padding(.horizontal, Self.horizontalInset)
-            .padding(.top, 40)
-            .padding(.bottom, 32)
-            .frame(maxWidth: 1200, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(SumiTheme.background)
     }

@@ -9,9 +9,11 @@ import AnicatCoreKit
 
 extension AppModel {
     /// Reconciled with `defaultHomeRows`: keeps the saved order and
-    /// visibility, drops a row id that no longer exists, and appends any
-    /// newly-added default row at the end so a stale saved config never hides
-    /// a row that didn't exist when it was written.
+    /// visibility, drops a row id that no longer exists, and inserts any
+    /// newly-added default row at its default position, so a stale saved
+    /// config never hides a row that did not exist when it was written.
+    /// Inserted, not appended: a row added at the top would otherwise drop
+    /// to the bottom of the page for everyone with a saved order.
     static func loadHomeRowConfig() -> [HomeRowConfig] {
         guard let data = UserDefaults.standard.data(forKey: homeRowsDefaultsKey),
               let saved = try? JSONDecoder().decode([HomeRowConfig].self, from: data) else {
@@ -23,8 +25,8 @@ extension AppModel {
             return HomeRowConfig(id: def.id, title: def.title, visible: row.visible)
         }
         let seen = Set(merged.map(\.id))
-        for def in defaultHomeRows where !seen.contains(def.id) {
-            merged.append(def)
+        for (index, def) in defaultHomeRows.enumerated() where !seen.contains(def.id) {
+            merged.insert(def, at: min(index, merged.count))
         }
         return merged
     }
@@ -37,13 +39,6 @@ extension AppModel {
     public func toggleHomeRow(id: String) {
         guard let index = homeRowConfig.firstIndex(where: { $0.id == id }) else { return }
         homeRowConfig[index].visible.toggle()
-        persistHomeRowConfig()
-    }
-
-    public func moveHomeRow(at index: Int, by delta: Int) {
-        let target = index + delta
-        guard homeRowConfig.indices.contains(index), homeRowConfig.indices.contains(target) else { return }
-        homeRowConfig.swapAt(index, target)
         persistHomeRowConfig()
     }
 
@@ -909,7 +904,8 @@ extension AppModel {
             // progress is the one AniList has not aired. The row said
             // "EP 12 / 12" with Resume a day before episode 12 aired.
             let awaiting = s.nextEpisode.map { progress + 1 >= Int($0) } ?? false
-            return UpNextQueueView.QueueEntry(
+            let next = awaiting ? nil : DetailCache.peekEpisode(id: s.catalogId, number: progress + 1)
+            var entry = UpNextQueueView.QueueEntry(
                 id: s.catalogId,
                 title: s.title,
                 thumbnailURL: URL(string: s.coverImage),
@@ -923,6 +919,9 @@ extension AppModel {
                 isRewatch: s.listStatus == "REPEATING",
                 bannerURL: DetailCache.peekBanner(id: s.catalogId, isManga: false)
             )
+            entry.nextEpisodeTitle = next?.title
+            entry.nextEpisodeStillURL = next?.stillURL
+            return entry
         }
         // Something playable on top: the first row is the big Resume, and
         // the menu bar and Shortcuts read `first` as "continue watching".

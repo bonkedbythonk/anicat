@@ -19,7 +19,7 @@ struct ServerPickerView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-            Divider()
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
 
             if isLoading {
                 HStack(spacing: 8) {
@@ -38,7 +38,7 @@ struct ServerPickerView: View {
                 ReleaseSortPicker(sort: $sort)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                Divider()
+                Rectangle().fill(SumiTheme.border).frame(height: 1)
                 let sorted = sort.apply(candidates)
                 ScrollView {
                     VStack(spacing: 0) {
@@ -88,7 +88,7 @@ struct ServerPickerView: View {
                             .buttonStyle(.sumiPressable)
 
                             if candidate.id != sorted.last?.id {
-                                Divider().padding(.leading, 14)
+                                Rectangle().fill(SumiTheme.border).frame(height: 1).padding(.leading, 14)
                             }
                         }
                     }

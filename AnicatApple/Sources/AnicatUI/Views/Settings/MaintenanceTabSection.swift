@@ -27,6 +27,11 @@ struct MaintenanceTabSection: View {
 
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_offline_cap_gb") private var offlineCapGb: Int = 2
+    /// Zero is "No limit", which is why the dropdown shows labels over the
+    /// stored gigabytes rather than the number itself.
+    private static let capOptions: [(gb: Int, label: String)] = [
+        (1, "1 GB"), (2, "2 GB"), (5, "5 GB"), (10, "10 GB"), (0, "No limit"),
+    ]
     // Same literal-key constraint. `AppModel.isLnoriEnabled` owns the reader
     // and the default (off).
     @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
@@ -41,7 +46,7 @@ struct MaintenanceTabSection: View {
     @State private var showsOnboardingDialog = false
 
     var body: some View {
-    VStack(alignment: .leading, spacing: 20) {
+    VStack(alignment: .leading, spacing: 28) {
         // Opt-in rather than a source picker: Syosetu carries text its
         // authors publish for free, Lnori carries publisher-owned volumes,
         // and the app must not contact the second without being told to.
@@ -69,22 +74,16 @@ struct MaintenanceTabSection: View {
                 label: "Keep at most",
                 description: "Downloaded chapters above this are removed, least recently read first. The chapter open in the reader is never removed."
             ) {
-                Picker("", selection: $offlineCapGb) {
-                    Text("1 GB").tag(1)
-                    Text("2 GB").tag(2)
-                    Text("5 GB").tag(5)
-                    Text("10 GB").tag(10)
-                    Text("No limit").tag(0)
-                }
-                .frame(maxWidth: 140)
-                .font(.system(size: 12))
+                SumiDropdown(options: Self.capOptions.map(\.label), selected: Binding(
+                    get: { Self.capOptions.first { $0.gb == offlineCapGb }?.label ?? "\(offlineCapGb) GB" },
+                    set: { label in
+                        if let gb = Self.capOptions.first(where: { $0.label == label })?.gb { offlineCapGb = gb }
+                    }
+                ))
             }
             // The engine holds the cap in memory, so a change has to be
             // handed over rather than waiting for the next launch.
             .onChange(of: offlineCapGb) { _, _ in AppModel.shared?.applyOfflineLimit() }
-
-            Divider()
-                .background(SumiTheme.border)
 
             SettingField(
                 label: "Streamed video",
@@ -126,9 +125,6 @@ struct MaintenanceTabSection: View {
                     .sumiTextSelectable()
             }
 
-            Divider()
-                .background(SumiTheme.border)
-
             SettingField(
                 label: "Check for updates",
                 description: "Asks GitHub for the latest published release. Anicat does not update itself: the button opens the release page so you can replace the app yourself."
@@ -157,14 +153,6 @@ struct MaintenanceTabSection: View {
                     }
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.02))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
         }
 
         SettingsCard(title: "Licenses", description: "Anicat is free software under the GPL, version 3.") {
@@ -235,10 +223,8 @@ struct MaintenanceTabSection: View {
             .foregroundColor(SumiTheme.muted)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.02))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
         }

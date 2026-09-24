@@ -55,15 +55,14 @@ struct CinemaPersonView: View {
         }
         .overlay(alignment: .topTrailing) {
             Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(SumiTheme.muted)
-                    .padding(8)
-                    .background(SumiTheme.card)
-                    .clipShape(Circle())
+                Text("Done")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(SumiTheme.indigo)
+                    .padding(12)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .padding(12)
+            .sumiKeyboardShortcut(.escape, modifiers: [])
         }
     }
 

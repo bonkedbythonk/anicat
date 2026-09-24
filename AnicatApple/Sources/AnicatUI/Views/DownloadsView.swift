@@ -148,7 +148,7 @@ public struct DownloadsView: View {
                 .sumiTabularMono(size: 10.5)
                 .foregroundColor(SumiTheme.muted)
         }
-        .padding(.top, 4)
+        .padding(.vertical, 4)
     }
 
     /// What the list's `.animation(value:)` watches. `LibraryDownload` is
@@ -182,14 +182,11 @@ public struct DownloadsView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 16) {
                         ForEach(grouped(shown), id: \.0) { title, rows in
-                            VStack(spacing: 8) {
+                            VStack(spacing: 0) {
                                 groupHeader(title, count: rows.count, unit: "episode")
                                 ForEach(rows) { item in
                                     DownloadRow(item: item, onPlay: onPlay, onRemove: onRemove)
-                                        .transition(.asymmetric(
-                                            insertion: .opacity,
-                                            removal: .scale(scale: 0.96).combined(with: .opacity)
-                                        ))
+                                        .transition(.opacity)
                                 }
                             }
                         }
@@ -217,7 +214,7 @@ public struct DownloadsView: View {
         } else {
             VStack(alignment: .leading, spacing: 16) {
                 ForEach(groupedChapters, id: \.0) { title, rows in
-                VStack(spacing: 8) {
+                VStack(spacing: 0) {
                 groupHeader(title, count: rows.count, unit: "item")
                 ForEach(rows, id: \.chapterId) { chapter in
                     // Built before the view rather than inside the `Text`
@@ -230,6 +227,7 @@ public struct DownloadsView: View {
                     let heading = isNovel ? chapter.chapterNumber : "Ch " + chapter.chapterNumber
                     let unit = isNovel ? "chapters" : "pages"
                     let detail = "\(chapter.pageCount) " + unit + " · " + Self.size(chapter.bytes)
+                    LinedRow { showsActions in
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
                             // A novel row's "number" is the volume's name, so
@@ -252,16 +250,11 @@ public struct DownloadsView: View {
                                     .foregroundColor(SumiTheme.muted)
                             }
                             .buttonStyle(.sumiPressable)
+                            .opacity(showsActions ? 1 : 0)
+                            .allowsHitTesting(showsActions)
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(SumiTheme.card)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
+                    }
                 }
                 }
                 }
@@ -318,6 +311,7 @@ private struct DownloadRow: View {
     private var isRemovable: Bool { DownloadsView.isRemovable(item.state) }
 
     var body: some View {
+        LinedRow { showsActions in
         HStack(spacing: 12) {
             CachedAsyncImage(url: item.coverURL, maxPixelSize: 96) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
@@ -340,12 +334,12 @@ private struct DownloadRow: View {
             Spacer(minLength: 12)
 
             actions
+                .opacity(showsActions ? 1 : 0)
+                .allowsHitTesting(showsActions)
 
             statusView
         }
-        .padding(10)
-        .background(SumiTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+        }
         .confirmationDialog(
             "Remove \(item.title) episode \(item.episode)?",
             isPresented: $removeConfirming,
@@ -378,7 +372,7 @@ private struct DownloadRow: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 11.5))
-                        .foregroundColor(SumiTheme.dangerLight)
+                        .foregroundColor(SumiTheme.muted)
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -419,12 +413,35 @@ private struct DownloadRow: View {
                     .contentTransition(.numericText())
             }
         case .done:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(SumiTheme.successLight)
+            Text("Downloaded").sumiTabularMono(size: 11).foregroundColor(SumiTheme.muted)
         case .failed(let message):
-            Image(systemName: "exclamationmark.circle")
-                .foregroundColor(SumiTheme.dangerLight)
+            Text("Failed").sumiTabularMono(size: 11).foregroundColor(SumiTheme.dangerLight)
                 .help("Download failed: \(message)")
         }
+    }
+}
+
+/// A row on the page ground with a hairline under it, its actions shown
+/// under the pointer only. Boxed rows with an always-on play, folder and red
+/// trash on each read as a generic actions column, thirty times over. The
+/// actions are faded rather than removed so nothing shifts on hover, and
+/// shown always on the phone, which has no pointer to reveal them.
+private struct LinedRow<Content: View>: View {
+    @ViewBuilder let content: (Bool) -> Content
+    @State private var isHovered = false
+
+    var body: some View {
+        #if os(macOS)
+        let showsActions = isHovered
+        #else
+        let showsActions = true
+        #endif
+        content(showsActions)
+            .padding(.vertical, 10)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(SumiTheme.border).frame(height: 1)
+            }
+            .contentShape(Rectangle())
+            .stableHover { isHovered = $0 }
     }
 }

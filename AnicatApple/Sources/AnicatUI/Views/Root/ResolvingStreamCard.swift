@@ -18,51 +18,43 @@ struct ResolvingStreamCard: View {
     let onCancel: () -> Void
 
     var body: some View {
-        // A compact horizontal toast, same corner the mini-player uses —
-        // not a centered modal. This shows on every single play
-        // press (if only for a moment), so treating it like an alarming
-        // blocking dialog was wrong to begin with; a small notification you
-        // can glance at (or ignore) fits what it actually is.
+        // A line across the top of the window, the same shape as the error
+        // line: it shows on every play press, if only for a moment, and a
+        // card floating in the corner with a drop shadow read as a web toast.
         HStack(spacing: 10) {
             ProgressView()
-                .scaleEffect(0.8)
+                .controlSize(.small)
                 .tint(SumiTheme.indigo)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(status ?? "Finding a stream…")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundColor(SumiTheme.foreground)
-                    .lineLimit(1)
-                    .contentTransition(.opacity)
-                    .animation(.smooth, value: status)
+            Text(status ?? "Finding a stream…")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundColor(SumiTheme.foreground)
+                .lineLimit(1)
+                .contentTransition(.opacity)
+                .animation(.smooth, value: status)
 
-                TimelineView(.periodic(from: startedAt, by: 1)) { context in
-                    let elapsed = max(0, Int(context.date.timeIntervalSince(startedAt)))
-                    Text("\(elapsed)s")
-                        .sumiTabularMono(size: 10)
-                        .foregroundColor(SumiTheme.muted)
-                }
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                let elapsed = max(0, Int(context.date.timeIntervalSince(startedAt)))
+                Text("\(elapsed)s")
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(SumiTheme.muted)
             }
+
+            Spacer()
 
             Button(action: onCancel) {
                 Text("Cancel")
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.system(size: 12.5))
                     .foregroundColor(SumiTheme.muted)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(SumiTheme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 10)
-        .frame(height: 56)
-        .sumiCardStyle()
-        .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 9)
+        .background(SumiTheme.background)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
+        }
     }
 }

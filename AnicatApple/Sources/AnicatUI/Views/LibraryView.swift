@@ -60,24 +60,57 @@ public struct LibraryView: View {
     }
 
     public var body: some View {
-        SumiPage {
-            SumiPageHeader(
-                title: "Library",
-                subtitle: "\(items.count) \(mediaType == "MANGA" ? "manga" : "anime") · \(layout)"
-            ) {
-                HStack(spacing: 12) {
-                    SumiSegmentedControl(
-                        options: [("ANIME", "Anime"), ("MANGA", "Manga")],
-                        selection: $mediaType
-                    )
-                    SumiSegmentedControl(
-                        options: [("grid", "Grid"), ("table", "Table")],
-                        selection: $layout
-                    )
-                }
+        #if os(macOS)
+        // Outside `SumiPage`: that page is a vertical `ScrollView`, and a
+        // `Table` inside one has no height of its own and collapses to its
+        // header. Here the table takes the rest of the window and scrolls
+        // itself, inside the page's own insets.
+        if isSignedIn && !items.isEmpty && layout != "grid" {
+            GeometryReader { viewport in
+            VStack(alignment: .leading, spacing: 20) {
+                pageHeader
+                LibraryTable(items: items, onSelect: onSelect)
+                    .opacity(isLoading ? 0.5 : 1)
+                    .animation(.snappy, value: isLoading)
             }
+            .padding(.horizontal, SumiPage<EmptyView>.horizontalInset)
+            .padding(.top, 40)
+            .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .background(SumiTheme.background)
+        } else {
+            scrollingPage
+        }
+        #else
+        scrollingPage
+        #endif
+    }
 
-            SumiTabBar(tabs: tabs, selection: $status)
+    @ViewBuilder
+    private var pageHeader: some View {
+        SumiPageHeader(
+            title: "Library",
+            subtitle: "\(items.count) \(mediaType == "MANGA" ? "manga" : "anime") · \(layout)"
+        ) {
+            HStack(spacing: 12) {
+                SumiSegmentedControl(
+                    options: [("ANIME", "Anime"), ("MANGA", "Manga")],
+                    selection: $mediaType
+                )
+                SumiSegmentedControl(
+                    options: [("grid", "Grid"), ("table", "Table")],
+                    selection: $layout
+                )
+            }
+        }
+
+        SumiTabBar(tabs: tabs, selection: $status)
+    }
+
+    private var scrollingPage: some View {
+        SumiPage {
+            pageHeader
 
             Group {
                 if !isSignedIn {
@@ -103,7 +136,7 @@ public struct LibraryView: View {
                     .opacity(isLoading ? 0.5 : 1)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else {
-                    LibraryTable(items: items, mediaType: mediaType, onSelect: onSelect)
+                    LibraryTable(items: items, onSelect: onSelect)
                         .opacity(isLoading ? 0.5 : 1)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
@@ -116,10 +149,66 @@ public struct LibraryView: View {
     }
 }
 
+#if os(macOS)
+/// `score` and `progress` are optional and `Optional` is not `Comparable`,
+/// so `KeyPathComparator` cannot sort on them directly. Progress sorts by
+/// count, not fraction: an airing title has no total to divide by.
+fileprivate extension MediaCard.Item {
+    var progressSortKey: Int { progress ?? 0 }
+    var scoreSortKey: Int { score ?? -1 }
+}
 
 private struct LibraryTable: View {
     let items: [MediaCard.Item]
-    let mediaType: String
+    let onSelect: (MediaCard.Item) -> Void
+
+    /// Empty until a header is clicked, so the list first shows in the order
+    /// AniList returns it: most recently updated first.
+    @State private var sortOrder: [KeyPathComparator<MediaCard.Item>] = []
+    @State private var selection: MediaCard.Item.ID?
+
+    private var rows: [MediaCard.Item] {
+        sortOrder.isEmpty ? items : items.sorted(using: sortOrder)
+    }
+
+    var body: some View {
+        Table(rows, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Title", value: \.title, comparator: .localizedStandard) { item in
+                Text(item.title)
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(1)
+            }
+            TableColumn("Progress", value: \.progressSortKey) { item in
+                Text("\(item.progress ?? 0) / \(item.totalEpisodesOrChapters.map(String.init) ?? "?")")
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(SumiTheme.muted)
+            }
+            .width(min: 80, ideal: 110, max: 140)
+            TableColumn("Score", value: \.scoreSortKey) { item in
+                Text(item.score.map { "\($0)%" } ?? "—")
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(SumiTheme.muted)
+            }
+            .width(min: 60, ideal: 80, max: 100)
+        }
+        .tableStyle(.inset(alternatesRowBackgrounds: false))
+        .scrollContentBackground(.hidden)
+        .tint(SumiTheme.indigo)
+        // The button rows this replaced opened on a single click; a table's
+        // primary action is a double-click. Selection opens instead, and is
+        // cleared at once: left set, a second click on the same row changes
+        // nothing and opens nothing.
+        .onChange(of: selection) { _, id in
+            guard let id, let item = items.first(where: { $0.id == id }) else { return }
+            selection = nil
+            onSelect(item)
+        }
+    }
+}
+#else
+private struct LibraryTable: View {
+    let items: [MediaCard.Item]
     let onSelect: (MediaCard.Item) -> Void
 
     var body: some View {
@@ -178,3 +267,4 @@ private struct LibraryTable: View {
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
     }
 }
+#endif

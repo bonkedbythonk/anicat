@@ -192,11 +192,12 @@ public struct CalendarView: View {
     }
 
     private var weekdayHeader: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             ForEach(Self.weekdayLabels, id: \.self) { label in
                 Text(label)
                     .sumiTabularMono(size: 10)
                     .foregroundColor(SumiTheme.muted)
+                    .padding(.horizontal, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -204,8 +205,10 @@ public struct CalendarView: View {
 
     private var grid: some View {
         LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7),
-            spacing: 6
+            // No spacing: a gap between cells broke the day hairlines
+            // into dashes.
+            columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
+            spacing: 0
         ) {
             ForEach(days) { day in
                 dayCell(day)
@@ -225,9 +228,23 @@ public struct CalendarView: View {
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
+                    // The underline always has its padding, so selecting a
+                    // day does not push its chips down 3pt.
                     Text("\(Calendar.current.component(.day, from: day.date))")
-                        .sumiTabularMono(size: 11, weight: isToday ? .bold : .regular)
-                        .foregroundColor(isToday ? SumiTheme.indigo : SumiTheme.foreground.opacity(day.inMonth ? 0.8 : 0.35))
+                        .sumiTabularMono(size: 11, weight: isToday || isSelected ? .semibold : .regular)
+                        .foregroundColor(
+                            isToday ? SumiTheme.indigo
+                                : isSelected ? SumiTheme.foreground
+                                : SumiTheme.foreground.opacity(day.inMonth ? 0.8 : 0.35)
+                        )
+                        .padding(.bottom, 3)
+                        .overlay(alignment: .bottom) {
+                            if isSelected {
+                                Rectangle()
+                                    .fill(SumiTheme.indigo)
+                                    .frame(height: 2)
+                            }
+                        }
 
                     if onList {
                         Circle()
@@ -259,15 +276,13 @@ public struct CalendarView: View {
             }
             .padding(6)
             .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
-            .background(isToday ? SumiTheme.card.opacity(0.6) : SumiTheme.card.opacity(day.inMonth ? 0.3 : 0.12))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-            .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                    .stroke(
-                        isSelected ? SumiTheme.indigo : (isToday ? SumiTheme.indigo.opacity(0.6) : SumiTheme.border),
-                        lineWidth: isSelected ? 1.5 : 1
-                    )
-            )
+            .overlay(alignment: .leading) {
+                if day.id % 7 != 0 {
+                    Rectangle()
+                        .fill(SumiTheme.border)
+                        .frame(width: 1)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)
@@ -294,7 +309,7 @@ public struct CalendarView: View {
 
     private func dayColumn(_ date: Date) -> some View {
         let daySlots = Self.slots(on: date, from: slots, watchingOnly: watchingOnly)
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(Self.dayTitleFormatter.string(from: date))
                     .font(.sumiHeading(size: 13, weight: .semibold))
@@ -311,24 +326,23 @@ public struct CalendarView: View {
                 }
                 .buttonStyle(.sumiPressable)
             }
+            .padding(.bottom, 6)
 
             if daySlots.isEmpty {
                 Text(watchingOnly ? "Nothing from your list airs today." : "Nothing airs on this day.")
                     .font(.system(size: 12))
                     .foregroundColor(SumiTheme.muted)
+                    .padding(.top, 4)
             } else {
                 ForEach(daySlots, id: \.self) { slot in
                     daySlotRow(slot)
+                        .padding(.vertical, 8)
+                    Rectangle()
+                        .fill(SumiTheme.border)
+                        .frame(height: 1)
                 }
             }
         }
-        .padding(12)
-        .background(SumiTheme.card.opacity(0.4))
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
     }
 
     private func daySlotRow(_ slot: FfiAiringSlot) -> some View {

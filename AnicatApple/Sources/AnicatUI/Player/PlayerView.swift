@@ -1224,23 +1224,14 @@ public struct PlayerView: View {
                                 controller.skipPendingWindow()
                             }
                         } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "forward.fill")
-                                    .font(.system(size: 12))
-                                Text(window.label)
-                                    .sumiTabularMono(size: 12, weight: .bold)
-                                Text("↵")
-                                    .sumiTabularMono(size: 11, weight: .medium)
-                                    .opacity(0.6)
-                            }
-                            .foregroundColor(SumiTheme.background)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(SumiTheme.indigo)
-                            .clipShape(Capsule())
-                            .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+                            Label(window.label, systemImage: "forward.fill")
                         }
-                        .buttonStyle(.sumiPressable)
+                        // The app's own primary shape; it was a capsule with a
+                        // drop shadow and a return-key glyph, the one place
+                        // the player still looked like a web overlay. The key
+                        // is in the tooltip.
+                        .sumiPrimaryButton()
+                        .controlSize(.large)
                         .help("\(window.label) (Return or S)")
                         .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                     }
@@ -1478,7 +1469,7 @@ public struct PlayerView: View {
                     .foregroundColor(SumiTheme.muted)
             }
 
-            Divider()
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
 
             // Remembered against the title, unlike the Sub/Dub row below:
             // this is a pick aimed at one show ("this group's dub", "the
@@ -1543,13 +1534,17 @@ public struct PlayerView: View {
                                 refreshTracks()
                             }
                         } label: {
-                            Text(option == "Dubbed" ? "Dub" : "Sub")
-                                .sumiTabularMono(size: 11, weight: storedSubDub == option ? .bold : .regular)
-                                .foregroundColor(storedSubDub == option ? SumiTheme.indigo : SumiTheme.foreground)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(storedSubDub == option ? SumiTheme.indigo.opacity(0.15) : Color.clear)
-                                .clipShape(Capsule())
+                            // Slash words like the detail page's Sub / Dub,
+                            // not tinted pill chips.
+                            HStack(spacing: 6) {
+                                if option == "Dubbed" { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
+                                Text("Dub").hidden().overlay {
+                                    Text(option == "Dubbed" ? "Dub" : "Sub")
+                                        .fontWeight(storedSubDub == option ? .semibold : .regular)
+                                        .foregroundColor(storedSubDub == option ? SumiTheme.foreground : SumiTheme.muted)
+                                }
+                            }
+                            .font(.system(size: 12))
                         }
                         .buttonStyle(.sumiPressable)
                     }
@@ -1585,7 +1580,7 @@ public struct PlayerView: View {
                 }
             }
 
-            Divider()
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Speed")
@@ -1594,13 +1589,14 @@ public struct PlayerView: View {
                 HStack(spacing: 6) {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
                         Button(action: { controller.setPlaybackRate(rate) }) {
-                            Text(speedLabel(rate))
-                                .sumiTabularMono(size: 11, weight: controller.playbackRate == rate ? .bold : .regular)
-                                .foregroundColor(controller.playbackRate == rate ? SumiTheme.indigo : SumiTheme.foreground)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(controller.playbackRate == rate ? SumiTheme.indigo.opacity(0.15) : Color.clear)
-                                .clipShape(Capsule())
+                            HStack(spacing: 6) {
+                                if rate != 0.5 { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
+                                Text(speedLabel(rate))
+                                    .fontWeight(controller.playbackRate == rate ? .semibold : .regular)
+                                    .foregroundColor(controller.playbackRate == rate ? SumiTheme.foreground : SumiTheme.muted)
+                            }
+                            .font(.system(size: 12))
+                            .monospacedDigit()
                         }
                         .buttonStyle(.sumiPressable)
                     }
@@ -1608,11 +1604,11 @@ public struct PlayerView: View {
             }
 
             if controller.onListReleases != nil {
-                Divider()
+                Rectangle().fill(SumiTheme.border).frame(height: 1)
                 releaseSection
             }
 
-            Divider()
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
             streamDetailsSection
         }
         .padding(16)
@@ -1743,13 +1739,13 @@ public struct PlayerView: View {
                         subtitleScale = scale
                         controller.onSetSubtitleScale?(scale)
                     } label: {
-                        Text(label)
-                            .sumiTabularMono(size: 11, weight: subtitleScale == scale ? .bold : .regular)
-                            .foregroundColor(subtitleScale == scale ? SumiTheme.indigo : SumiTheme.foreground)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 4)
-                            .background(subtitleScale == scale ? SumiTheme.indigo.opacity(0.15) : Color.clear)
-                            .clipShape(Capsule())
+                        HStack(spacing: 6) {
+                            if scale != 0.8 { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
+                            Text(label)
+                                .fontWeight(subtitleScale == scale ? .semibold : .regular)
+                                .foregroundColor(subtitleScale == scale ? SumiTheme.foreground : SumiTheme.muted)
+                        }
+                        .font(.system(size: 12))
                     }
                     .buttonStyle(.sumiPressable)
                     .help("Subtitle size \(label)")

@@ -63,6 +63,10 @@ public final class AppModel {
 
     var activeDetailTask: Task<Void, Never>?
     var activeDetailExtrasTask: Task<Void, Never>?
+    /// The title whose cast fetch has finished, found or not. Without it an
+    /// empty cast could only ever say "Loading", and on a title AniList
+    /// lists no characters for it said so forever.
+    public var castSettledId: Int64?
     var activeLibraryTask: Task<Void, Never>?
     var activeSearchTask: Task<Void, Never>?
     public internal(set) var loadingCatalogId: Int64?
@@ -640,10 +644,10 @@ public final class AppModel {
     static let defaultHomeRows: [HomeRowConfig] = [
         HomeRowConfig(id: "becauseYouWatched", title: "Because you watched", visible: true),
         HomeRowConfig(id: "planning", title: "Planning", visible: true),
-        HomeRowConfig(id: "smartPlaylist", title: "Smart Picks", visible: true),
-        HomeRowConfig(id: "trending", title: "Trending Now", visible: true),
-        HomeRowConfig(id: "newlyReleasing", title: "Newly Releasing", visible: true),
-        HomeRowConfig(id: "seasonal", title: "Seasonal Highlights", visible: true),
+        HomeRowConfig(id: "smartPlaylist", title: "Smart picks", visible: true),
+        HomeRowConfig(id: "trending", title: "Trending now", visible: true),
+        HomeRowConfig(id: "newlyReleasing", title: "Newly releasing", visible: true),
+        HomeRowConfig(id: "seasonal", title: "Seasonal highlights", visible: true),
     ]
 
     static let homeRowsDefaultsKey = "anicat_home_rows"

@@ -186,7 +186,11 @@ echo "Step 3: Installing..."
 # rw-rw-rw- even with no controlling terminal, so `[ -r /dev/tty ]` passed,
 # the printf failed with "Device not configured" and `set -e` ended the
 # install before anything was quit.
-if pgrep -x Anicat >/dev/null 2>&1; then
+#
+# `pgrep -a`: without it pgrep leaves out its own ancestors, and under Update
+# now the running Anicat is one. The quit was skipped, the bundle replaced
+# under the live app, and "Opening Anicat" only focused the old process.
+if pgrep -a -x Anicat >/dev/null 2>&1; then
     if { : < /dev/tty; } 2>/dev/null; then
         printf 'Anicat is running and has to quit to be replaced. Quit it now? [Y/n] ' > /dev/tty
         read -r answer < /dev/tty || answer=""
@@ -202,10 +206,10 @@ if pgrep -x Anicat >/dev/null 2>&1; then
     # the rm below would pull the bundle out from under a live process. Wait
     # for it, and stop here if it never goes.
     for _ in $(seq 1 30); do
-        pgrep -x Anicat >/dev/null 2>&1 || break
+        pgrep -a -x Anicat >/dev/null 2>&1 || break
         sleep 0.5
     done
-    if pgrep -x Anicat >/dev/null 2>&1; then
+    if pgrep -a -x Anicat >/dev/null 2>&1; then
         echo "Anicat did not quit, so it was not replaced. Quit it and run the installer again." >&2
         exit 1
     fi

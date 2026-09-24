@@ -212,27 +212,12 @@ struct MangaTabSection: View {
         } else if let groups = chapterGroups {
             LazyVStack(spacing: 8) {
                 ForEach(groups, id: \.start) { group in
-                    // `DisclosureGroup` is not in the tvOS SDK; the same
-                    // flat fallback the episode list uses.
-                    #if os(tvOS)
-                    VStack(alignment: .leading, spacing: 8) {
-                        groupLabel(group.chapters)
-                        chapterRows(group.chapters)
-                    }
-                    #else
-                    DisclosureGroup(
-                        isExpanded: Binding(
-                            get: { expandedGroups.contains(group.start) },
-                            set: { open in
-                                if open { expandedGroups.insert(group.start) } else { expandedGroups.remove(group.start) }
-                            }
-                        )
+                    ExpandableGroup(
+                        title: "Chapters \(group.chapters.first?.number ?? "")-\(group.chapters.last?.number ?? "")",
+                        isExpanded: Binding(member: group.start, of: $expandedGroups)
                     ) {
                         chapterRows(group.chapters)
-                    } label: {
-                        groupLabel(group.chapters)
                     }
-                    #endif
                 }
             }
             // Added, never swapped in, so a group the reader opened stays
@@ -262,13 +247,6 @@ struct MangaTabSection: View {
         return stride(from: 0, to: chapters.count, by: Self.groupSize).map { start in
             (start, chapters[start..<min(start + Self.groupSize, chapters.count)])
         }
-    }
-
-    private func groupLabel(_ group: ArraySlice<MediaDetailView.MangaChapterItem>) -> some View {
-        Text("Chapters \(group.first?.number ?? "")-\(group.last?.number ?? "")")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 4)
     }
 
     private func chapterRows(_ rows: ArraySlice<MediaDetailView.MangaChapterItem>) -> some View {

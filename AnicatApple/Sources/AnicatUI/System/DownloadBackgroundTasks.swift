@@ -80,6 +80,10 @@ public final class DownloadBackgroundTasks {
         // Marked before the submit: a task the system starts at once must find
         // itself expected in `started`, or it is completed on the spot.
         submitted.insert(key)
+        // Compiled only by the iOS 27 SDK: `#available` guards the call at run
+        // time, but CI's Xcode 26 has no such overload and failed the build
+        // with "extra trailing closure passed in call".
+        #if compiler(>=6.4)
         if #available(iOS 27.0, *) {
             // The completion form, not `submit(_:)`: on the owner's phone
             // `submit` returned without an error and the task never started.
@@ -100,14 +104,15 @@ public final class DownloadBackgroundTasks {
                     }
                 }
             }
-        } else {
-            do {
-                try BGTaskScheduler.shared.submit(request)
-                AppLog.write("[downloads] background task submitted for \(title)")
-            } catch {
-                submitted.remove(key)
-                AppLog.write("[downloads] background task refused for \(title): \(error.localizedDescription)")
-            }
+            return
+        }
+        #endif
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            AppLog.write("[downloads] background task submitted for \(title)")
+        } catch {
+            submitted.remove(key)
+            AppLog.write("[downloads] background task refused for \(title): \(error.localizedDescription)")
         }
     }
 

@@ -1,204 +1,522 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-skin="ink" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Anicat</title>
+<script>
+  // Before the stylesheet paints: a light-skin viewer otherwise sees one
+  // frame of the dark ground on every load.
+  (function () {
+    var skin = "ink", follow = true, theme = "dark";
+    try {
+      skin = localStorage.getItem("anicat_skin") || "ink";
+      follow = localStorage.getItem("anicat_follow_system") !== "0";
+      theme = localStorage.getItem("anicat_theme") || "dark";
+    } catch (e) { /* storage refused: defaults */ }
+    if (follow) theme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    if (skin === "oled") theme = "dark";
+    document.documentElement.dataset.skin = skin;
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
 <style>
-  :root {
+  /* The Sumi Ledger: ink or washi ground, one accent, hairlines, flat at
+     rest. Values are the Mac app's SumiPalette (ThemeStore.swift). */
+  :root, [data-skin=ink][data-theme=dark] {
     color-scheme: dark;
-    --bg: #111214;
-    --panel: #1b1c20;
-    --panel-2: #24262b;
-    --line: #33363d;
-    --text: #e8e8ea;
-    --muted: #9a9ca3;
-    --accent: #6ea8ff;
-    --accent-text: #0b1220;
-    --danger: #ff7a7a;
-    --ok: #7ad49a;
-    --focus: #ffcc4d;
+    --bg: #161310; --card: #1e1a15; --card-2: #26211b; --fg: #ede7dc;
+    --accent: #8fb8dc; --accent-2: #a8c9e6;
+    --muted: color-mix(in srgb, var(--fg) 55%, transparent);
+    --faint: color-mix(in srgb, var(--fg) 32%, transparent);
+    --line: rgba(237, 231, 220, 0.1);
+    --danger: #e2674a; --ok: #8fb573; --warn: #d9a441;
+    --shade: rgba(0, 0, 0, 0.45);
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      color-scheme: light;
-      --bg: #f5f5f7;
-      --panel: #ffffff;
-      --panel-2: #ececf0;
-      --line: #d6d7dc;
-      --text: #17181b;
-      --muted: #5d6068;
-      --accent: #1f5fd1;
-      --accent-text: #ffffff;
-      --danger: #b3261e;
-      --ok: #1e7a44;
-      --focus: #b36b00;
-    }
+  [data-skin=ink][data-theme=light] {
+    color-scheme: light;
+    --bg: #f1ece2; --card: #faf7f0; --card-2: #e9e3d6; --fg: #26221b;
+    --accent: #2f5a76; --accent-2: #45789a;
+    --muted: color-mix(in srgb, var(--fg) 65%, transparent);
+    --faint: color-mix(in srgb, var(--fg) 40%, transparent);
+    --line: rgba(38, 34, 27, 0.12);
+    --danger: #a93a26; --ok: #4c6b35; --warn: #8c6310;
+    --shade: rgba(38, 34, 27, 0.18);
   }
+  [data-skin=sakura][data-theme=dark] {
+    color-scheme: dark;
+    --bg: #180a10; --card: #201016; --card-2: #2b1620; --fg: #fcfafb;
+    --accent: #e0607e; --accent-2: #ea8ea3;
+    --muted: color-mix(in srgb, var(--fg) 55%, transparent);
+    --faint: color-mix(in srgb, var(--fg) 32%, transparent);
+    --line: rgba(252, 250, 251, 0.1);
+    --danger: #e2674a; --ok: #8fb573; --warn: #d9a441;
+    --shade: rgba(0, 0, 0, 0.5);
+  }
+  [data-skin=sakura][data-theme=light] {
+    color-scheme: light;
+    --bg: #fdf5f7; --card: #ffffff; --card-2: #f6e6eb; --fg: #2d1822;
+    --accent: #c04060; --accent-2: #d86884;
+    --muted: color-mix(in srgb, var(--fg) 65%, transparent);
+    --faint: color-mix(in srgb, var(--fg) 40%, transparent);
+    --line: rgba(45, 24, 34, 0.12);
+    --danger: #a93a26; --ok: #4c6b35; --warn: #8c6310;
+    --shade: rgba(45, 24, 34, 0.16);
+  }
+  [data-skin=oled] {
+    color-scheme: dark;
+    --bg: #000000; --card: #0b0a09; --card-2: #16140f; --fg: #ede7dc;
+    --accent: #8fb8dc; --accent-2: #a8c9e6;
+    --muted: color-mix(in srgb, var(--fg) 55%, transparent);
+    --faint: color-mix(in srgb, var(--fg) 32%, transparent);
+    --line: rgba(237, 231, 220, 0.12);
+    --danger: #e2674a; --ok: #8fb573; --warn: #d9a441;
+    --shade: rgba(0, 0, 0, 0.6);
+  }
+  /* Sakura is the one skin that changes anything but colour: names go serif. */
+  [data-skin=sakura] .t-name { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Yu Mincho", serif; }
+
   * { box-sizing: border-box; }
   /* Class rules below set display, which would otherwise beat the hidden
      attribute and leave an empty now-playing bar on screen. */
   [hidden] { display: none !important; }
-  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); }
   body {
-    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    min-width: 0;
-    padding-bottom: 5rem;
+    font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  a { color: var(--accent); }
-  button, select, input, textarea { font: inherit; color: inherit; }
-  button {
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
-    padding: .35rem .75rem; cursor: pointer;
+  .num, .meta, time { font-variant-numeric: tabular-nums; }
+  a { color: inherit; text-decoration: none; }
+  button, input, textarea { font: inherit; color: inherit; }
+  ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+  :focus { outline: none; }
+  :focus-visible {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent), 0 0 0 4px var(--bg);
+    border-radius: 8px;
   }
-  button:hover { border-color: var(--muted); }
-  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-  button.danger { color: var(--danger); }
-  button:disabled { opacity: .5; cursor: default; }
-  input[type=text], input[type=search], select, textarea {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .4rem .6rem;
-  }
-  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  code, pre, textarea.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; font-size: 12.5px; }
+  img { color: transparent; }
 
-  header.top {
-    position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line);
-    display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; padding: .6rem 1.5rem;
+  /* ---- buttons ---- */
+  .btn {
+    display: inline-flex; align-items: center; gap: .45rem; cursor: pointer; white-space: nowrap;
+    background: var(--card); border: 0; box-shadow: inset 0 0 0 1px var(--line); border-radius: 10px;
+    padding: .5rem .9rem; font-size: 13px; transition: background .15s, transform .08s;
   }
-  header.top .brand { font-weight: 700; font-size: 16px; margin-right: .25rem; }
-  .segment { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
-  .segment button { border: 0; border-radius: 0; background: transparent; }
-  .segment button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); }
-  nav.tabs { display: flex; gap: .25rem; }
-  nav.tabs a {
-    color: var(--text); text-decoration: none; padding: .35rem .7rem; border-radius: 6px;
+  .btn:hover { background: color-mix(in srgb, var(--card) 80%, var(--fg)); }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .45; cursor: default; transform: none; }
+  .btn.primary {
+    background: var(--accent); color: var(--bg); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 14%, transparent);
+    font-weight: 650; padding: .6rem 1.15rem;
   }
-  nav.tabs a[aria-current=page] { background: var(--panel-2); }
-  nav.tabs a:hover { background: var(--panel); }
-  header.top .spacer { flex: 1; }
+  .btn.primary:hover { background: var(--accent-2); }
+  .btn.ghost { background: transparent; box-shadow: none; color: var(--muted); padding: .35rem .5rem; }
+  .btn.ghost:hover { color: var(--fg); background: transparent; }
+  .btn.danger { color: var(--danger); }
+  .btn svg { width: 16px; height: 16px; flex: none; }
+  .link { color: var(--accent); cursor: pointer; background: none; border: 0; padding: 0; font: inherit; }
+  .link:hover { color: var(--accent-2); }
 
-  main { max-width: 1280px; margin: 0 auto; padding: 1rem 1.5rem; }
-  h1 { font-size: 22px; margin: .25rem 0 .75rem; }
-  h2 { font-size: 16px; margin: 1.5rem 0 .6rem; }
+  /* A slash toggle: the choices as words, the chosen one in ink. */
+  .slash { display: inline-flex; align-items: baseline; gap: .1rem; font-size: 13px; }
+  .slash button {
+    background: none; border: 0; padding: .15rem .25rem; cursor: pointer; color: var(--faint);
+    transition: color .15s;
+  }
+  .slash button:hover { color: var(--muted); }
+  .slash button[aria-pressed=true] { color: var(--fg); font-weight: 600; }
+  .slash .sep { color: var(--faint); user-select: none; }
+
+  /* Text-menu dropdown. */
+  .menu-btn {
+    display: inline-flex; align-items: center; gap: .3rem; background: none; border: 0; cursor: pointer;
+    padding: .25rem .1rem; font-size: 13px; color: var(--muted);
+  }
+  .menu-btn:hover { color: var(--fg); }
+  .menu-btn b { color: var(--fg); font-weight: 600; }
+  .menu-btn svg { width: 12px; height: 12px; opacity: .7; }
+  .popover {
+    position: fixed; z-index: 60; min-width: 180px; max-height: min(420px, 70vh); overflow: auto;
+    background: var(--card); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line), 0 14px 40px var(--shade);
+    padding: .3rem; animation: pop .14s ease-out;
+  }
+  .popover button {
+    display: flex; width: 100%; align-items: center; gap: .5rem; text-align: left; background: none; border: 0;
+    padding: .42rem .65rem; border-radius: 8px; cursor: pointer; font-size: 13px;
+  }
+  .popover button:hover, .popover button.hot { background: var(--card-2); }
+  .popover button[aria-checked=true] { color: var(--accent); font-weight: 600; }
+  @keyframes pop { from { opacity: 0; transform: translateY(-4px); } }
+
+  input.field, textarea.field {
+    background: var(--card); border: 0; box-shadow: inset 0 0 0 1px var(--line); border-radius: 10px;
+    padding: .6rem .8rem; width: 100%;
+  }
+  input.field:focus-visible, textarea.field:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); border-radius: 10px; }
+  textarea.field { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12px; min-height: 12rem; }
+
+  /* ---- shell ---- */
+  .shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+  aside.side {
+    position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 1.1rem;
+    background: var(--card); box-shadow: inset -1px 0 0 var(--line); padding: 1.25rem .9rem 1rem;
+  }
+  .brand { display: flex; align-items: center; gap: .55rem; padding: 0 .55rem; font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
+  .brand svg { width: 22px; height: 22px; color: var(--accent); }
+  .side .slash { padding: 0 .35rem; }
+  nav.nav { display: flex; flex-direction: column; gap: .1rem; }
+  nav.nav a {
+    position: relative; display: flex; align-items: center; gap: .7rem; padding: .5rem .6rem; border-radius: 9px;
+    color: var(--muted); font-size: 13.5px; transition: color .15s, background .15s;
+  }
+  nav.nav a svg { width: 18px; height: 18px; flex: none; }
+  nav.nav a:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 4%, transparent); }
+  nav.nav a[aria-current=page] { color: var(--fg); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  nav.nav a[aria-current=page]::before {
+    content: ""; position: absolute; left: -.9rem; top: 22%; bottom: 22%; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent);
+  }
+  .side .grow { flex: 1; }
+  .who { display: flex; align-items: center; gap: .6rem; padding: .4rem .55rem; border-radius: 10px; font-size: 13px; }
+  .who img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: var(--card-2); }
+  .who .muted { font-size: 11.5px; }
+  .side-foot { font-size: 11.5px; color: var(--faint); padding: 0 .55rem; }
+
+  main#view { min-width: 0; padding: 0 0 7rem; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 1.75rem 2.5rem 0; animation: rise .32s cubic-bezier(.2, .8, .2, 1); }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+
+  h1 { font-size: 26px; font-weight: 680; letter-spacing: -.015em; margin: .2rem 0 1rem; }
+  h2 { font-size: 17px; font-weight: 650; margin: 0; }
   .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
   .error { color: var(--danger); }
-  .card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem;
-  }
+  .okc { color: var(--ok); }
+  .meta { font-size: 12px; color: var(--muted); }
+  .dot::before { content: "\00b7"; margin: 0 .4rem; color: var(--faint); }
+
   .banner {
-    background: var(--panel); border-bottom: 1px solid var(--line); padding: .6rem 1.5rem;
-    display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center;
+    display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; padding: .7rem 2.5rem; font-size: 13px;
+    background: color-mix(in srgb, var(--accent) 9%, var(--bg)); box-shadow: inset 0 -1px 0 var(--line);
   }
-  .codebox { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
-  .codebox code {
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: .3rem .5rem;
-    overflow-x: auto; white-space: nowrap; max-width: 100%;
-  }
+  .banner code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; background: var(--card); padding: .25rem .5rem; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--line); overflow-x: auto; white-space: nowrap; max-width: 100%; }
 
-  .grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem .9rem;
+  /* ---- hero ---- */
+  .hero {
+    position: relative; min-height: 400px; display: flex; align-items: flex-end; overflow: hidden;
+    margin: 0 0 1.25rem; isolation: isolate;
   }
-  .poster-card { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
-  .poster-card a.poster-link { color: inherit; text-decoration: none; display: block; border-radius: 8px; }
-  .poster {
-    width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 8px; background: var(--panel-2);
-    display: block;
+  .hero .art { position: absolute; inset: 0; z-index: -2; background: var(--card); }
+  .hero .art img { width: 100%; height: 100%; object-fit: cover; object-position: center 25%; opacity: 0; transition: opacity .6s; }
+  .hero .art img.in { opacity: 1; }
+  .hero::after {
+    content: ""; position: absolute; inset: 0; z-index: -1;
+    background:
+      linear-gradient(90deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 88%, transparent) 30%, color-mix(in srgb, var(--bg) 25%, transparent) 70%, transparent 100%),
+      linear-gradient(0deg, var(--bg) 0%, transparent 45%);
   }
-  .poster-card .name {
-    font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  }
-  .poster-card .sub { font-size: 12px; color: var(--muted); }
-  .poster-card .actions { display: flex; gap: .35rem; flex-wrap: wrap; }
-  .poster-card .actions button { padding: .2rem .55rem; font-size: 12px; }
+  .hero .copy { padding: 2.5rem 2.5rem 1.5rem; max-width: 640px; display: flex; flex-direction: column; gap: .7rem; }
+  .hero .eyebrow { font-size: 12.5px; color: var(--accent); font-weight: 600; }
+  .hero h1 { font-size: 38px; line-height: 1.1; margin: 0; }
+  .hero p.syn { margin: 0; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 60ch; }
+  .hero .row { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .35rem; }
+  .hero.skeleton .copy { opacity: 0; }
 
-  .detail { display: grid; grid-template-columns: 220px 1fr; gap: 1.5rem; }
-  .detail .poster { max-width: 220px; }
-  .detail .meta { display: flex; flex-wrap: wrap; gap: .25rem .9rem; color: var(--muted); margin-bottom: .6rem; }
-  .detail .synopsis { max-width: 70ch; }
-  .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .75rem 0; }
-  .episodes {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .6rem;
+  /* ---- shelves ---- */
+  .shelf { margin: 1.6rem 0 0; }
+  .shelf-head { display: flex; align-items: baseline; gap: .8rem; margin-bottom: .75rem; }
+  .shelf-head .sub { font-size: 12.5px; color: var(--muted); }
+  .shelf-head .grow { flex: 1; }
+  .shelf-head .arrows { display: flex; gap: .2rem; }
+  .shelf-head .arrows button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: .2rem; border-radius: 6px; }
+  .shelf-head .arrows button:hover { color: var(--fg); }
+  .shelf-head .arrows svg { width: 18px; height: 18px; }
+  .rail {
+    display: grid; grid-auto-flow: column; grid-auto-columns: 152px; gap: 1rem; overflow-x: auto; overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity; scrollbar-width: none; padding: 4px 4px 10px; margin: -4px -4px 0;
   }
-  .ep {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .55rem .7rem;
-    display: flex; flex-direction: column; gap: .3rem;
-  }
-  .ep.watched { opacity: .72; }
-  .ep .ep-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ep .bar { height: 3px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
-  .ep .bar > span { display: block; height: 100%; background: var(--accent); }
-  .ep .ep-actions { display: flex; gap: .35rem; flex-wrap: wrap; }
-  .ep .ep-actions button { padding: .15rem .5rem; font-size: 12px; }
-  .tag { font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 .35rem; color: var(--muted); }
-  .tag.ok { color: var(--ok); border-color: var(--ok); }
+  .rail::-webkit-scrollbar { display: none; }
+  .rail > * { scroll-snap-align: start; }
+  .rail.wide { grid-auto-columns: 286px; }
 
-  .overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30;
-    display: flex; align-items: center; justify-content: center; padding: 1rem;
-  }
-  .modal {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(640px, 100%);
-    max-height: 85vh; display: flex; flex-direction: column;
-  }
-  .modal header { padding: .8rem 1rem; border-bottom: 1px solid var(--line); display: flex; gap: 1rem; align-items: center; }
-  .modal header h3 { margin: 0; font-size: 15px; flex: 1; }
-  .modal .body { padding: .8rem 1rem; overflow: auto; }
-  .release-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
-  .release-list button {
-    width: 100%; text-align: left; display: flex; gap: .75rem; align-items: center; background: var(--panel);
-  }
-  .release-list .rel-name { flex: 1; overflow-wrap: anywhere; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.4rem 1rem; }
 
-  .toast {
-    position: fixed; right: 1rem; bottom: 4.75rem; z-index: 40; max-width: 420px;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem;
-    box-shadow: 0 6px 24px rgba(0,0,0,.3);
+  .pc { display: flex; flex-direction: column; gap: .45rem; min-width: 0; }
+  .pc .frame {
+    position: relative; display: block; border-radius: 12px; overflow: hidden; aspect-ratio: 2 / 3; background: var(--card);
+    transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s;
   }
+  .pc .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pc:hover .frame, .wc:hover .frame { transform: translateY(-2px); box-shadow: 0 10px 28px var(--shade); }
+  .pc .tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in srgb, var(--bg) 60%, transparent); }
+  .pc .tick > i { display: block; height: 100%; background: var(--accent); }
+  .pc .name, .wc .name { font-size: 13px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .pc .meta { margin-top: -.2rem; }
+  .pc .score { position: absolute; top: .45rem; right: .45rem; font-size: 11px; font-weight: 650; padding: .1rem .38rem; border-radius: 6px; background: color-mix(in srgb, var(--bg) 78%, transparent); color: var(--fg); }
 
-  .nowplaying {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--panel);
-    border-top: 1px solid var(--line); padding: .55rem 1.5rem; display: flex; gap: 1rem; align-items: center;
+  .wc { display: flex; flex-direction: column; gap: .5rem; min-width: 0; cursor: pointer; }
+  .wc .frame { position: relative; border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 9; background: var(--card); transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s; }
+  .wc .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .wc .frame .play {
+    position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .18s;
+    background: color-mix(in srgb, var(--bg) 35%, transparent);
   }
-  .nowplaying .np-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .nowplaying .np-text { flex: 1; min-width: 0; }
+  .wc:hover .frame .play, .wc:focus-visible .frame .play { opacity: 1; }
+  .play-dot { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: var(--bg); display: grid; place-items: center; }
+  .play-dot svg { width: 18px; height: 18px; margin-left: 2px; }
+  .wc .tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in srgb, var(--bg) 60%, transparent); }
+  .wc .tick > i { display: block; height: 100%; background: var(--accent); }
+  .wc .line { display: flex; gap: .6rem; align-items: baseline; }
+  .wc .line .name { flex: 1; -webkit-line-clamp: 1; }
+  .wc .line .go { font-size: 12px; color: var(--accent); white-space: nowrap; }
 
-  .signin { max-width: 560px; margin: 2rem auto; display: flex; flex-direction: column; gap: .8rem; }
-  .signin input { width: 100%; }
-  .pref { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
-  .pref span span { display: block; font-size: 12px; }
-  .settings { display: flex; flex-direction: column; gap: 1rem; max-width: 720px; }
-  .settings textarea { width: 100%; min-height: 12rem; }
+  .empty { color: var(--muted); padding: 1.2rem 0; }
+  .skel { background: linear-gradient(90deg, var(--card) 0%, var(--card-2) 50%, var(--card) 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 12px; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
 
-  @media (max-width: 900px) {
-    header.top { padding: .5rem 1rem; }
-    main { padding: .75rem 1rem; }
-    .detail { grid-template-columns: 150px 1fr; gap: 1rem; }
-    .detail .poster { max-width: 150px; }
-    .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  /* ---- title page ---- */
+  .backdrop { position: relative; height: 340px; overflow: hidden; margin-bottom: -210px; isolation: isolate; }
+  .backdrop img { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; opacity: 0; transition: opacity .6s; }
+  .backdrop img.in { opacity: .55; }
+  .backdrop::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, var(--bg) 8%, color-mix(in srgb, var(--bg) 40%, transparent) 70%, color-mix(in srgb, var(--bg) 20%, transparent)); }
+  .tp { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 2.2rem; position: relative; }
+  .tp .cover { width: 230px; aspect-ratio: 2 / 3; border-radius: 14px; overflow: hidden; background: var(--card); box-shadow: 0 16px 44px var(--shade); }
+  .tp .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tp h1 { font-size: 32px; line-height: 1.12; margin: 2.2rem 0 .3rem; }
+  .tp .alt { color: var(--muted); font-size: 13px; margin-bottom: .55rem; }
+  .tp .meta { font-size: 12.5px; display: flex; flex-wrap: wrap; row-gap: .2rem; }
+  .tp .syn { max-width: 72ch; color: color-mix(in srgb, var(--fg) 84%, transparent); margin: .9rem 0 0; }
+  .tp .syn.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; margin: 1.2rem 0 0; }
+  .actions .gap { flex: 0 0 .2rem; }
+  .fav { background: none; border: 0; cursor: pointer; color: var(--muted); padding: .3rem; display: inline-flex; border-radius: 8px; }
+  .fav svg { width: 20px; height: 20px; }
+  .fav[aria-pressed=true] { color: var(--accent); }
+  .fav[aria-pressed=true] svg path { fill: currentColor; }
+
+  .tabs { display: flex; gap: 1.5rem; margin: 2.2rem 0 1.1rem; box-shadow: inset 0 -1px 0 var(--line); }
+  .tabs button {
+    background: none; border: 0; padding: .55rem 0; cursor: pointer; color: var(--muted); font-size: 14px; position: relative;
+  }
+  .tabs button:hover { color: var(--fg); }
+  .tabs button[aria-selected=true] { color: var(--fg); font-weight: 600; }
+  .tabs button[aria-selected=true]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); border-radius: 2px; }
+  .tabs .count { color: var(--faint); font-weight: 400; margin-left: .3rem; font-size: 12px; }
+
+  .groups { display: flex; flex-wrap: wrap; gap: .1rem .3rem; margin-bottom: 1rem; }
+  .groups button { background: none; border: 0; cursor: pointer; color: var(--faint); padding: .2rem .4rem; font-size: 13px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+  .groups button:hover { color: var(--muted); }
+  .groups button[aria-pressed=true] { color: var(--fg); font-weight: 600; background: var(--card); }
+
+  .eps { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1.2rem 1rem; }
+  .ep { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+  .ep .frame { position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: var(--card); cursor: pointer; border: 0; padding: 0; display: block; width: 100%; transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s; }
+  .ep .frame:hover { transform: translateY(-2px); box-shadow: 0 10px 28px var(--shade); }
+  .ep .frame:disabled { cursor: default; transform: none; box-shadow: none; }
+  .ep .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ep .frame .ph { position: absolute; inset: 0; display: grid; place-items: center; font-size: 28px; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .ep .frame .play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .18s; background: color-mix(in srgb, var(--bg) 35%, transparent); }
+  .ep .frame:hover .play, .ep .frame:focus-visible .play { opacity: 1; }
+  .ep .frame:disabled .play { display: none; }
+  .ep .tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in srgb, var(--bg) 60%, transparent); }
+  .ep .tick > i { display: block; height: 100%; background: var(--accent); }
+  .ep.watched .frame img { opacity: .55; }
+  .ep .hd { display: flex; gap: .5rem; align-items: baseline; font-size: 13px; }
+  .ep .hd .n { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .ep .hd .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+  .ep .ft { display: flex; gap: .2rem .75rem; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
+  .ep .ft .grow { flex: 1; }
+  .ep .ft .link, .ep .ft .lk { font-size: 12px; }
+  .lk { background: none; border: 0; padding: 0; cursor: pointer; color: var(--muted); }
+  .lk:hover { color: var(--fg); }
+
+  .timeline { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 150px; gap: 1.2rem; overflow-x: auto; padding: 1.6rem 4px 12px; scrollbar-width: thin; }
+  .timeline::before { content: ""; position: absolute; left: 0; right: 0; top: .5rem; height: 1px; background: var(--line); min-width: 100%; }
+  .tl { position: relative; display: flex; flex-direction: column; gap: .4rem; }
+  .tl::before { content: ""; position: absolute; top: -1.35rem; left: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--faint); box-shadow: 0 0 0 3px var(--bg); }
+  .tl.here::before { background: var(--accent); }
+  .tl.aside { opacity: .8; }
+  .tl .when { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: -.25rem; }
+  .tl.here .frame { box-shadow: 0 0 0 2px var(--accent); }
+
+  .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: .8rem; }
+  .person { display: flex; gap: .7rem; align-items: center; background: var(--card); border-radius: 12px; padding: .5rem; box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
+  .person img, .person .ph { width: 46px; height: 62px; border-radius: 8px; object-fit: cover; background: var(--card-2); flex: none; }
+  .person .who2 { flex: 1; min-width: 0; font-size: 13px; }
+  .person .who2 div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .person.va { flex-direction: row; }
+  .person .va-side { text-align: right; }
+
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: .45rem 1.5rem; font-size: 13.5px; max-width: 720px; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .8rem; margin-top: 1.4rem; }
+  .gallery img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; background: var(--card); display: block; }
+
+  /* ---- search, library ---- */
+  .searchbar { display: flex; align-items: center; gap: .6rem; background: var(--card); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); padding: .15rem .35rem .15rem .9rem; }
+  .searchbar:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+  .searchbar svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
+  .searchbar input { flex: 1; min-width: 0; background: none; border: 0; padding: .75rem 0; font-size: 15px; box-shadow: none; }
+  .searchbar kbd { font: 11px "Cascadia Mono", Consolas, monospace; color: var(--faint); padding: .15rem .4rem; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line); margin-right: .4rem; }
+  .filters { display: flex; flex-wrap: wrap; gap: .2rem 1.1rem; margin: .8rem 0 1.4rem; align-items: center; }
+  .filters .clear { margin-left: auto; }
+  .libbar { display: flex; flex-wrap: wrap; gap: .6rem 1.2rem; align-items: center; margin: 0 0 1.3rem; }
+  .libbar .grow { flex: 1; }
+  .libbar input.field { width: 220px; padding: .45rem .7rem; }
+  .statuses { display: flex; flex-wrap: wrap; gap: .1rem 1.1rem; }
+  .statuses button { background: none; border: 0; padding: .3rem 0; cursor: pointer; color: var(--muted); font-size: 14px; position: relative; }
+  .statuses button:hover { color: var(--fg); }
+  .statuses button[aria-pressed=true] { color: var(--fg); font-weight: 600; }
+  .statuses button[aria-pressed=true]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px; background: var(--accent); border-radius: 2px; }
+  .statuses .count { color: var(--faint); font-weight: 400; font-size: 12px; margin-left: .25rem; }
+
+  /* ---- schedule ---- */
+  .days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .5rem; margin-bottom: 1.4rem; }
+  .days button {
+    background: var(--card); border: 0; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line); padding: .6rem .5rem; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: .1rem; transition: background .15s;
+  }
+  .days button:hover { background: var(--card-2); }
+  .days button .d { font-size: 12px; color: var(--muted); }
+  .days button .n { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .days button .c { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .days button[aria-pressed=true] { box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .days button[aria-pressed=true] .d { color: var(--accent); }
+  .slots { display: flex; flex-direction: column; }
+  .slot { display: grid; grid-template-columns: 84px 44px minmax(0, 1fr) auto; gap: 1rem; align-items: center; padding: .6rem .4rem; border-radius: 10px; box-shadow: 0 1px 0 var(--line); }
+  .slot:hover { background: var(--card); }
+  .slot time { font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .slot img, .slot .ph { width: 44px; height: 62px; border-radius: 7px; object-fit: cover; background: var(--card); }
+  .slot .t { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slot .r { text-align: right; font-size: 12px; white-space: nowrap; }
+  .slot.past { opacity: .6; }
+  .slot.mine .t::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: .5rem; vertical-align: middle; }
+  .nowline { display: flex; align-items: center; gap: .6rem; color: var(--accent); font-size: 11.5px; margin: .3rem 0; }
+  .nowline::after { content: ""; flex: 1; height: 1px; background: var(--accent); opacity: .6; }
+
+  /* ---- stats ---- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; margin-bottom: 1.8rem; }
+  .tile { background: var(--card); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); padding: 1rem 1.1rem; }
+  .tile .v { font-size: 28px; font-weight: 680; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .tile .k { font-size: 12.5px; color: var(--muted); }
+  .panel { background: var(--card); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); padding: 1.1rem 1.25rem; margin-bottom: 1.2rem; }
+  .panel h2 { margin-bottom: .9rem; }
+  .panel svg { display: block; max-width: 100%; }
+  .two { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 1.2rem; }
+  .toprow { display: grid; grid-template-columns: 22px 36px minmax(0, 1fr) auto; gap: .8rem; align-items: center; padding: .4rem 0; font-size: 13px; }
+  .toprow img, .toprow .ph { width: 36px; height: 50px; border-radius: 6px; object-fit: cover; background: var(--card-2); }
+  .toprow .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toprow .bar { height: 3px; border-radius: 2px; background: var(--accent); margin-top: .3rem; }
+
+  /* ---- settings ---- */
+  .settings { max-width: 760px; }
+  .set { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .3rem 1.5rem; align-items: center; padding: 1rem 0; box-shadow: 0 1px 0 var(--line); }
+  .set .k { font-weight: 600; }
+  .set .h { grid-column: 1; font-size: 12.5px; color: var(--muted); }
+  .set .c { grid-row: 1 / span 2; grid-column: 2; }
+  .settings h2 { margin: 2rem 0 .2rem; }
+  .skins { display: flex; gap: .8rem; flex-wrap: wrap; }
+  .skin { background: none; border: 0; cursor: pointer; display: flex; flex-direction: column; gap: .35rem; align-items: center; font-size: 12px; color: var(--muted); }
+  .skin i { display: block; width: 64px; height: 42px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line); position: relative; overflow: hidden; }
+  .skin i b { position: absolute; right: 8px; bottom: 8px; width: 14px; height: 14px; border-radius: 50%; }
+  .skin[aria-pressed=true] { color: var(--fg); font-weight: 600; }
+  .skin[aria-pressed=true] i { box-shadow: 0 0 0 2px var(--accent); }
+
+  /* ---- overlays ---- */
+  .overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; padding: 1rem; animation: fade .15s ease-out; }
+  @keyframes fade { from { opacity: 0; } }
+  .modal { background: var(--card); border-radius: 16px; box-shadow: inset 0 0 0 1px var(--line), 0 24px 70px rgba(0, 0, 0, .5); width: min(720px, 100%); max-height: 86vh; display: flex; flex-direction: column; animation: rise .22s cubic-bezier(.2, .8, .2, 1); }
+  .modal header { padding: 1rem 1.25rem .8rem; display: flex; gap: 1rem; align-items: center; box-shadow: 0 1px 0 var(--line); }
+  .modal header h3 { margin: 0; font-size: 15px; flex: 1; font-weight: 650; }
+  .modal .body { padding: .6rem 1.25rem 1.1rem; overflow: auto; }
+  .rels { display: flex; flex-direction: column; }
+  .rel { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1.1rem; align-items: center; text-align: left; background: none; border: 0; cursor: pointer; padding: .65rem .5rem; border-radius: 10px; box-shadow: 0 1px 0 var(--line); }
+  .rel:hover { background: var(--card-2); }
+  .rel .nm { font-size: 13px; overflow-wrap: anywhere; }
+  .rel .nm small { display: block; color: var(--accent); font-size: 11.5px; margin-top: .1rem; }
+  .rel .sz, .rel .sd { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; min-width: 64px; }
+  .rel .sd.hi { color: var(--ok); }
+
+  .resolving { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 1.25rem; align-items: center; padding: 1.1rem 1.25rem 1.25rem; }
+  .resolving img, .resolving .ph { width: 96px; aspect-ratio: 2 / 3; border-radius: 10px; object-fit: cover; background: var(--card-2); }
+  .steps { list-style: none; margin: .7rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; font-size: 13px; }
+  .steps li { display: flex; gap: .55rem; align-items: center; color: var(--faint); }
+  .steps li::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--card-2); flex: none; }
+  .steps li.done { color: var(--muted); }
+  .steps li.done::before { background: var(--ok); }
+  .steps li.on { color: var(--fg); }
+  .steps li.on::before { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .resolving .detail { font-size: 12px; color: var(--muted); margin-top: .6rem; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+  .toasts { position: fixed; left: 50%; bottom: 5.5rem; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; gap: .5rem; align-items: center; pointer-events: none; }
+  .toast { background: var(--fg); color: var(--bg); border-radius: 10px; padding: .6rem 1rem; font-size: 13px; box-shadow: 0 10px 30px var(--shade); animation: rise .2s ease-out; max-width: min(520px, 90vw); pointer-events: auto; }
+  .toast.error { background: var(--danger); color: #fff; }
+
+  .np {
+    position: fixed; left: 232px; right: 0; bottom: 0; z-index: 40; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 1rem; align-items: center;
+    background: var(--card); box-shadow: inset 0 1px 0 var(--line); padding: .6rem 2.5rem .7rem;
+  }
+  .np img, .np .ph { width: 44px; height: 62px; border-radius: 7px; object-fit: cover; background: var(--card-2); }
+  .np .t { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+  .np .prog { height: 3px; border-radius: 2px; background: var(--card-2); margin-top: .45rem; overflow: hidden; }
+  .np .prog > i { display: block; height: 100%; background: var(--accent); transition: width 1.9s linear; }
+
+  .signin { max-width: 560px; margin: 4rem auto 0; display: flex; flex-direction: column; gap: 1rem; }
+  .signin ol { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: .4rem; color: var(--muted); }
+  .signin ol a { color: var(--accent); }
+  .signin .row { display: flex; gap: .6rem; flex-wrap: wrap; }
+
+  @media (max-width: 1100px) {
+    .two { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: minmax(0, 1fr); }
+    aside.side { position: sticky; top: 0; z-index: 30; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .6rem 1rem; box-shadow: inset 0 -1px 0 var(--line); }
+    nav.nav { flex-direction: row; flex-wrap: wrap; }
+    nav.nav a span { display: none; }
+    nav.nav a[aria-current=page]::before { display: none; }
+    .side .grow, .who, .side-foot { display: none; }
+    .page { padding: 1.2rem 1rem 0; }
+    .hero .copy { padding: 1.5rem 1rem 1rem; }
+    .hero h1 { font-size: 28px; }
+    .banner { padding: .6rem 1rem; }
+    .tp { grid-template-columns: 120px minmax(0, 1fr); gap: 1rem; }
+    .tp .cover { width: 120px; }
+    .tp h1 { font-size: 22px; margin-top: 1rem; }
+    .np { left: 0; padding: .5rem 1rem; }
+    .days { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .slot { grid-template-columns: 52px 40px minmax(0, 1fr); }
+    .slot .r { grid-column: 3; text-align: left; }
   }
 </style>
 </head>
 <body>
 <div id="update-banner" class="banner" hidden></div>
-<header class="top">
-  <span class="brand">Anicat</span>
-  <div class="segment" role="group" aria-label="Catalog">
-    <button type="button" data-mode="anime">Anime</button>
-    <button type="button" data-mode="cinema">Films and TV</button>
-  </div>
-  <nav class="tabs" aria-label="Sections">
-    <a href="#/" data-tab="home">Up Next</a>
-    <a href="#/library" data-tab="library">Library</a>
-    <a href="#/search" data-tab="search">Search</a>
-  </nav>
-  <span class="spacer"></span>
-  <nav class="tabs" aria-label="Settings">
-    <a href="#/settings" data-tab="settings">Settings</a>
-  </nav>
-</header>
-<main id="view" tabindex="-1"></main>
-<div id="nowplaying" class="nowplaying" hidden></div>
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="#/" aria-label="Anicat home"><span data-icon="paw"></span>Anicat</a>
+    <div class="slash" id="mode" role="group" aria-label="Catalog">
+      <button type="button" data-mode="anime">Anime</button><span class="sep">/</span><button type="button" data-mode="cinema">Films and TV</button>
+    </div>
+    <nav class="nav" aria-label="Sections">
+      <a href="#/" data-tab="home"><span data-icon="home"></span><span>Home</span></a>
+      <a href="#/schedule" data-tab="schedule" data-anime-only><span data-icon="calendar"></span><span>Schedule</span></a>
+      <a href="#/library" data-tab="library"><span data-icon="library"></span><span>Library</span></a>
+      <a href="#/search" data-tab="search"><span data-icon="search"></span><span>Search</span></a>
+      <a href="#/stats" data-tab="stats"><span data-icon="chart"></span><span>Stats</span></a>
+      <a href="#/settings" data-tab="settings"><span data-icon="gear"></span><span>Settings</span></a>
+    </nav>
+    <div class="grow"></div>
+    <a class="who" id="who" href="#/settings"></a>
+    <div class="side-foot" id="side-foot"></div>
+  </aside>
+  <main id="view" tabindex="-1"></main>
+</div>
+<div id="nowplaying" class="np" hidden></div>
 <div id="overlay-root"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script>
 "use strict";
@@ -210,17 +528,44 @@ const INSTALL_COMMAND = "irm https://raw.githubusercontent.com/bonkedbythonk/ani
 // Same 85% the server replays from the start past, and the player marks
 // watched at. A resume offered above it lands in the credits.
 const RESUME_LIMIT = 0.85;
+// The Mac app's chapter and episode lists open in groups of 50; a
+// thousand-episode series drawn at once took seconds to lay out.
+const GROUP_SIZE = 50;
 const ANIME_STATUSES = ["CURRENT", "REPEATING", "PAUSED", "PLANNING", "COMPLETED", "DROPPED"];
 const CINEMA_STATUSES = ["CURRENT", "PLANNING", "COMPLETED", "DROPPED"];
 const STATUS_LABELS = {
   CURRENT: "Watching", REPEATING: "Rewatching", PAUSED: "Paused",
   PLANNING: "Planning", COMPLETED: "Completed", DROPPED: "Dropped",
 };
-const PHASE_LABELS = {
-  remembered: "Trying the release that played last time",
-  searching: "Searching for releases",
-  connecting: "Connecting to peers",
-  buffering: "Buffering",
+const PHASES = [
+  ["remembered", "Trying the release that played last time"],
+  ["searching", "Searching for releases"],
+  ["connecting", "Connecting to peers"],
+  ["buffering", "Buffering"],
+];
+const FORMAT_LABELS = { TV: "TV", TV_SHORT: "TV short", MOVIE: "Film", SPECIAL: "Special", OVA: "OVA", ONA: "ONA", MUSIC: "Music" };
+const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Horror", "Mahou Shoujo", "Mecha", "Music",
+  "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"];
+const SKINS = [
+  { id: "ink", label: "Ink and index", dark: ["#161310", "#8fb8dc"], light: ["#f1ece2", "#2f5a76"] },
+  { id: "sakura", label: "Sakura zen", dark: ["#180a10", "#e0607e"], light: ["#fdf5f7", "#c04060"] },
+  { id: "oled", label: "OLED", dark: ["#000000", "#8fb8dc"] },
+];
+
+const ICONS = {
+  paw: '<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="6.2" cy="9.6" rx="2.1" ry="2.6"/><ellipse cx="10" cy="5.8" rx="2.1" ry="2.7"/><ellipse cx="14.6" cy="5.8" rx="2.1" ry="2.7"/><ellipse cx="18.2" cy="9.6" rx="2.1" ry="2.6"/><path d="M12.2 11.2c-3.2 0-6.4 4.3-6.4 6.9 0 1.7 1.3 2.6 2.9 2.6 1.4 0 2.3-.8 3.5-.8s2.1.8 3.5.8c1.6 0 2.9-.9 2.9-2.6 0-2.6-3.2-6.9-6.4-6.9z"/></svg>',
+  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg>',
+  library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5v15M9 4.5v15"/><path d="m13 5.2 3.6-.9 3.4 14.4-3.6.9z"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 20V11M10 20V5M15 20v-7M20 20V8"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M6 18l1.4-1.4M16.6 7.4 18 6"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8v14.4a.8.8 0 0 0 1.2.7l11.3-7.2a.8.8 0 0 0 0-1.4L8.2 4.1A.8.8 0 0 0 7 4.8z"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 19.5s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 7.5 2.5c0 5.4-7.5 10-7.5 10z"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  left: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>',
+  right: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></svg>',
 };
 
 // ---- storage ----------------------------------------------------------------
@@ -292,6 +637,7 @@ function el(tag, attrs, ...children) {
       if (v === null || v === undefined || v === false) continue;
       if (k === "class") node.className = v;
       else if (k === "text") node.textContent = v;
+      else if (k === "style") node.style.cssText = v;
       else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
       else node.setAttribute(k, v === true ? "" : String(v));
     }
@@ -300,6 +646,24 @@ function el(tag, attrs, ...children) {
     if (c === null || c === undefined || c === false) continue;
     node.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
+  return node;
+}
+
+// The icon strings are constants in this file; nothing from a response ever
+// reaches innerHTML.
+function icon(name) {
+  const span = document.createElement("span");
+  span.style.display = "contents";
+  span.innerHTML = ICONS[name] || "";
+  return span.firstElementChild || span;
+}
+
+function img(src, attrs) {
+  if (!src) return el("div", { class: "ph" });
+  const node = el("img", Object.assign({ src, alt: "", loading: "lazy", decoding: "async", referrerpolicy: "no-referrer" }, attrs || {}));
+  node.addEventListener("load", () => node.classList.add("in"), { once: true });
+  // A dead CDN link leaves a broken-image glyph; the card ground reads better.
+  node.addEventListener("error", () => { node.style.visibility = "hidden"; }, { once: true });
   return node;
 }
 
@@ -319,6 +683,20 @@ function bytes(n) {
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
+
+function hours(seconds) {
+  const h = seconds / 3600;
+  if (h >= 100) return `${Math.round(h)} h`;
+  if (h >= 1) return `${h.toFixed(1)} h`;
+  return `${Math.round(seconds / 60)} min`;
+}
+
+function humanize(s) {
+  const t = String(s || "").replace(/[_-]+/g, " ").toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+function formatLabel(f) { return f ? (FORMAT_LABELS[f] || humanize(f)) : null; }
 
 // AniList synopses are HTML. Parsed into an inert document (scripts never
 // run there, images never load), then rebuilt keeping only text, <br> and
@@ -341,6 +719,12 @@ function sanitizedSynopsis(html) {
   };
   walk(doc.body, out);
   return out;
+}
+
+function plainSynopsis(html) {
+  const div = document.createElement("div");
+  div.append(sanitizedSynopsis(html));
+  return div.textContent.replace(/\s+/g, " ").trim();
 }
 
 async function mapLimited(items, limit, fn) {
@@ -381,7 +765,7 @@ function copyText(text, fallbackHost) {
   const fallback = () => {
     fallbackHost.replaceChildren(
       el("p", { class: "muted", text: "Copying was not allowed. Select the text below and copy it by hand." }),
-      el("textarea", { class: "mono", readonly: true, rows: 12, style: "width:100%" }, text),
+      el("textarea", { class: "field", readonly: true, rows: 12 }, text),
     );
     const ta = fallbackHost.querySelector("textarea");
     ta.focus();
@@ -395,24 +779,123 @@ function copyText(text, fallbackHost) {
 }
 
 function toast(message, isError) {
-  const root = document.getElementById("overlay-root");
   const node = el("div", { class: "toast" + (isError ? " error" : ""), role: "status" }, message);
-  root.append(node);
-  setTimeout(() => node.remove(), isError ? 7000 : 3500);
+  document.getElementById("toasts").append(node);
+  setTimeout(() => node.remove(), isError ? 7000 : 3200);
 }
 
-// ---- cards ------------------------------------------------------------------
+// ---- controls ---------------------------------------------------------------
+
+function slash(options, value, onChange, label) {
+  const wrap = el("div", { class: "slash", role: "group", "aria-label": label || null });
+  const buttons = [];
+  options.forEach(([v, text], i) => {
+    if (i) wrap.append(el("span", { class: "sep", text: "/" }));
+    const b = el("button", { type: "button", "aria-pressed": String(v === value), text,
+      onclick: () => {
+        if (b.getAttribute("aria-pressed") === "true") return;
+        for (const o of buttons) o.setAttribute("aria-pressed", String(o === b));
+        onChange(v);
+      } });
+    buttons.push(b);
+    wrap.append(b);
+  });
+  return wrap;
+}
+
+let openPopover = null;
+function closePopover() {
+  if (!openPopover) return;
+  openPopover.remove();
+  openPopover = null;
+}
+document.addEventListener("pointerdown", (e) => {
+  if (openPopover && !openPopover.contains(e.target) && !(openPopover.owner && openPopover.owner.contains(e.target))) closePopover();
+});
+// Capture phase sees the popover's own scroll too; closing on that shut the
+// Year menu the moment it opened, focusing a saved year below the fold.
+window.addEventListener("scroll", (e) => {
+  if (openPopover && e.target instanceof Node && openPopover.contains(e.target)) return;
+  closePopover();
+}, true);
+window.addEventListener("resize", closePopover);
+
+// A text-menu dropdown: "Genre Any" as words, the choices in a popover.
+function menu({ label, options, value, onChange }) {
+  const current = () => options.find(([v]) => v === btn.value) || options[0];
+  const valueNode = el("b");
+  const btn = el("button", { type: "button", class: "menu-btn", "aria-haspopup": "listbox" },
+    label ? el("span", {}, label) : null, valueNode, icon("chevron"));
+  btn.value = value === undefined ? options[0][0] : value;
+  const sync = () => { valueNode.textContent = current()[1]; };
+  btn.set = (v) => { btn.value = v; sync(); };
+  sync();
+  btn.addEventListener("click", () => {
+    if (openPopover && openPopover.owner === btn) { closePopover(); return; }
+    closePopover();
+    const pop = el("div", { class: "popover", role: "listbox" });
+    pop.owner = btn;
+    let hot = Math.max(0, options.findIndex(([v]) => v === btn.value));
+    const items = options.map(([v, text], i) => el("button", {
+      type: "button", role: "option", "aria-checked": String(v === btn.value), text,
+      onclick: () => { closePopover(); if (v !== btn.value) { btn.set(v); onChange(v); } btn.focus(); },
+      onmouseenter: () => { hot = i; paint(); },
+    }));
+    const paint = () => items.forEach((it, i) => it.classList.toggle("hot", i === hot));
+    pop.append(...items);
+    pop.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { hot = Math.min(items.length - 1, hot + 1); paint(); items[hot].focus(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { hot = Math.max(0, hot - 1); paint(); items[hot].focus(); e.preventDefault(); }
+      else if (e.key === "Escape") { closePopover(); btn.focus(); e.stopPropagation(); }
+    });
+    document.getElementById("overlay-root").append(pop);
+    const r = btn.getBoundingClientRect();
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+    pop.style.top = `${r.bottom + h + 8 > innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
+    openPopover = pop;
+    paint();
+    items[hot].focus();
+    items[hot].scrollIntoView({ block: "nearest" });
+  });
+  return btn;
+}
+
+function modal(title, ...body) {
+  const root = document.getElementById("overlay-root");
+  const prev = document.activeElement;
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+    if (prev && prev.focus) prev.focus();
+  };
+  const onKey = (e) => { if (e.key === "Escape" && !openPopover) close(); };
+  const closeBtn = el("button", { type: "button", class: "btn ghost", text: "Close", onclick: close });
+  const overlay = el("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) close(); } },
+    el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": title },
+      el("header", {}, el("h3", {}, title), closeBtn),
+      ...body,
+    ));
+  root.append(overlay);
+  document.addEventListener("keydown", onKey);
+  closeBtn.focus();
+  return { close, closeBtn, overlay };
+}
+
+// ---- cards and shelves ------------------------------------------------------
 
 function posterCard(item, opts = {}) {
-  const href = titleHref(item.catalog, item.catalog_id);
-  const img = item.cover_image
-    ? el("img", { class: "poster", src: item.cover_image, alt: "", loading: "lazy", referrerpolicy: "no-referrer" })
-    : el("div", { class: "poster" });
-  return el("div", { class: "poster-card" },
-    el("a", { class: "poster-link", href, "aria-label": item.title }, img),
-    el("a", { class: "name", href, style: "color:inherit;text-decoration:none" }, item.title),
-    opts.sub ? el("div", { class: "sub" }, opts.sub) : null,
-    opts.actions ? el("div", { class: "actions" }, opts.actions) : null,
+  const href = opts.href || titleHref(item.catalog, item.catalog_id);
+  const total = item.episodes || 0;
+  const frac = opts.fraction !== undefined ? opts.fraction : (total && item.progress ? Math.min(1, item.progress / total) : 0);
+  return el("div", { class: "pc" },
+    el("a", { class: "frame", href, "aria-label": item.title },
+      img(item.cover_image),
+      opts.score ? el("span", { class: "score num" }, opts.score) : null,
+      frac > 0 ? el("span", { class: "tick" }, el("i", { style: `width:${(frac * 100).toFixed(1)}%` })) : null,
+    ),
+    el("a", { class: "name t-name", href }, item.title),
+    opts.sub !== "" ? el("div", { class: "meta" }, opts.sub !== undefined ? opts.sub : summarySub(item)) : null,
   );
 }
 
@@ -420,48 +903,86 @@ function summarySub(item) {
   const bits = [];
   if (item.catalog === "tmdb_movie") bits.push("Film");
   else if (item.catalog === "tmdb_tv") bits.push("Series");
-  else if (item.format) bits.push(item.format.replace(/_/g, " "));
+  else if (item.format) bits.push(formatLabel(item.format));
   // TMDB rows report a film as one episode; only AniList counts mean anything.
-  if (item.episodes && item.catalog === "anilist") bits.push(`${item.episodes} ep`);
-  if (item.progress) bits.push(`seen ${item.progress}`);
-  return bits.join(" / ");
-}
-
-function gridOf(items, opts) {
-  if (!items.length) return el("p", { class: "muted", text: "Nothing here." });
-  return el("div", { class: "grid" }, items.map((it) => posterCard(it, opts ? opts(it) : { sub: summarySub(it) })));
-}
-
-async function section(host, title, loader) {
-  const body = el("div", {}, el("p", { class: "muted", text: "Loading..." }));
-  host.append(el("section", {}, el("h2", {}, title), body));
-  try {
-    const content = await loader();
-    body.replaceChildren(content);
-  } catch (e) {
-    body.replaceChildren(el("p", { class: "error", text: errorText(e) }));
+  if (item.catalog === "anilist") {
+    if (item.progress && item.episodes) bits.push(`${item.progress} / ${item.episodes}`);
+    else if (item.progress) bits.push(`${item.progress} seen`);
+    else if (item.episodes) bits.push(`${item.episodes} ep`);
   }
+  return bits.join(" · ");
+}
+
+function scoreOf(item) { return item.average_score ? `${item.average_score}%` : null; }
+
+function grid(items, opts) {
+  if (!items.length) return el("p", { class: "empty", text: "Nothing here." });
+  return el("div", { class: "grid" }, items.map((it) => posterCard(it, opts ? opts(it) : {})));
+}
+
+// A horizontal shelf. The loader answers card nodes; an empty answer or an
+// error takes the whole shelf off the page unless `loud` is set, so a flaky
+// optional row never leaves a broken heading behind.
+function shelf(host, title, loader, opts = {}) {
+  const rail = el("div", { class: "rail" + (opts.wide ? " wide" : "") });
+  const step = (dir) => rail.scrollBy({ left: dir * rail.clientWidth * 0.85, behavior: "smooth" });
+  const sub = el("span", { class: "sub" });
+  const section = el("section", { class: "shelf" },
+    el("div", { class: "shelf-head" },
+      el("h2", {}, title), sub, el("span", { class: "grow" }),
+      el("div", { class: "arrows" },
+        el("button", { type: "button", "aria-label": "Scroll left", onclick: () => step(-1) }, icon("left")),
+        el("button", { type: "button", "aria-label": "Scroll right", onclick: () => step(1) }, icon("right"))),
+    ),
+    rail);
+  for (let i = 0; i < (opts.wide ? 4 : 7); i++) {
+    rail.append(el("div", { class: "skel", style: opts.wide ? "aspect-ratio:16/9" : "aspect-ratio:2/3" }));
+  }
+  host.append(section);
+  return (async () => {
+    try {
+      const out = await loader(sub);
+      const nodes = Array.isArray(out) ? out : [];
+      if (!nodes.length) {
+        if (opts.loud) rail.replaceWith(el("p", { class: "empty", text: opts.emptyText || "Nothing here." }));
+        else section.remove();
+        return [];
+      }
+      rail.replaceChildren(...nodes);
+      return nodes;
+    } catch (e) {
+      if (opts.loud) rail.replaceWith(el("p", { class: "error", text: errorText(e) }));
+      else section.remove();
+      return [];
+    }
+  })();
+}
+
+function page(host) {
+  const p = el("div", { class: "page" });
+  host.append(p);
+  return p;
 }
 
 // ---- playback ---------------------------------------------------------------
 
 let resolving = false;
 
-async function play({ catalog, catalogId, episode, title, chosenName, fromStart }) {
+async function play({ catalog, catalogId, episode, title, chosenName, fromStart, cover }) {
   if (resolving) { toast("A play is already starting."); return; }
   resolving = true;
   const dub = preferDub(catalog, catalogId);
-  const root = document.getElementById("overlay-root");
-  const phase = el("p", { text: "Starting..." });
-  const detail = el("p", { class: "muted" });
-  const closeBtn = el("button", { type: "button", text: "Hide", onclick: () => overlay.remove() });
-  const overlay = el("div", { class: "overlay" },
-    el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": "Starting playback" },
-      el("header", {}, el("h3", {}, `${title || "Episode"}, episode ${episode}`), closeBtn),
-      el("div", { class: "body" }, phase, detail),
-    ));
-  root.append(overlay);
-  closeBtn.focus();
+  const steps = PHASES.map(([key, text]) => el("li", { "data-phase": key, text }));
+  const detail = el("div", { class: "detail" });
+  const headline = el("div", { style: "font-weight:650;font-size:15px" },
+    catalog === "tmdb_movie" ? (title || "Film") : `${title || "Episode"}`);
+  const sub = el("div", { class: "meta" }, catalog === "tmdb_movie" ? "Film" : `Episode ${episode}${dub ? " · Dub" : ""}`);
+  const m = modal("Starting playback",
+    el("div", { class: "resolving" },
+      img(cover),
+      el("div", {}, headline, sub, el("ul", { class: "steps" }, steps), detail)));
+  // Only "remembered" is optional; hide it until the engine says it is trying one.
+  steps[0].hidden = true;
 
   let done = false;
   const poll = async () => {
@@ -469,18 +990,23 @@ async function play({ catalog, catalogId, episode, title, chosenName, fromStart 
       try {
         const p = await api("GET", `/api/resolve-progress/${catalog}/${catalogId}/${episode}`);
         if (!done && p) {
-          phase.textContent = PHASE_LABELS[p.phase] || p.phase;
+          const at = PHASES.findIndex(([k]) => k === p.phase);
+          if (p.phase === "remembered") steps[0].hidden = false;
+          steps.forEach((li, i) => {
+            li.className = i < at ? "done" : i === at ? "on" : "";
+          });
           const bits = [];
           if (p.release) bits.push(p.release);
           if (p.candidates) bits.push(`${p.candidates} candidates`);
-          if (p.attempt) bits.push(`attempt ${p.attempt}`);
+          if (p.attempt > 1) bits.push(`attempt ${p.attempt}`);
           if (p.bytes_per_second) bits.push(`${bytes(p.bytes_per_second)}/s`);
-          detail.textContent = bits.join(" / ");
+          detail.textContent = bits.join(" · ");
         }
       } catch { /* the play call reports the real failure */ }
       await new Promise((r) => setTimeout(r, 500));
     }
   };
+  steps[1].className = "on";
   poll();
 
   try {
@@ -489,35 +1015,24 @@ async function play({ catalog, catalogId, episode, title, chosenName, fromStart 
       prefer_dub: dub, chosen_name: chosenName || null, from_start: !!fromStart,
     });
     done = true;
-    overlay.remove();
+    m.close();
     toast("Playing in mpv.");
     state.playerRouteMissing = false;
     pollPlayer();
   } catch (e) {
     done = true;
-    phase.textContent = "Could not start playback.";
-    phase.className = "error";
-    detail.textContent = errorText(e);
-    closeBtn.textContent = "Close";
+    steps.forEach((li) => { if (li.className === "on") li.className = ""; });
+    detail.className = "detail error";
+    detail.textContent = `Could not start playback. ${errorText(e)}`;
   } finally {
     resolving = false;
   }
 }
 
-function openReleases({ catalog, catalogId, episode, title }) {
-  const root = document.getElementById("overlay-root");
+function openReleases({ catalog, catalogId, episode, title, cover }) {
   const body = el("div", { class: "body" }, el("p", { class: "muted", text: "Searching the indexers..." }));
-  const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
-  const closeBtn = el("button", { type: "button", text: "Close", onclick: close });
-  const overlay = el("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) close(); } },
-    el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": "Choose release" },
-      el("header", {}, el("h3", {}, `Choose release: episode ${episode}`), closeBtn),
-      body,
-    ));
-  root.append(overlay);
-  document.addEventListener("keydown", onKey);
-  closeBtn.focus();
+  const sortHost = el("div", { style: "padding:.7rem 1.25rem 0" });
+  const m = modal(catalog === "tmdb_movie" ? "Choose a release" : `Choose a release for episode ${episode}`, sortHost, body);
 
   const dub = preferDub(catalog, catalogId);
   const qs = new URLSearchParams({ catalog, catalog_id: catalogId, episode, prefer_dub: dub });
@@ -525,19 +1040,33 @@ function openReleases({ catalog, catalogId, episode, title }) {
   api("GET", `/api/releases?${qs}`).then((data) => {
     const rows = (data && data.releases) || [];
     if (!rows.length) {
-      body.replaceChildren(el("p", { class: "muted", text: "No releases found for this episode." }));
+      body.replaceChildren(el("p", { class: "empty", text: "No releases found for this episode." }));
       return;
     }
-    body.replaceChildren(el("ul", { class: "release-list" }, rows.map((r) =>
-      el("li", {}, el("button", {
-        type: "button",
-        onclick: () => { close(); play({ catalog, catalogId, episode, title, chosenName: r.name }); },
-      },
-        el("span", { class: "rel-name" }, r.name),
-        r.name === data.remembered ? el("span", { class: "tag ok", text: "last played" }) : null,
-        r.is_dub ? el("span", { class: "tag", text: "dub" }) : null,
-        el("span", { class: "muted", text: `${r.seeders} seeders` }),
-      )))));
+    let sort = store.get("anicat_release_sort") || "seeders";
+    const draw = () => {
+      const sorted = rows.slice();
+      if (sort === "seeders") sorted.sort((a, b) => (b.seeders_known - a.seeders_known) || (b.seeders - a.seeders));
+      else if (sort === "small") sorted.sort((a, b) => (a.size_bytes || Infinity) - (b.size_bytes || Infinity));
+      else if (sort === "large") sorted.sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0));
+      body.replaceChildren(el("div", { class: "rels" }, sorted.map((r) =>
+        el("button", { type: "button", class: "rel",
+          onclick: () => { m.close(); play({ catalog, catalogId, episode, title, chosenName: r.name, cover }); } },
+          el("span", { class: "nm" }, r.name,
+            r.name === data.remembered || r.is_dub
+              ? el("small", {}, [r.name === data.remembered ? "Played last time" : null, r.is_dub ? "Dub" : null].filter(Boolean).join(" · "))
+              : null),
+          el("span", { class: "sz" }, r.size_bytes ? bytes(r.size_bytes) : ""),
+          // A count the indexer never reported is not zero seeders.
+          el("span", { class: "sd" + (r.seeders_known && r.seeders >= 20 ? " hi" : "") },
+            r.seeders_known ? `${r.seeders} seeders` : "seeders unknown"),
+        ))));
+    };
+    sortHost.replaceChildren(el("div", { class: "filters", style: "margin:0" },
+      el("span", { class: "meta" }, `${rows.length} releases`),
+      menu({ label: "Sort", value: sort, options: [["seeders", "Seeders"], ["small", "Smallest"], ["large", "Largest"], ["found", "As found"]],
+        onChange: (v) => { sort = v; store.set("anicat_release_sort", v); draw(); } })));
+    draw();
   }, (e) => {
     body.replaceChildren(el("p", { class: "error", text: errorText(e) }));
   });
@@ -566,23 +1095,35 @@ async function pollPlayer() {
   playerTimer = setTimeout(pollPlayer, 2000);
 }
 
+let npKey = null;
 function renderPlayer(p) {
   const bar = document.getElementById("nowplaying");
-  if (!p || !p.active) { bar.hidden = true; return; }
-  const title = p.title || "Playing";
+  if (!p || !p.active) { bar.hidden = true; npKey = null; return; }
+  const key = `${p.catalog}:${p.catalog_id}:${p.episode}`;
   const href = p.catalog && p.catalog_id ? titleHref(p.catalog, p.catalog_id) : null;
   const bits = [];
   if (p.episode !== null && p.episode !== undefined && p.catalog !== "tmdb_movie") bits.push(`Episode ${p.episode}`);
   bits.push(`${clock(p.position)} / ${clock(p.duration)}`);
-  if (p.paused) bits.push("paused");
-  if (p.next_ready) bits.push("next episode ready");
-  bar.replaceChildren(
-    el("div", { class: "np-text" },
-      href ? el("a", { class: "np-title", href, style: "color:inherit" }, title) : el("div", { class: "np-title" }, title),
-      el("div", { class: "muted" }, bits.join(" / ")),
-    ),
-    el("button", { type: "button", text: "Stop", onclick: stopPlayer }),
-  );
+  if (p.paused) bits.push("Paused");
+  if (p.next_ready) bits.push("Next episode ready");
+  const frac = p.duration > 0 ? Math.min(1, (p.position || 0) / p.duration) : 0;
+  if (npKey !== key) {
+    npKey = key;
+    const cover = el("div", { class: "ph" });
+    bar.replaceChildren(
+      cover,
+      el("div", { style: "min-width:0" },
+        href ? el("a", { class: "t t-name", href }, p.title || "Playing") : el("span", { class: "t" }, p.title || "Playing"),
+        el("div", { class: "meta", "data-np": "meta" }),
+        el("div", { class: "prog" }, el("i", { "data-np": "bar" }))),
+      el("button", { type: "button", class: "btn", onclick: stopPlayer }, icon("stop"), "Stop"),
+    );
+    if (p.catalog && p.catalog_id) {
+      fetchDetail(p.catalog, p.catalog_id).then((d) => { if (npKey === key && d.cover_image) cover.replaceWith(img(d.cover_image)); }, () => {});
+    }
+  }
+  bar.querySelector('[data-np="meta"]').textContent = bits.join(" · ");
+  bar.querySelector('[data-np="bar"]').style.width = `${(frac * 100).toFixed(2)}%`;
   bar.hidden = false;
 }
 
@@ -597,6 +1138,7 @@ async function stopPlayer() {
     }
   }
   document.getElementById("nowplaying").hidden = true;
+  npKey = null;
   pollPlayer();
 }
 
@@ -604,107 +1146,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") pollPlayer();
 });
 
-// ---- views ------------------------------------------------------------------
-
-function signInPrompt() {
-  return el("div", { class: "card" },
-    el("p", {}, "Sign in to AniList to see your list, Up Next and to sync what you watch."),
-    el("a", { href: "#/signin" }, "Sign in"),
-  );
-}
-
-async function viewSignIn(host) {
-  const input = el("input", { type: "text", placeholder: "Paste the token or the whole address", "aria-label": "AniList token", autocomplete: "off", spellcheck: "false" });
-  const status = el("p", { class: "muted" });
-  const submit = el("button", { type: "submit", class: "primary", text: "Sign in" });
-  const form = el("form", {
-    class: "card signin",
-    onsubmit: async (ev) => {
-      ev.preventDefault();
-      const token = extractToken(input.value);
-      if (!token) { status.className = "error"; status.textContent = "That does not contain a token."; return; }
-      submit.disabled = true;
-      status.className = "muted";
-      status.textContent = "Checking with AniList...";
-      try {
-        const r = await api("POST", "/api/token", { token });
-        state.signedIn = !!r.signed_in;
-        state.profile = r.profile || null;
-        state.viewerError = null;
-        store.del("anicat_skip_signin");
-        location.hash = "#/";
-      } catch (e) {
-        status.className = "error";
-        status.textContent = e instanceof ApiFailure && e.anilistDown ? errorText(e) : `AniList refused the token: ${errorText(e)}`;
-      } finally {
-        submit.disabled = false;
-      }
-    },
-  },
-    el("h1", {}, "Sign in to AniList"),
-    el("p", {}, "Anime lists and progress sync with your AniList account. Films and TV work without one."),
-    el("ol", {},
-      el("li", {}, el("a", { href: SIGNIN_URL, target: "_blank", rel: "noopener noreferrer" }, "Open AniList sign-in"), " and approve Anicat."),
-      el("li", {}, "AniList shows a page whose address contains access_token=. Copy the token, or the whole address, and paste it here."),
-    ),
-    input,
-    el("div", { class: "toolbar" },
-      submit,
-      el("button", { type: "button", text: "Skip, Films and TV only", onclick: () => {
-        store.set("anicat_skip_signin", "1");
-        setMode("cinema");
-        location.hash = "#/";
-      } }),
-    ),
-    status,
-  );
-  host.append(form);
-  input.focus();
-}
-
-function extractToken(raw) {
-  const text = (raw || "").trim();
-  if (!text) return null;
-  const m = text.match(/access_token=([^&\s#]+)/);
-  if (m) return decodeURIComponent(m[1]);
-  // A bare token has no spaces and no URL punctuation.
-  if (/^[A-Za-z0-9._\-]+$/.test(text)) return text;
-  return null;
-}
-
-async function viewHome(host, token) {
-  if (state.mode === "anime") {
-    host.append(el("h1", {}, state.signedIn ? "Up Next" : "Anime"));
-    if (!state.signedIn) {
-      host.append(signInPrompt());
-    } else {
-      await section(host, "Continue watching", () => upNextAnime());
-    }
-    if (token !== state.renderToken) return;
-    section(host, "Trending", async () => gridOf(await api("GET", "/api/trending?limit=24")));
-    section(host, "Airing now", async () => gridOf(await api("GET", "/api/discover?status=RELEASING&limit=24")));
-  } else {
-    host.append(el("h1", {}, "Up Next"));
-    await section(host, "Continue watching", () => upNextCinema());
-    if (token !== state.renderToken) return;
-    let kinds = [];
-    try {
-      kinds = await api("GET", "/api/cinema/rows");
-    } catch (e) {
-      host.append(el("p", { class: "error", text: errorText(e) }));
-      return;
-    }
-    if (token !== state.renderToken) return;
-    for (const kind of kinds) {
-      section(host, rowLabel(kind), async () => gridOf(await api("GET", `/api/cinema/row/${encodeURIComponent(kind)}`)));
-    }
-  }
-}
-
-function rowLabel(kind) {
-  const s = String(kind).replace(/[_-]+/g, " ");
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
+// ---- up next ----------------------------------------------------------------
 
 // One card per title, newest watch first. A title whose last episode stopped
 // short of the watched line resumes it; one that finished it offers the next.
@@ -715,7 +1157,7 @@ async function upNextFrom(rows, wantCinema) {
     const key = `${r.catalog}:${r.catalog_id}`;
     if (!seen.has(key)) seen.set(key, r);
   }
-  const latest = [...seen.values()].slice(0, 12);
+  const latest = [...seen.values()].slice(0, 14);
   const cards = await mapLimited(latest, 4, async (r) => {
     const [detail, prog] = await Promise.all([
       fetchDetail(r.catalog, r.catalog_id),
@@ -729,348 +1171,1088 @@ async function upNextFrom(rows, wantCinema) {
       const row = (detail.episodes || []).find((e) => e.number === episode);
       if (r.catalog === "tmdb_movie" || !row || !row.is_aired) return null;
     }
-    return { detail, catalog: r.catalog, episode, resumable, at: resumable ? prog.stop_time : 0 };
+    return { detail, catalog: r.catalog, episode, resumable, at: resumable ? prog.stop_time : 0, fraction: resumable ? fraction : 0 };
   });
   return cards.filter((c) => c && !c.error).sort((a, b) => (b.resumable ? 1 : 0) - (a.resumable ? 1 : 0));
 }
 
-function upNextGrid(cards, extra) {
-  const items = cards.map((c) => posterCard(
-    { catalog: c.catalog, catalog_id: c.detail.catalog_id, title: c.detail.title, cover_image: c.detail.cover_image },
-    {
-      sub: c.resumable
-        ? `${c.catalog === "tmdb_movie" ? "Resume" : `Resume episode ${c.episode}`} at ${clock(c.at)}`
-        : `Next: episode ${c.episode}`,
-      actions: el("button", { type: "button", text: c.resumable ? "Resume" : "Play", onclick: () =>
-        play({ catalog: c.catalog, catalogId: c.detail.catalog_id, episode: c.episode, title: c.detail.title }) }),
-    }));
-  const all = items.concat(extra || []);
-  if (!all.length) return el("p", { class: "muted", text: "Nothing in progress. Start something from the rows below or Search." });
-  return el("div", { class: "grid" }, all);
-}
-
-async function upNextAnime() {
-  const [activity, current] = await Promise.all([
-    api("GET", "/api/activity?limit=200"),
-    api("GET", "/api/user-list?status=CURRENT").catch(() => []),
-  ]);
-  const cards = await upNextFrom(activity, false);
-  const shown = new Set(cards.map((c) => c.detail.catalog_id));
-  // Titles watching on AniList with nothing played on this machine yet.
-  const extra = current
-    .filter((m) => !shown.has(m.catalog_id))
-    .filter((m) => !m.episodes || (m.progress || 0) < m.episodes)
-    .map((m) => {
-      const episode = (m.progress || 0) + 1;
-      return posterCard(m, {
-        sub: `Next: episode ${episode}`,
-        actions: el("button", { type: "button", text: "Play", onclick: () =>
-          play({ catalog: "anilist", catalogId: m.catalog_id, episode, title: m.title }) }),
-      });
-    });
-  return upNextGrid(cards, extra);
-}
-
-async function upNextCinema() {
+async function upNextCards() {
   const activity = await api("GET", "/api/activity?limit=200");
-  return upNextGrid(await upNextFrom(activity, true));
+  const cards = await upNextFrom(activity, state.mode === "cinema");
+  if (state.mode === "anime" && state.signedIn) {
+    // Titles watching on AniList with nothing played on this machine yet.
+    const current = await api("GET", "/api/user-list?status=CURRENT").catch(() => []);
+    const shown = new Set(cards.map((c) => c.detail.catalog_id));
+    const extra = current
+      .filter((m) => !shown.has(m.catalog_id))
+      .filter((m) => {
+        const next = (m.progress || 0) + 1;
+        const aired = m.released_episodes || (m.next_episode ? m.next_episode - 1 : m.episodes);
+        return !aired || next <= aired;
+      })
+      .slice(0, 8);
+    const more = await mapLimited(extra, 4, async (m) => {
+      const detail = await fetchDetail("anilist", m.catalog_id);
+      const episode = (m.progress || 0) + 1;
+      const row = (detail.episodes || []).find((e) => e.number === episode);
+      if (row && !row.is_aired) return null;
+      return { detail, catalog: "anilist", episode, resumable: false, at: 0, fraction: 0 };
+    });
+    cards.push(...more.filter((c) => c && !c.error));
+  }
+  return cards;
 }
 
-async function viewLibrary(host, token) {
-  host.append(el("h1", {}, "Library"));
+function cardLabel(c) {
+  if (c.catalog === "tmdb_movie") return c.resumable ? `Resume at ${clock(c.at)}` : "Play";
+  return c.resumable ? `Episode ${c.episode} · ${clock(c.at)}` : `Episode ${c.episode}`;
+}
+
+function playCard(c) {
+  play({ catalog: c.catalog, catalogId: c.detail.catalog_id, episode: c.episode, title: c.detail.title, cover: c.detail.cover_image });
+}
+
+function wideCard(c) {
+  const row = (c.detail.episodes || []).find((e) => e.number === c.episode);
+  const still = (row && row.thumbnail) || c.detail.banner_image || c.detail.cover_image;
+  const node = el("div", { class: "wc", tabindex: "0", role: "button", "aria-label": `${c.detail.title}, ${cardLabel(c)}`,
+    onclick: () => playCard(c),
+    onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); playCard(c); } } },
+    el("div", { class: "frame" },
+      img(still),
+      el("div", { class: "play" }, el("span", { class: "play-dot" }, icon("play"))),
+      c.fraction > 0 ? el("span", { class: "tick" }, el("i", { style: `width:${(c.fraction * 100).toFixed(1)}%` })) : null),
+    el("div", { class: "line" },
+      el("a", { class: "name t-name", href: titleHref(c.catalog, c.detail.catalog_id), onclick: (e) => e.stopPropagation() }, c.detail.title),
+      el("span", { class: "go num" }, c.resumable ? "Resume" : "Play")),
+    el("div", { class: "meta" }, cardLabel(c), row && row.title && c.catalog !== "tmdb_movie" ? el("span", { class: "dot" }, row.title) : null),
+  );
+  return node;
+}
+
+// ---- views: home ------------------------------------------------------------
+
+function hero(host) {
+  const art = el("div", { class: "art" });
+  const copy = el("div", { class: "copy" });
+  const node = el("section", { class: "hero skeleton" }, art, copy);
+  host.append(node);
+  return {
+    fill({ eyebrow, detail, catalog, primary, secondary }) {
+      node.classList.remove("skeleton");
+      const banner = detail.banner_image || detail.cover_image;
+      if (banner) art.replaceChildren(img(banner, { loading: "eager" }));
+      const meta = [formatLabel(detail.format), detail.year, detail.studio, detail.average_score ? `${detail.average_score}%` : null,
+        (detail.genres || []).slice(0, 3).join(", ") || null].filter(Boolean);
+      copy.replaceChildren(
+        el("div", { class: "eyebrow" }, eyebrow),
+        el("a", { href: titleHref(catalog, detail.catalog_id) }, el("h1", { class: "t-name" }, detail.title)),
+        el("div", { class: "meta" }, meta.map((m, i) => el("span", { class: i ? "dot" : null }, m))),
+        el("p", { class: "syn" }, plainSynopsis(detail.synopsis)),
+        el("div", { class: "row" }, primary, secondary),
+      );
+    },
+    remove() { node.remove(); },
+  };
+}
+
+async function viewHome(host, token) {
+  const h = hero(host);
+  const p = page(host);
+  p.style.paddingTop = "0";
+  let heroDone = false;
+  const fillHero = (opts) => { if (!heroDone && token === state.renderToken) { heroDone = true; h.fill(opts); } };
+
+  const upNext = shelf(p, state.mode === "cinema" || state.signedIn ? "Up next" : "Continue watching", async () => {
+    const cards = await upNextCards();
+    if (cards.length) {
+      const c = cards[0];
+      fillHero({
+        eyebrow: c.resumable ? "Continue watching" : "Up next",
+        detail: c.detail, catalog: c.catalog,
+        primary: el("button", { type: "button", class: "btn primary", onclick: () => playCard(c) }, icon("play"),
+          c.catalog === "tmdb_movie" ? (c.resumable ? `Resume at ${clock(c.at)}` : "Play") : `${c.resumable ? "Resume" : "Play"} episode ${c.episode}`),
+        secondary: el("a", { class: "btn", href: titleHref(c.catalog, c.detail.catalog_id) }, "Details"),
+      });
+    }
+    return cards.map(wideCard);
+  }, { wide: true });
+
   if (state.mode === "anime") {
-    if (!state.signedIn) { host.append(signInPrompt()); return; }
-    for (const status of ANIME_STATUSES) {
-      if (token !== state.renderToken) return;
-      section(host, STATUS_LABELS[status], async () => gridOf(await api("GET", `/api/user-list?status=${status}`)));
+    if (!state.signedIn) {
+      p.prepend(el("div", { class: "panel", style: "margin-top:1rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap" },
+        el("span", { style: "flex:1;min-width:240px" }, "Sign in to AniList for your list, Up Next across devices, and recommendations."),
+        el("a", { class: "btn primary", href: "#/signin" }, "Sign in")));
+    }
+    const today = airingToday(p);
+    const trending = shelf(p, "Trending now", async () => {
+      const rows = await api("GET", "/api/trending?limit=24");
+      if (rows.length) heroFromSummary(rows[0], "Trending now", "anilist", fillHero, token, upNext);
+      return rows.map((r) => posterCard(r, { score: scoreOf(r) }));
+    });
+    if (state.signedIn) {
+      shelfRecommendations(p);
+    }
+    shelf(p, "Airing this season", async () =>
+      (await api("GET", "/api/discover?status=RELEASING&limit=24")).map((r) => posterCard(r, { score: scoreOf(r) })));
+    shelf(p, "Most anticipated", async () =>
+      (await api("GET", "/api/discover?status=NOT_YET_RELEASED&limit=24")).map((r) => posterCard(r, { sub: formatLabel(r.format) || "" })));
+    await Promise.all([upNext, trending, today]);
+  } else {
+    let kinds = [];
+    try { kinds = await api("GET", "/api/cinema/rows"); } catch (e) {
+      p.append(el("p", { class: "error", text: errorText(e) }));
+    }
+    let first = true;
+    for (const kind of kinds) {
+      const isFirst = first;
+      first = false;
+      shelf(p, humanize(kind), async () => {
+        const rows = await api("GET", `/api/cinema/row/${encodeURIComponent(kind)}`);
+        if (isFirst && rows.length) heroFromSummary(rows[0], humanize(kind), rows[0].catalog, fillHero, token, upNext);
+        return rows.map((r) => posterCard(r, { score: scoreOf(r) }));
+      });
+    }
+    await upNext;
+  }
+  if (!heroDone) {
+    // Waited on: Up Next wins the spotlight when it has anything.
+    setTimeout(() => { if (!heroDone && token === state.renderToken) h.remove(); }, 6000);
+  }
+}
+
+// The spotlight falls back to the first trending title, but only once Up Next
+// has had its say; otherwise a fast trending answer took the hero from the
+// episode the viewer was halfway through.
+async function heroFromSummary(item, eyebrow, catalog, fillHero, token, upNext) {
+  await upNext;
+  if (token !== state.renderToken) return;
+  try {
+    const d = await fetchDetail(catalog, item.catalog_id);
+    const first = (d.episodes || []).find((e) => e.is_aired);
+    fillHero({
+      eyebrow, detail: d, catalog,
+      primary: first
+        ? el("button", { type: "button", class: "btn primary", onclick: () =>
+            play({ catalog, catalogId: d.catalog_id, episode: first.number, title: d.title, cover: d.cover_image }) },
+            icon("play"), catalog === "tmdb_movie" ? "Play" : `Play episode ${first.number}`)
+        : el("a", { class: "btn primary", href: titleHref(catalog, d.catalog_id) }, "Details"),
+      secondary: first ? el("a", { class: "btn", href: titleHref(catalog, d.catalog_id) }, "Details") : null,
+    });
+  } catch { /* the hero keeps waiting for another source */ }
+}
+
+function airingToday(p) {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const from = Math.floor(start.getTime() / 1000);
+  return shelf(p, "Airing today", async (sub) => {
+    const slots = await api("GET", `/api/schedule?from=${from}&to=${from + 86400}`);
+    const mine = slots.filter((s) => s.on_user_list);
+    const pick = (mine.length ? mine : slots).sort((a, b) => a.airing_at - b.airing_at);
+    sub.textContent = mine.length ? "From your list" : "";
+    const now = Date.now() / 1000;
+    return pick.map((s) => posterCard({ catalog: "anilist", catalog_id: s.catalog_id, title: s.title, cover_image: s.cover_image },
+      { sub: `${s.airing_at <= now ? "Out" : timeOf(s.airing_at)} · Ep ${s.episode}` }));
+  });
+}
+
+function shelfRecommendations(p) {
+  return shelf(p, "Because you watched", async (sub) => {
+    const rows = await api("GET", "/api/recommendations?limit=24");
+    const because = [...new Set(rows.map((r) => r.because_title))].slice(0, 3);
+    sub.textContent = because.join(", ");
+    return rows.map((r) => posterCard(r.media, { sub: `For ${r.because_title}`, score: scoreOf(r.media) }));
+  });
+}
+
+function timeOf(unix) {
+  return new Date(unix * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// ---- views: schedule --------------------------------------------------------
+
+async function viewSchedule(host, token) {
+  const p = page(host);
+  if (state.mode === "cinema") { location.hash = "#/"; return; }
+  p.append(el("h1", {}, "Schedule"));
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const from = Math.floor(start.getTime() / 1000);
+  let onlyMine = state.signedIn && store.get("anicat_schedule_all") !== "1";
+  let day = Number(store.get("anicat_schedule_day_offset") || 0);
+  if (!(day >= 0 && day < 7)) day = 0;
+
+  const days = el("div", { class: "days" });
+  const list = el("div", { class: "slots" }, el("p", { class: "muted", text: "Loading the week..." }));
+  const bar = el("div", { class: "libbar" },
+    el("span", { class: "meta" }, "Times in your time zone"),
+    el("span", { class: "grow" }),
+    state.signedIn ? slash([[true, "My list"], [false, "Everything"]], onlyMine, (v) => {
+      onlyMine = v; store.set("anicat_schedule_all", v ? "0" : "1"); draw();
+    }, "Which titles") : null);
+  p.append(bar, days, list);
+
+  let slots;
+  try {
+    slots = await api("GET", `/api/schedule?from=${from}&to=${from + 7 * 86400}`);
+  } catch (e) {
+    list.replaceChildren(el("p", { class: "error", text: errorText(e) }));
+    return;
+  }
+  if (token !== state.renderToken) return;
+
+  const dayOf = (s) => {
+    const d = new Date(s.airing_at * 1000); d.setHours(0, 0, 0, 0);
+    return Math.round((d.getTime() - start.getTime()) / 86400000);
+  };
+  function draw() {
+    const shown = slots.filter((s) => !onlyMine || s.on_user_list);
+    days.replaceChildren(...Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start.getTime() + i * 86400000);
+      const count = shown.filter((s) => dayOf(s) === i).length;
+      return el("button", { type: "button", "aria-pressed": String(i === day),
+        onclick: () => { day = i; store.set("anicat_schedule_day_offset", String(i)); draw(); } },
+        el("span", { class: "d" }, i === 0 ? "Today" : d.toLocaleDateString([], { weekday: "short" })),
+        el("span", { class: "n" }, d.getDate()),
+        el("span", { class: "c" }, count ? `${count} airing` : "none"));
+    }));
+    const today = shown.filter((s) => dayOf(s) === day).sort((a, b) => a.airing_at - b.airing_at);
+    if (!today.length) {
+      list.replaceChildren(el("p", { class: "empty", text: onlyMine ? "Nothing from your list airs this day." : "Nothing airs this day." }));
+      return;
+    }
+    const now = Date.now() / 1000;
+    const rows = [];
+    let nowDrawn = day !== 0;
+    for (const s of today) {
+      if (!nowDrawn && s.airing_at > now) { rows.push(el("div", { class: "nowline" }, `Now, ${timeOf(now)}`)); nowDrawn = true; }
+      const left = s.airing_at - now;
+      rows.push(el("a", { class: "slot" + (s.airing_at <= now ? " past" : "") + (s.on_user_list ? " mine" : ""), href: titleHref("anilist", s.catalog_id) },
+        el("time", {}, timeOf(s.airing_at)),
+        img(s.cover_image),
+        el("div", { style: "min-width:0" },
+          el("div", { class: "t t-name" }, s.title),
+          el("div", { class: "meta" }, `Episode ${s.episode}${s.episode_count ? ` of ${s.episode_count}` : ""}`,
+            s.format ? el("span", { class: "dot" }, formatLabel(s.format)) : null,
+            s.user_status ? el("span", { class: "dot", style: "color:var(--accent)" }, STATUS_LABELS[s.user_status] || humanize(s.user_status)) : null)),
+        el("div", { class: "r meta" }, left > 0 ? `in ${until(left)}` : "Aired"),
+      ));
+    }
+    list.replaceChildren(...rows);
+  }
+  draw();
+}
+
+function until(seconds) {
+  const m = Math.round(seconds / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} h ${m % 60} min`;
+  return `${Math.floor(h / 24)} d ${h % 24} h`;
+}
+
+// ---- views: library ---------------------------------------------------------
+
+const listMemo = new Map();
+function userList(status, fresh) {
+  if (!fresh && listMemo.has(status)) return listMemo.get(status);
+  const p = api("GET", `/api/user-list?status=${status}`);
+  listMemo.set(status, p);
+  p.catch(() => listMemo.delete(status));
+  setTimeout(() => listMemo.delete(status), 60_000);
+  return p;
+}
+
+async function viewLibrary(host, token, statusArg) {
+  const p = page(host);
+  p.append(el("h1", {}, "Library"));
+  if (state.mode === "anime" && !state.signedIn) { p.append(signInPrompt()); return; }
+  const statuses = state.mode === "anime" ? ANIME_STATUSES : CINEMA_STATUSES;
+  const status = statuses.includes(statusArg) ? statusArg : (store.get(`anicat_lib_${state.mode}`) || "CURRENT");
+  store.set(`anicat_lib_${state.mode}`, status);
+  let sort = store.get("anicat_lib_sort") || "updated";
+  let filter = "";
+
+  const tabs = el("div", { class: "statuses", role: "group", "aria-label": "Status" });
+  const filterInput = el("input", { class: "field", type: "search", placeholder: "Filter", "aria-label": "Filter titles" });
+  const body = el("div", {}, el("div", { class: "grid" }, Array.from({ length: 12 }, () => el("div", { class: "skel", style: "aspect-ratio:2/3" }))));
+  const sortMenu = menu({ label: "Sort", value: sort,
+    options: state.mode === "anime"
+      ? [["updated", "Last updated"], ["title", "Title"], ["score", "Your score"], ["progress", "Progress"], ["airing", "Next airing"]]
+      : [["updated", "Last added"], ["title", "Title"]],
+    onChange: (v) => { sort = v; store.set("anicat_lib_sort", v); draw(); } });
+  p.append(el("div", { class: "libbar" }, tabs, el("span", { class: "grow" }), filterInput, sortMenu), body);
+
+  const counts = {};
+  const drawTabs = () => tabs.replaceChildren(...statuses.map((s) => el("button", {
+    type: "button", "aria-pressed": String(s === status), onclick: () => { location.hash = `#/library/${s}`; },
+  }, STATUS_LABELS[s], counts[s] !== undefined ? el("span", { class: "count num" }, counts[s]) : null)));
+  drawTabs();
+
+  let items = [];
+  if (state.mode === "anime") {
+    // Counts for every tab, fetched alongside; the open tab comes first.
+    for (const s of statuses.filter((x) => x !== status)) {
+      userList(s).then((rows) => { counts[s] = rows.length; if (token === state.renderToken) drawTabs(); }, () => {});
+    }
+    try { items = await userList(status, true); counts[status] = items.length; drawTabs(); } catch (e) {
+      body.replaceChildren(el("p", { class: "error", text: errorText(e) }));
+      return;
     }
   } else {
     let entries;
-    try {
-      entries = await api("GET", "/api/cinema/list");
-    } catch (e) {
-      host.append(el("p", { class: "error", text: errorText(e) }));
+    try { entries = await api("GET", "/api/cinema/list"); } catch (e) {
+      body.replaceChildren(el("p", { class: "error", text: errorText(e) }));
       return;
     }
-    if (!entries.length) {
-      host.append(el("p", { class: "muted", text: "Your films and TV list is empty. Add titles from their page." }));
-      return;
-    }
-    for (const status of CINEMA_STATUSES.concat([...new Set(entries.map((e) => e.status))].filter((s) => !CINEMA_STATUSES.includes(s)))) {
-      const group = entries.filter((e) => e.status === status);
-      if (!group.length) continue;
-      section(host, STATUS_LABELS[status] || rowLabel(status.toLowerCase()), async () => {
-        const details = await mapLimited(group, 4, (e) => fetchDetail(e.catalog, e.catalog_id));
-        return gridOf(group.map((e, i) => {
-          const d = details[i];
-          return d && !d.error
-            ? { catalog: e.catalog, catalog_id: e.catalog_id, title: d.title, cover_image: d.cover_image, format: d.format }
-            : { catalog: e.catalog, catalog_id: e.catalog_id, title: `Unavailable (${e.catalog} ${e.catalog_id})`, cover_image: "" };
-        }), (it) => ({ sub: it.catalog === "tmdb_tv" ? "Series" : "Film" }));
-      });
-    }
+    for (const s of statuses) counts[s] = entries.filter((e) => e.status === s).length;
+    drawTabs();
+    const group = entries.filter((e) => e.status === status);
+    const details = await mapLimited(group, 4, (e) => fetchDetail(e.catalog, e.catalog_id));
+    items = group.map((e, i) => {
+      const d = details[i];
+      return d && !d.error
+        ? { catalog: e.catalog, catalog_id: e.catalog_id, title: d.title, cover_image: d.cover_image, format: d.format, average_score: d.average_score, order: i }
+        : { catalog: e.catalog, catalog_id: e.catalog_id, title: `Unavailable (${e.catalog} ${e.catalog_id})`, cover_image: "", order: i };
+    });
   }
+  if (token !== state.renderToken) return;
+
+  function draw() {
+    const q = filter.trim().toLowerCase();
+    let rows = items.filter((m) => !q || m.title.toLowerCase().includes(q));
+    const by = {
+      updated: (a, b) => (b.updated_at || 0) - (a.updated_at || 0) || (a.order || 0) - (b.order || 0),
+      title: (a, b) => a.title.localeCompare(b.title),
+      score: (a, b) => (b.user_score || 0) - (a.user_score || 0),
+      progress: (a, b) => ((b.progress || 0) / (b.episodes || 1e9)) - ((a.progress || 0) / (a.episodes || 1e9)),
+      airing: (a, b) => (a.next_airing_at || Infinity) - (b.next_airing_at || Infinity),
+    }[sort] || (() => 0);
+    rows = rows.slice().sort(by);
+    if (!rows.length) {
+      body.replaceChildren(el("p", { class: "empty", text: items.length ? "No title matches the filter." :
+        state.mode === "anime" ? `Nothing in ${STATUS_LABELS[status]}.` : "Nothing here yet. Add titles from their page." }));
+      return;
+    }
+    const now = Date.now() / 1000;
+    body.replaceChildren(grid(rows, (m) => {
+      const bits = [];
+      if (m.catalog === "anilist") {
+        if (m.episodes) bits.push(`${m.progress || 0} / ${m.episodes}`);
+        else if (m.progress) bits.push(`${m.progress} seen`);
+        if (m.next_airing_at && m.next_airing_at > now) bits.push(`Ep ${m.next_episode} in ${until(m.next_airing_at - now)}`);
+        else if (m.released_episodes && (m.progress || 0) < m.released_episodes) bits.push(`${m.released_episodes - (m.progress || 0)} new`);
+      } else {
+        bits.push(m.catalog === "tmdb_tv" ? "Series" : "Film");
+      }
+      return { sub: bits.join(" · "), score: m.user_score ? String(m.user_score) : null };
+    }));
+  }
+  filterInput.addEventListener("input", () => { filter = filterInput.value; draw(); });
+  draw();
 }
+
+function signInPrompt() {
+  return el("div", { class: "panel", style: "display:flex;gap:1rem;align-items:center;flex-wrap:wrap" },
+    el("span", { style: "flex:1;min-width:240px" }, "Sign in to AniList to see your list and sync what you watch."),
+    el("a", { class: "btn primary", href: "#/signin" }, "Sign in"));
+}
+
+// ---- views: search ----------------------------------------------------------
 
 async function viewSearch(host, token, query) {
-  const input = el("input", { type: "search", value: query || "", placeholder: state.mode === "anime" ? "Search anime" : "Search films and TV", "aria-label": "Search", style: "flex:1;min-width:0" });
-  const form = el("form", { class: "toolbar", onsubmit: (ev) => {
-    ev.preventDefault();
-    const q = input.value.trim();
-    location.hash = q ? `#/search/${encodeURIComponent(q)}` : "#/search";
-  } }, input, el("button", { type: "submit", class: "primary", text: "Search" }));
-  // Explicit, not left to implicit form submission: a key event synthesized
-  // by automation (CDP without a text payload) never submits the form, and
-  // Enter then did nothing at all.
-  input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && !ev.isComposing) { ev.preventDefault(); form.requestSubmit(); }
-  });
-  host.append(el("h1", {}, state.mode === "anime" ? "Search anime" : "Search films and TV"), form);
+  const p = page(host);
+  const anime = state.mode === "anime";
+  p.append(el("h1", {}, anime ? "Search anime" : "Search films and TV"));
+  const input = el("input", { type: "search", value: query || "", placeholder: anime ? "Titles, studios, genres" : "Films and series", "aria-label": "Search", autocomplete: "off", spellcheck: "false" });
+  p.append(el("div", { class: "searchbar" }, icon("search"), input, el("kbd", {}, "/")));
+  const filtersHost = el("div", { class: "filters" });
+  const results = el("div", {});
+  p.append(filtersHost, results);
   input.focus();
-  if (!query) return;
-  await section(host, `Results for "${query}"`, async () =>
-    gridOf(await api("POST", "/api/search", { query, kind: state.mode === "anime" ? "anime" : "cinema", limit: 30 })));
+  if (query) input.setSelectionRange(query.length, query.length);
+
+  const saved = (() => { try { return JSON.parse(store.get(`anicat_filters_${state.mode}`) || "{}"); } catch { return {}; } })();
+  const f = Object.assign({}, saved);
+  const persist = () => store.set(`anicat_filters_${state.mode}`, JSON.stringify(f));
+  const opt = (list) => [["", "Any"], ...list];
+  const year = new Date().getFullYear();
+  const years = opt(Array.from({ length: year - 1969 + 1 }, (_, i) => [String(year + 1 - i), String(year + 1 - i)]));
+
+  let seq = 0;
+  async function run() {
+    const mine = ++seq;
+    const q = input.value.trim();
+    const anyFilter = Object.values(f).some(Boolean);
+    // The address follows the query, without a history entry per keystroke.
+    history.replaceState(null, "", q ? `#/search/${encodeURIComponent(q)}` : "#/search");
+    if (!q && !anyFilter && anime) {
+      results.replaceChildren();
+      shelf(results, "Popular this season", async () =>
+        (await api("GET", "/api/discover?status=RELEASING&limit=24")).map((r) => posterCard(r, { score: scoreOf(r) })));
+      shelf(results, "All-time popular", async () =>
+        (await api("POST", "/api/search", { query: "", kind: "anime" })).map((r) => posterCard(r, { score: scoreOf(r) })));
+      return;
+    }
+    results.replaceChildren(el("div", { class: "grid" }, Array.from({ length: 12 }, () => el("div", { class: "skel", style: "aspect-ratio:2/3" }))));
+    try {
+      let rows;
+      if (anime) {
+        const filters = {
+          genre: f.genre || null, year: f.year ? Number(f.year) : null, season: f.year && f.season ? f.season : null,
+          format: f.format || null, status: f.status || null, country: f.country || null, sort: f.sort || null,
+          min_score: f.min_score ? Number(f.min_score) : null,
+        };
+        rows = await api("POST", "/api/search", { query: q, kind: "anime", filters, limit: 30 });
+      } else if (q) {
+        rows = await api("POST", "/api/search", { query: q, kind: "cinema", limit: 30 });
+      } else {
+        const qs = new URLSearchParams({ series: f.kind === "tv" ? "true" : "false" });
+        if (f.genre) qs.set("genre", f.genre);
+        if (f.year) qs.set("year", f.year);
+        rows = await api("GET", `/api/cinema/discover?${qs}`);
+      }
+      if (mine !== seq || token !== state.renderToken) return;
+      results.replaceChildren(rows.length
+        ? grid(rows, (r) => ({ score: scoreOf(r) }))
+        : el("p", { class: "empty", text: q ? `Nothing found for "${q}".` : "Nothing matches these filters." }));
+    } catch (e) {
+      if (mine === seq) results.replaceChildren(el("p", { class: "error", text: errorText(e) }));
+    }
+  }
+
+  let timer = null;
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 320); });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.isComposing) { ev.preventDefault(); clearTimeout(timer); run(); }
+  });
+
+  const set = (key) => (v) => { if (v) f[key] = v; else delete f[key]; persist(); drawFilters(); run(); };
+  async function drawFilters() {
+    const menus = [];
+    if (anime) {
+      menus.push(
+        menu({ label: "Genre", value: f.genre || "", options: opt(GENRES.map((g) => [g, g])), onChange: set("genre") }),
+        menu({ label: "Year", value: f.year || "", options: years, onChange: set("year") }),
+        // AniList ignores a season with no year; offering one then filtered nothing.
+        f.year ? menu({ label: "Season", value: f.season || "", options: opt([["WINTER", "Winter"], ["SPRING", "Spring"], ["SUMMER", "Summer"], ["FALL", "Fall"]]), onChange: set("season") }) : null,
+        menu({ label: "Format", value: f.format || "", options: opt(Object.entries(FORMAT_LABELS)), onChange: set("format") }),
+        menu({ label: "Status", value: f.status || "", options: opt([["RELEASING", "Releasing"], ["FINISHED", "Finished"], ["NOT_YET_RELEASED", "Not yet released"], ["HIATUS", "Hiatus"], ["CANCELLED", "Cancelled"]]), onChange: set("status") }),
+        menu({ label: "Origin", value: f.country || "", options: opt([["JP", "Japan"], ["KR", "Korea"], ["CN", "China"]]), onChange: set("country") }),
+        menu({ label: "Score", value: f.min_score || "", options: opt([["90", "90+"], ["80", "80+"], ["70", "70+"], ["60", "60+"]]), onChange: set("min_score") }),
+        menu({ label: "Sort", value: f.sort || "", options: [["", "Popularity"], ["SCORE_DESC", "Score"], ["TRENDING_DESC", "Trending"], ["START_DATE_DESC", "Newest"], ["TITLE_ROMAJI", "Title"]], onChange: set("sort") }),
+      );
+    } else {
+      menus.push(el("span", { class: "meta" }, "With an empty search, browse:"),
+        slash([["movie", "Films"], ["tv", "Series"]], f.kind || "movie", set("kind"), "Kind"));
+      let genres = [];
+      try { genres = await api("GET", `/api/cinema/genres?series=${f.kind === "tv"}`); } catch { /* browse without genres */ }
+      menus.push(
+        menu({ label: "Genre", value: f.genre || "", options: opt(genres.map((g) => [String(g.id), g.name])), onChange: set("genre") }),
+        menu({ label: "Year", value: f.year || "", options: years, onChange: set("year") }));
+    }
+    const any = Object.keys(f).some((k) => f[k] && k !== "kind");
+    // replaceChildren, unlike el(), writes a null out as the text "null".
+    filtersHost.replaceChildren(...[...menus,
+      any ? el("button", { type: "button", class: "lk clear", text: "Clear filters", onclick: () => {
+        for (const k of Object.keys(f)) if (k !== "kind") delete f[k];
+        persist(); drawFilters(); run();
+      } }) : null].filter(Boolean));
+  }
+  drawFilters();
+  run();
 }
 
-async function viewTitle(host, token, catalog, id) {
+// ---- views: title -----------------------------------------------------------
+
+async function viewTitle(host, token, catalog, id, tabArg) {
   if (!["anilist", "tmdb_movie", "tmdb_tv"].includes(catalog) || !/^\d+$/.test(id)) {
-    host.append(el("p", { class: "error", text: "Unknown title address." }));
+    page(host).append(el("p", { class: "error", text: "Unknown title address." }));
     return;
   }
   const catalogId = Number(id);
-  const loading = el("p", { class: "muted", text: "Loading..." });
-  host.append(loading);
+  const backdrop = el("div", { class: "backdrop" });
+  host.append(backdrop);
+  const p = page(host);
+  p.style.paddingTop = "0";
+  const loading = el("div", { class: "tp" }, el("div", { class: "cover skel" }), el("div", {}, el("div", { class: "skel", style: "height:34px;width:60%;margin-top:2.2rem" })));
+  p.append(loading);
   let d;
   try {
     d = await fetchDetail(catalog, catalogId, true);
   } catch (e) {
-    loading.replaceWith(el("p", { class: "error", text: errorText(e) }));
+    loading.replaceWith(el("p", { class: "error", text: errorText(e), style: "margin-top:4rem" }));
     return;
   }
   if (token !== state.renderToken) return;
-  loading.remove();
   document.title = `${d.title} - Anicat`;
-
-  const meta = [d.format && d.format.replace(/_/g, " "), d.year, d.status && rowLabel(d.status.toLowerCase()), d.studio,
-    d.average_score ? `${d.average_score}%` : null, d.episode_count && catalog !== "tmdb_movie" ? `${d.episode_count} episodes` : null,
-    d.genres && d.genres.length ? d.genres.slice(0, 4).join(", ") : null].filter(Boolean);
-
-  const toolbar = el("div", { class: "toolbar" });
-  const info = el("div", {},
-    el("h1", {}, d.title),
-    d.romaji_title && d.romaji_title !== d.title ? el("div", { class: "muted" }, d.romaji_title) : null,
-    el("div", { class: "meta" }, meta.map((m) => el("span", {}, m))),
-    el("p", { class: "synopsis" }, sanitizedSynopsis(d.synopsis)),
-    toolbar,
-  );
-  const poster = d.cover_image
-    ? el("img", { class: "poster", src: d.cover_image, alt: "", referrerpolicy: "no-referrer" })
-    : el("div", { class: "poster" });
-  host.append(el("div", { class: "detail" }, el("div", {}, poster), info));
-
   const title = d.title;
+  const cover = d.cover_image;
   const episodes = d.episodes || [];
+  const extrasP = isCinema(catalog) ? api("GET", `/api/cinema/${catalogId}/extras?catalog=${catalog}`).catch(() => null) : Promise.resolve(null);
+  if (d.banner_image) backdrop.append(img(d.banner_image, { loading: "eager" }));
+  else extrasP.then((x) => { if (x && x.gallery && x.gallery[0]) backdrop.append(img(x.gallery[0], { loading: "eager" })); });
+
+  const meta = [formatLabel(d.format), d.year, d.status ? humanize(d.status) : null, d.studio,
+    d.average_score ? `${d.average_score}%` : null,
+    d.episode_count && catalog !== "tmdb_movie" ? `${d.episode_count} episodes` : null,
+    d.duration_minutes ? `${d.duration_minutes} min` : null].filter(Boolean);
+
+  const actions = el("div", { class: "actions" });
+  const syn = el("p", { class: "syn clamp" }, sanitizedSynopsis(d.synopsis));
+  const more = el("button", { type: "button", class: "lk", text: "More", style: "margin-top:.3rem", onclick: () => {
+    syn.classList.toggle("clamp");
+    more.textContent = syn.classList.contains("clamp") ? "More" : "Less";
+  } });
+  const info = el("div", { style: "min-width:0" },
+    el("h1", { class: "t-name" }, title),
+    d.romaji_title && d.romaji_title !== title ? el("div", { class: "alt" }, d.romaji_title) : null,
+    el("div", { class: "meta" }, meta.map((m, i) => el("span", { class: i ? "dot" : null }, m))),
+    d.genres && d.genres.length ? el("div", { class: "meta", style: "margin-top:.25rem" }, d.genres.join(", ")) : null,
+    syn, more, actions);
+  loading.replaceWith(el("div", { class: "tp" }, el("div", { class: "cover" }, img(cover, { loading: "eager" })), info));
+  requestAnimationFrame(() => { if (syn.scrollHeight <= syn.clientHeight + 2) more.remove(); });
+
+  // Primary action: resume, next, or the first aired episode.
+  const playOpts = (episode, extra) => Object.assign({ catalog, catalogId, episode, title, cover }, extra || {});
+  if (catalog === "tmdb_movie") {
+    const film = episodes[0];
+    const resume = d.resume_episode === 1 && d.resume_seconds > 0 ? d.resume_seconds : 0;
+    actions.append(
+      el("button", { type: "button", class: "btn primary", onclick: () => play(playOpts(1)) }, icon("play"), resume ? `Resume at ${clock(resume)}` : "Play"),
+      resume ? el("button", { type: "button", class: "btn", text: "From the start", onclick: () => play(playOpts(1, { fromStart: true })) }) : null,
+      el("button", { type: "button", class: "btn", text: "Releases", onclick: () => openReleases(playOpts(1)) }),
+      film && !film.is_watched ? el("button", { type: "button", class: "btn", text: "Mark watched", onclick: () => markWatched(catalog, catalogId, 1) }) : null,
+    );
+  } else {
+    const resumeRow = d.resume_episode ? episodes.find((e) => e.number === d.resume_episode) : null;
+    const listNext = d.list_progress ? episodes.find((e) => e.number === d.list_progress + 1) : null;
+    const firstAired = episodes.find((e) => e.is_aired);
+    if (resumeRow && resumeRow.is_aired) {
+      actions.append(el("button", { type: "button", class: "btn primary", onclick: () => play(playOpts(resumeRow.number)) }, icon("play"),
+        d.resume_seconds > 0 ? `Resume episode ${resumeRow.number} at ${clock(d.resume_seconds)}` : `Play episode ${resumeRow.number}`));
+    } else if (listNext && listNext.is_aired) {
+      actions.append(el("button", { type: "button", class: "btn primary", onclick: () => play(playOpts(listNext.number)) }, icon("play"), `Play episode ${listNext.number}`));
+    } else if (firstAired) {
+      actions.append(el("button", { type: "button", class: "btn primary", onclick: () => play(playOpts(firstAired.number)) }, icon("play"), `Play episode ${firstAired.number}`));
+    }
+  }
 
   if (catalog === "anilist") {
     // Sub/Dub is a per-title preference sent with every play and release
     // search; the audio language is recorded too so the player picks the
     // matching track inside a dual-audio release.
-    const dubBtn = el("button", { type: "button" });
-    const syncDub = () => {
-      const on = preferDub(catalog, catalogId);
-      dubBtn.textContent = on ? "Audio: Dub" : "Audio: Sub";
-      dubBtn.setAttribute("aria-pressed", String(on));
-    };
-    dubBtn.addEventListener("click", async () => {
-      const on = !preferDub(catalog, catalogId);
+    actions.append(slash([[false, "Sub"], [true, "Dub"]], preferDub(catalog, catalogId), (on) => {
       store.set(`anicat_dub_${catalog}_${catalogId}`, on ? "1" : "0");
-      syncDub();
-    });
-    syncDub();
-    toolbar.append(dubBtn);
-  }
-
-  if (catalog === "tmdb_movie") {
-    const film = episodes[0];
-    const resume = d.resume_episode === 1 && d.resume_seconds > 0 ? d.resume_seconds : 0;
-    toolbar.prepend(...[
-      el("button", { type: "button", class: "primary", text: resume ? `Resume at ${clock(resume)}` : "Play",
-        onclick: () => play({ catalog, catalogId, episode: 1, title }) }),
-      resume ? el("button", { type: "button", text: "Play from start", onclick: () => play({ catalog, catalogId, episode: 1, title, fromStart: true }) }) : null,
-      el("button", { type: "button", text: "Choose release", onclick: () => openReleases({ catalog, catalogId, episode: 1, title }) }),
-      film && !film.is_watched ? el("button", { type: "button", text: "Mark watched", onclick: () => markWatched(catalog, catalogId, 1) }) : null,
-    ].filter(Boolean));
-  } else if (d.resume_episode) {
-    const row = episodes.find((e) => e.number === d.resume_episode);
-    if (row && row.is_aired) {
-      toolbar.prepend(el("button", { type: "button", class: "primary",
-        text: d.resume_seconds > 0 ? `Resume episode ${d.resume_episode} at ${clock(d.resume_seconds)}` : `Play episode ${d.resume_episode}`,
-        onclick: () => play({ catalog, catalogId, episode: d.resume_episode, title }) }));
+    }, "Audio"));
+    if (state.signedIn) {
+      const statusMenu = menu({ label: "List", value: d.list_status || "",
+        options: [["", "Not on list"], ...ANIME_STATUSES.map((s) => [s, STATUS_LABELS[s]])],
+        onChange: async (v) => {
+          try {
+            if (!v) {
+              if (!d.list_entry_id || !confirm(`Remove "${title}" from your AniList list?`)) { statusMenu.set(d.list_status || ""); return; }
+              await api("DELETE", `/api/list/${d.list_entry_id}`);
+              d.list_status = null; d.list_entry_id = null;
+              toast("Removed from your list.");
+            } else {
+              await api("POST", "/api/list-entry", { catalog_id: catalogId, status: v });
+              d.list_status = v;
+              toast(`Saved as ${STATUS_LABELS[v]}.`);
+            }
+            listMemo.clear();
+            detailMemo.delete(`${catalog}:${catalogId}`);
+          } catch (e) { statusMenu.set(d.list_status || ""); toast(errorText(e), true); }
+        } });
+      let fav = !!d.is_favourite;
+      const favBtn = el("button", { type: "button", class: "fav", "aria-pressed": String(fav), "aria-label": "Favourite", title: "Favourite",
+        onclick: async () => {
+          favBtn.disabled = true;
+          try {
+            const r = await api("POST", "/api/favourite", { catalog_id: catalogId, currently_favourite: fav });
+            fav = !!r.is_favourite;
+            favBtn.setAttribute("aria-pressed", String(fav));
+            detailMemo.delete(`${catalog}:${catalogId}`);
+          } catch (e) { toast(errorText(e), true); }
+          favBtn.disabled = false;
+        } }, icon("heart"));
+      actions.append(statusMenu, favBtn);
     }
-  } else if (episodes.length && episodes[0].is_aired) {
-    toolbar.prepend(el("button", { type: "button", class: "primary", text: "Play episode " + episodes[0].number,
-      onclick: () => play({ catalog, catalogId, episode: episodes[0].number, title }) }));
-  }
-
-  if (catalog === "anilist" && d.list_entry_id) {
-    toolbar.append(el("button", { type: "button", class: "danger", text: "Remove from list", onclick: async () => {
-      if (!confirm(`Remove "${title}" from your AniList list?`)) return;
-      try {
-        await api("DELETE", `/api/list/${d.list_entry_id}`);
-        toast("Removed from your list.");
-        render();
-      } catch (e) { toast(errorText(e), true); }
-    } }));
-  }
-  if (catalog === "anilist" && d.list_status) {
-    toolbar.append(el("span", { class: "tag" }, STATUS_LABELS[d.list_status] || d.list_status));
-  }
-
-  if (isCinema(catalog)) {
-    const select = el("select", { "aria-label": "List status" },
-      el("option", { value: "" }, "Not on list"),
-      CINEMA_STATUSES.map((s) => el("option", { value: s }, STATUS_LABELS[s])));
-    toolbar.append(select);
+  } else {
+    const select = menu({ label: "List", value: "", options: [["", "Not on list"], ...CINEMA_STATUSES.map((s) => [s, STATUS_LABELS[s]])],
+      onChange: async (v) => {
+        try {
+          await api("POST", "/api/cinema/list", { catalog, catalog_id: catalogId, status: v || null });
+          toast(v ? `Saved as ${STATUS_LABELS[v]}.` : "Removed from your list.");
+        } catch (e) { toast(errorText(e), true); }
+      } });
+    actions.append(select);
     api("GET", "/api/cinema/list").then((rows) => {
       const hit = rows.find((r) => r.catalog === catalog && r.catalog_id === catalogId);
-      select.value = hit ? hit.status : "";
+      select.set(hit ? hit.status : "");
     }, () => {});
-    select.addEventListener("change", async () => {
-      try {
-        await api("POST", "/api/cinema/list", { catalog, catalog_id: catalogId, status: select.value || null });
-        toast(select.value ? `Saved as ${STATUS_LABELS[select.value]}.` : "Removed from your list.");
-      } catch (e) { toast(errorText(e), true); }
-    });
   }
 
-  if (catalog === "tmdb_movie") return;
+  // Tabs. Each one draws on first open; the address remembers which is open.
+  const tabDefs = [];
+  if (catalog !== "tmdb_movie") tabDefs.push(["episodes", "Episodes", episodes.length || null, (h) => drawEpisodes(h, { d, catalog, catalogId, episodes, token, extrasP })]);
+  if (catalog === "anilist") {
+    tabDefs.push(["timeline", "Timeline", null, (h) => drawTimeline(h, catalogId)]);
+    tabDefs.push(["characters", "Characters", null, (h) => drawCharacters(h, api("GET", `/api/characters/${catalogId}`))]);
+    const related = (d.relations || []).length + (d.recommendations || []).length;
+    if (related) tabDefs.push(["related", "Related", null, (h) => drawRelated(h, d)]);
+  } else {
+    tabDefs.push(["cast", "Cast", null, (h) => drawCharacters(h, api("GET", `/api/cinema/${catalogId}/cast?catalog=${catalog}`))]);
+    tabDefs.push(["details", "Details", null, (h) => drawCinemaFacts(h, extrasP)]);
+  }
+  const tabBar = el("div", { class: "tabs", role: "tablist" });
+  const panes = new Map();
+  const tabHost = el("div", {});
+  p.append(tabBar, tabHost);
+  const openTab = (key) => {
+    for (const b of tabBar.children) b.setAttribute("aria-selected", String(b.dataset.key === key));
+    for (const [k, pane] of panes) pane.hidden = k !== key;
+    if (!panes.has(key)) {
+      const pane = el("div", { role: "tabpanel" });
+      panes.set(key, pane);
+      tabHost.append(pane);
+      tabDefs.find((t) => t[0] === key)[3](pane);
+    }
+    history.replaceState(null, "", `#/title/${catalog}/${catalogId}/${key}`);
+  };
+  for (const [key, label, count] of tabDefs) {
+    tabBar.append(el("button", { type: "button", role: "tab", "data-key": key, onclick: () => openTab(key) },
+      label, count ? el("span", { class: "count num" }, count) : null));
+  }
+  openTab(tabDefs.some((t) => t[0] === tabArg) ? tabArg : tabDefs[0][0]);
+}
 
-  host.append(el("h2", {}, "Episodes"));
-  if (!episodes.length) {
-    host.append(el("p", { class: "muted", text: "No episodes listed." }));
+function drawEpisodes(host, { d, catalog, catalogId, episodes, token, extrasP }) {
+  if (!episodes.length) { host.append(el("p", { class: "empty", text: "No episodes listed yet." })); return; }
+  const title = d.title;
+  const cover = d.cover_image;
+  const groupBar = el("div", { class: "groups" });
+  const gridHost = el("div", { class: "eps" });
+  host.append(groupBar, gridHost);
+
+  // Groups: a series' seasons from TMDB's season map (the engine numbers
+  // episodes straight through), otherwise blocks of 50 for long runs.
+  let groups = [{ label: null, from: episodes[0].number, to: episodes[episodes.length - 1].number }];
+  const target = d.resume_episode || (d.list_progress ? d.list_progress + 1 : episodes[0].number);
+  const drawGroups = (active) => {
+    if (groups.length < 2) { groupBar.hidden = true; return; }
+    groupBar.hidden = false;
+    groupBar.replaceChildren(...groups.map((g, i) => el("button", { type: "button", "aria-pressed": String(i === active),
+      onclick: () => { drawGroups(i); drawGrid(g); } }, g.label)));
+  };
+  const openAt = () => {
+    const i = Math.max(0, groups.findIndex((g) => target >= g.from && target <= g.to));
+    drawGroups(i);
+    drawGrid(groups[i]);
+  };
+
+  const drawGrid = (g) => {
+    const rows = episodes.filter((e) => e.number >= g.from && e.number <= g.to);
+    const offset = g.offset || 0;
+    gridHost.replaceChildren(...rows.map((ep) => {
+      const shown = ep.number - offset;
+      const frac = !ep.is_watched && ep.progress_percent > 0 ? Math.min(100, ep.progress_percent) : 0;
+      const pos = el("span", {});
+      const cell = el("div", { class: "ep" + (ep.is_watched ? " watched" : "") },
+        el("button", { type: "button", class: "frame", disabled: !ep.is_aired, "aria-label": `Play episode ${ep.number}`,
+          onclick: () => play({ catalog, catalogId, episode: ep.number, title, cover }) },
+          ep.thumbnail ? img(ep.thumbnail) : el("span", { class: "ph" }, shown),
+          el("span", { class: "play" }, el("span", { class: "play-dot" }, icon("play"))),
+          frac ? el("span", { class: "tick" }, el("i", { style: `width:${frac.toFixed(1)}%` })) : null),
+        el("div", { class: "hd", title: ep.title },
+          el("span", { class: "n" }, g.offset !== undefined ? `E${shown}` : shown),
+          el("span", { class: "t" }, ep.title && !/^Episode \d+$/.test(ep.title) ? ep.title : `Episode ${shown}`)),
+        el("div", { class: "ft" },
+          ep.is_watched ? el("span", { class: "okc" }, "Watched") : null,
+          !ep.is_aired ? el("span", {}, ep.air_date ? `Airs ${ep.air_date}` : "Not aired") : null,
+          ep.is_aired && ep.runtime_minutes ? el("span", {}, `${ep.runtime_minutes} min`) : null,
+          pos,
+          el("span", { class: "grow" }),
+          ep.is_aired ? el("button", { type: "button", class: "lk", text: "Releases", onclick: () => openReleases({ catalog, catalogId, episode: ep.number, title, cover }) }) : null,
+          ep.is_aired && !ep.is_watched ? el("button", { type: "button", class: "lk", text: "Mark watched", onclick: () => markWatched(catalog, catalogId, ep.number) }) : null),
+      );
+      if (frac) {
+        api("GET", `/api/progress/${catalogId}?episode=${ep.number}&catalog=${catalog}`).then((pr) => {
+          if (pr && pr.stop_time > 0 && token === state.renderToken) pos.textContent = `Stopped at ${clock(pr.stop_time)}`;
+        }, () => {});
+      }
+      return cell;
+    }));
+  };
+
+  if (catalog === "tmdb_tv") {
+    extrasP.then((x) => {
+      const seasons = (x && x.seasons) || [];
+      if (seasons.length > 1) {
+        let at = 0;
+        groups = seasons.map((s) => {
+          const g = { label: `Season ${s.number}`, from: at + 1, to: at + s.episode_count, offset: at };
+          at += s.episode_count;
+          return g;
+        });
+      }
+      if (token === state.renderToken) openAt();
+    });
     return;
   }
-  const grid = el("div", { class: "episodes" });
-  host.append(grid);
-  const cells = new Map();
-  for (const ep of episodes) {
-    const pos = el("span", { class: "muted" });
-    const cell = el("div", { class: "ep" + (ep.is_watched ? " watched" : "") },
-      el("div", { class: "ep-title", title: ep.title }, `${ep.number}. ${ep.title}`),
-      el("div", { class: "muted", style: "display:flex;gap:.5rem;flex-wrap:wrap;align-items:center" },
-        ep.is_watched ? el("span", { class: "tag ok", text: "watched" }) : null,
-        !ep.is_aired ? el("span", { class: "tag", text: ep.air_date ? `airs ${ep.air_date}` : "not aired" }) : null,
-        ep.runtime_minutes ? el("span", {}, `${ep.runtime_minutes} min`) : null,
-        pos,
-      ),
-      ep.progress_percent > 0 && !ep.is_watched
-        ? el("div", { class: "bar" }, el("span", { style: `width:${Math.min(100, ep.progress_percent).toFixed(1)}%` }))
-        : null,
-      el("div", { class: "ep-actions" },
-        el("button", { type: "button", text: "Play", disabled: !ep.is_aired,
-          onclick: () => play({ catalog, catalogId, episode: ep.number, title }) }),
-        el("button", { type: "button", text: "Choose release", disabled: !ep.is_aired,
-          onclick: () => openReleases({ catalog, catalogId, episode: ep.number, title }) }),
-        !ep.is_watched && ep.is_aired
-          ? el("button", { type: "button", text: "Mark watched", onclick: () => markWatched(catalog, catalogId, ep.number) })
-          : null,
-      ),
-    );
-    cells.set(ep.number, pos);
-    grid.append(cell);
-  }
-  // Exact resume positions for the episodes that have one. The detail's
-  // percent is enough for the bar; the clock needs the recorded seconds.
-  const started = episodes.filter((e) => e.progress_percent > 0 && !e.is_watched).slice(0, 40);
-  mapLimited(started, 4, async (ep) => {
-    const p = await api("GET", `/api/progress/${catalogId}?episode=${ep.number}&catalog=${catalog}`);
-    if (p && p.stop_time > 0 && token === state.renderToken) {
-      cells.get(ep.number).textContent = `stopped at ${clock(p.stop_time)}`;
+  if (episodes.length > GROUP_SIZE + 10) {
+    groups = [];
+    for (let i = 0; i < episodes.length; i += GROUP_SIZE) {
+      const from = episodes[i].number;
+      const to = episodes[Math.min(i + GROUP_SIZE, episodes.length) - 1].number;
+      groups.push({ label: `${from}-${to}`, from, to });
     }
-  });
+  }
+  openAt();
+}
+
+async function drawTimeline(host, catalogId) {
+  host.append(el("p", { class: "muted", text: "Walking the franchise..." }));
+  let entries;
+  try { entries = await api("GET", `/api/franchise/${catalogId}`); } catch (e) {
+    host.replaceChildren(el("p", { class: "error", text: errorText(e) }));
+    return;
+  }
+  if (!entries.length || (entries.length === 1 && entries[0].catalog_id === catalogId)) {
+    host.replaceChildren(el("p", { class: "empty", text: "This title stands alone." }));
+    return;
+  }
+  const line = el("div", { class: "timeline" }, entries.map((e) => {
+    const when = [e.season ? humanize(e.season) : null, e.year].filter(Boolean).join(" ");
+    const bits = [formatLabel(e.format), e.episodes ? `${e.episodes} ep` : null, e.aside ? humanize(e.aside) : null].filter(Boolean);
+    const node = el("div", { class: "tl pc" + (e.catalog_id === catalogId ? " here" : "") + (e.aside ? " aside" : "") },
+      el("div", { class: "when" }, when || "Date unknown"),
+      el("a", { class: "frame", href: titleHref("anilist", e.catalog_id), "aria-label": e.title }, img(e.cover_image)),
+      el("a", { class: "name t-name", href: titleHref("anilist", e.catalog_id) }, e.title),
+      el("div", { class: "meta" }, bits.join(" · "),
+        e.list_status ? el("div", { style: "color:var(--accent)" }, STATUS_LABELS[e.list_status] || humanize(e.list_status)) : null));
+    return node;
+  }));
+  host.replaceChildren(el("p", { class: "meta", style: "margin:0 0 .4rem" }, `${entries.length} entries in watch order. Side stories are dimmed.`), line);
+  const here = line.querySelector(".here");
+  if (here) requestAnimationFrame(() => { line.scrollLeft = Math.max(0, here.offsetLeft - line.clientWidth / 3); });
+}
+
+async function drawCharacters(host, request) {
+  host.append(el("p", { class: "muted", text: "Loading..." }));
+  let rows;
+  try { rows = await request; } catch (e) { host.replaceChildren(el("p", { class: "error", text: errorText(e) })); return; }
+  if (!rows.length) { host.replaceChildren(el("p", { class: "empty", text: "No one listed." })); return; }
+  host.replaceChildren(el("div", { class: "people" }, rows.slice(0, 60).map((c) =>
+    el("div", { class: "person" },
+      img(c.image_url),
+      el("div", { class: "who2" }, el("div", {}, c.name), el("div", { class: "meta" }, humanize(c.role))),
+      c.voice_actor_name ? el("div", { class: "who2 va-side" }, el("div", {}, c.voice_actor_name), el("div", { class: "meta" }, "Voice")) : null,
+      c.voice_actor_name ? img(c.voice_actor_image_url) : null,
+    ))));
+}
+
+function drawRelated(host, d) {
+  const rel = d.relations || [];
+  const recs = d.recommendations || [];
+  if (rel.length) {
+    host.append(el("h2", { style: "margin-bottom:.8rem" }, "Relations"),
+      grid(rel.map((r) => ({ catalog: "anilist", catalog_id: r.catalog_id, title: r.title, cover_image: r.cover_image, format: r.format, average_score: r.average_score, rel: r.relation_type })),
+        (r) => ({ sub: [humanize(r.rel), formatLabel(r.format)].filter(Boolean).join(" · ") })));
+  }
+  if (recs.length) {
+    host.append(el("h2", { style: "margin:2rem 0 .8rem" }, "If you liked this"),
+      grid(recs.map((r) => ({ catalog: "anilist", catalog_id: r.catalog_id, title: r.title, cover_image: r.cover_image, format: r.format, average_score: r.average_score })),
+        (r) => ({ score: scoreOf(r) })));
+  }
+}
+
+async function drawCinemaFacts(host, extrasP) {
+  const x = await extrasP;
+  if (!x) { host.append(el("p", { class: "empty", text: "No details from TMDB." })); return; }
+  const money = (n) => n ? `$${(n / 1e6).toFixed(n >= 1e8 ? 0 : 1)}M` : null;
+  const facts = [
+    ["Tagline", x.tagline], ["Released", x.release_date], ["Last aired", x.last_air_date], ["Next episode", x.next_air_date],
+    ["Runtime", x.runtime_minutes ? `${x.runtime_minutes} min` : null],
+    ["Seasons", x.season_count], ["Episodes", x.episode_count],
+    ["Language", x.original_language ? x.original_language.toUpperCase() : null],
+    ["Budget", money(x.budget)], ["Box office", money(x.revenue)],
+    [x.companies.length > 1 ? "Companies" : "Company", x.companies.join(", ") || null],
+  ].filter(([, v]) => v);
+  host.append(el("dl", { class: "facts" }, facts.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])));
+  const links = [x.homepage ? ["Website", x.homepage] : null, x.imdb_url ? ["IMDb", x.imdb_url] : null].filter(Boolean);
+  if (links.length) {
+    host.append(el("div", { class: "actions" }, links.map(([t, u]) => el("a", { class: "btn", href: u, target: "_blank", rel: "noopener noreferrer" }, t))));
+  }
+  if (x.gallery && x.gallery.length) host.append(el("div", { class: "gallery" }, x.gallery.slice(0, 12).map((u) => img(u))));
 }
 
 async function markWatched(catalog, catalogId, episode) {
   try {
     const r = await api("POST", "/api/watched", { catalog, catalog_id: catalogId, episode });
     toast(r && r.anilist_synced ? "Marked watched and synced to AniList." : "Marked watched.");
+    listMemo.clear();
     render();
   } catch (e) {
     toast(errorText(e), true);
   }
 }
 
-async function viewSettings(host, token) {
-  host.append(el("h1", {}, "Settings"));
-  const wrap = el("div", { class: "settings" });
-  host.append(wrap);
+// ---- views: stats -----------------------------------------------------------
 
-  const account = el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "AniList account"));
+async function viewStats(host, token) {
+  const p = page(host);
+  p.append(el("h1", {}, state.mode === "anime" ? "Anime stats" : "Films and TV stats"),
+    el("p", { class: "meta", style: "margin:-.6rem 0 1.4rem" }, "From this computer's watch history."));
+  let s;
+  try { s = await api("GET", `/api/stats?days=182&mode=${state.mode}`); } catch (e) {
+    p.append(el("p", { class: "error", text: errorText(e) }));
+    return;
+  }
+  if (token !== state.renderToken) return;
+  if (!s.titles_started) {
+    p.append(el("p", { class: "empty", text: "Nothing watched yet. Stats fill in as you play." }));
+    return;
+  }
+  const since = s.first_watch_at ? new Date(s.first_watch_at).toLocaleDateString([], { year: "numeric", month: "long" }) : null;
+  p.append(el("div", { class: "tiles" },
+    tile(hours(s.total_watch_seconds), "Time watched"),
+    tile(s.episodes_watched, "Episodes finished"),
+    tile(s.titles_started, "Titles started"),
+    tile(`${s.current_streak_days} d`, "Current streak"),
+    tile(`${s.longest_streak_days} d`, "Longest streak"),
+  ));
+  p.append(el("div", { class: "panel" }, el("h2", {}, "The last six months"), heatmap(s.per_day),
+    since ? el("div", { class: "meta", style: "margin-top:.6rem" }, `Watching since ${since}`) : null));
+  const top = el("div", { class: "panel" }, el("h2", {}, "Most watched"));
+  p.append(el("div", { class: "two" }, top,
+    el("div", { class: "panel" }, el("h2", {}, "When you watch"), hourChart(s.by_hour),
+      el("div", { class: "meta", style: "margin-top:.6rem" }, `Busiest around ${String(s.busiest_hour).padStart(2, "0")}:00`))));
+  const rows = s.top_titles.slice(0, 8);
+  const maxSec = Math.max(1, ...rows.map((r) => r.seconds));
+  const details = await mapLimited(rows, 4, (r) => fetchDetail(r.catalog, r.catalog_id));
+  if (token !== state.renderToken) return;
+  top.append(...rows.map((r, i) => {
+    const d = details[i] && !details[i].error ? details[i] : null;
+    return el("a", { class: "toprow", href: titleHref(r.catalog, r.catalog_id) },
+      el("span", { class: "meta" }, i + 1),
+      img(d && d.cover_image),
+      el("div", { style: "min-width:0" }, el("div", { class: "t t-name" }, d ? d.title : `Title ${r.catalog_id}`),
+        el("div", { class: "bar", style: `width:${Math.max(4, (r.seconds / maxSec) * 100).toFixed(1)}%` })),
+      el("span", { class: "meta" }, `${r.episodes} ep · ${hours(r.seconds)}`));
+  }));
+}
+
+function tile(v, k) { return el("div", { class: "tile" }, el("div", { class: "v" }, v), el("div", { class: "k" }, k)); }
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+function svg(tag, attrs, ...kids) {
+  const n = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, v);
+  for (const c of kids) if (c) n.append(c);
+  return n;
+}
+
+function heatmap(days) {
+  const cell = 13, gap = 3;
+  const first = days.length ? new Date(days[0].date + "T00:00:00") : new Date();
+  const lead = (first.getDay() + 6) % 7; // weeks start on Monday
+  const weeks = Math.ceil((days.length + lead) / 7);
+  const max = Math.max(1, ...days.map((d) => d.seconds));
+  const root = svg("svg", { viewBox: `0 0 ${weeks * (cell + gap) + 30} ${7 * (cell + gap) + 18}`, width: weeks * (cell + gap) + 30, role: "img", "aria-label": "Watch time per day" });
+  ["Mon", "", "Wed", "", "Fri", "", ""].forEach((t, i) => {
+    if (t) root.append(svg("text", { x: 0, y: 18 + i * (cell + gap) + 10, "font-size": 9, fill: "var(--faint)" }, document.createTextNode(t)));
+  });
+  let lastMonth = -1;
+  days.forEach((d, i) => {
+    const k = i + lead;
+    const x = 30 + Math.floor(k / 7) * (cell + gap);
+    const y = 18 + (k % 7) * (cell + gap);
+    const date = new Date(d.date + "T00:00:00");
+    if (k % 7 === 0 || i === 0) {
+      if (date.getMonth() !== lastMonth && date.getDate() <= 7) {
+        lastMonth = date.getMonth();
+        root.append(svg("text", { x, y: 10, "font-size": 9, fill: "var(--muted)" }, document.createTextNode(date.toLocaleDateString([], { month: "short" }))));
+      }
+    }
+    const t = d.seconds / max;
+    const r = svg("rect", { x, y, width: cell, height: cell, rx: 3,
+      fill: d.seconds ? `color-mix(in srgb, var(--accent) ${Math.round(22 + t * 78)}%, var(--card-2))` : "var(--card-2)" });
+    r.append(svg("title", {}, document.createTextNode(`${date.toLocaleDateString()}: ${d.seconds ? hours(d.seconds) : "nothing"}${d.episodes ? `, ${d.episodes} episodes` : ""}`)));
+    root.append(r);
+  });
+  return el("div", { style: "overflow-x:auto" }, root);
+}
+
+function hourChart(byHour) {
+  const w = 14, gap = 4, h = 90;
+  const max = Math.max(1, ...byHour);
+  const root = svg("svg", { viewBox: `0 0 ${24 * (w + gap)} ${h + 16}`, width: "100%", role: "img", "aria-label": "Episodes started per hour" });
+  byHour.forEach((n, i) => {
+    const bh = Math.max(2, (n / max) * h);
+    const r = svg("rect", { x: i * (w + gap), y: h - bh, width: w, height: bh, rx: 3, fill: n === max ? "var(--accent)" : "color-mix(in srgb, var(--accent) 45%, var(--card-2))" });
+    r.append(svg("title", {}, document.createTextNode(`${String(i).padStart(2, "0")}:00, ${n} started`)));
+    root.append(r);
+    if (i % 6 === 0) root.append(svg("text", { x: i * (w + gap), y: h + 13, "font-size": 9, fill: "var(--faint)" }, document.createTextNode(`${String(i).padStart(2, "0")}:00`)));
+  });
+  return root;
+}
+
+// ---- views: sign-in, settings -----------------------------------------------
+
+async function viewSignIn(host) {
+  const input = el("input", { class: "field", type: "text", placeholder: "Paste the token or the whole address", "aria-label": "AniList token", autocomplete: "off", spellcheck: "false" });
+  const status = el("p", { class: "muted", style: "margin:0" });
+  const submit = el("button", { type: "submit", class: "btn primary", text: "Sign in" });
+  const form = el("form", {
+    class: "signin",
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      const token = extractToken(input.value);
+      if (!token) { status.className = "error"; status.textContent = "That does not contain a token."; return; }
+      submit.disabled = true;
+      status.className = "muted";
+      status.textContent = "Checking with AniList...";
+      try {
+        const r = await api("POST", "/api/token", { token });
+        state.signedIn = !!r.signed_in;
+        state.profile = r.profile || null;
+        state.viewerError = null;
+        store.del("anicat_skip_signin");
+        drawWho();
+        location.hash = "#/";
+      } catch (e) {
+        status.className = "error";
+        status.textContent = e instanceof ApiFailure && e.anilistDown ? errorText(e) : `AniList refused the token: ${errorText(e)}`;
+      } finally {
+        submit.disabled = false;
+      }
+    },
+  },
+    el("div", { class: "brand", style: "padding:0;font-size:22px" }, icon("paw"), "Anicat"),
+    el("h1", { style: "margin:0" }, "Sign in to AniList"),
+    el("p", { class: "muted", style: "margin:0" }, "Your anime list and progress sync with your AniList account. Films and TV work without one."),
+    el("ol", {},
+      el("li", {}, el("a", { href: SIGNIN_URL, target: "_blank", rel: "noopener noreferrer" }, "Open AniList sign-in"), " and approve Anicat."),
+      el("li", {}, "AniList shows a page whose address contains access_token=. Copy the token, or the whole address, and paste it here."),
+    ),
+    input,
+    el("div", { class: "row" },
+      submit,
+      el("button", { type: "button", class: "btn", text: "Skip, Films and TV only", onclick: () => {
+        store.set("anicat_skip_signin", "1");
+        setMode("cinema", true);
+        location.hash = "#/";
+      } }),
+    ),
+    status,
+  );
+  page(host).append(form);
+  input.focus();
+}
+
+function extractToken(raw) {
+  const text = (raw || "").trim();
+  if (!text) return null;
+  const m = text.match(/access_token=([^&\s#]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  // A bare token has no spaces and no URL punctuation.
+  if (/^[A-Za-z0-9._\-]+$/.test(text)) return text;
+  return null;
+}
+
+function setRow(key, hint, control) {
+  return el("div", { class: "set" }, el("div", { class: "k" }, key), el("div", { class: "c" }, control), el("div", { class: "h" }, hint));
+}
+
+async function viewSettings(host) {
+  const p = page(host);
+  p.append(el("h1", {}, "Settings"));
+  const wrap = el("div", { class: "settings" });
+  p.append(wrap);
+
+  wrap.append(el("h2", {}, "Account"));
   if (state.signedIn) {
-    account.append(
-      el("p", {}, state.profile ? `Signed in as ${state.profile.name}.` : "Signed in."),
-      state.viewerError ? el("p", { class: "error" }, state.viewerError) : null,
-      el("button", { type: "button", text: "Sign out", onclick: async () => {
+    wrap.append(setRow(state.profile ? `Signed in as ${state.profile.name}` : "Signed in",
+      state.viewerError || "Lists, progress and favourites sync with AniList.",
+      el("button", { type: "button", class: "btn", text: "Sign out", onclick: async () => {
         if (!confirm("Sign out of AniList on this computer?")) return;
         try {
           await api("POST", "/api/token", { token: null });
           state.signedIn = false;
           state.profile = null;
+          listMemo.clear();
+          drawWho();
           render();
         } catch (e) { toast(errorText(e), true); }
-      } }),
-    );
+      } })));
   } else {
-    account.append(el("p", {}, "Not signed in. Films and TV work without an account."),
-      el("a", { href: "#/signin" }, "Sign in to AniList"));
+    wrap.append(setRow("Not signed in", "Films and TV work without an account.", el("a", { class: "btn primary", href: "#/signin" }, "Sign in")));
   }
-  wrap.append(account);
+
+  wrap.append(el("h2", {}, "Appearance"));
+  const skinRow = el("div", { class: "skins" });
+  const drawSkins = () => {
+    const current = store.get("anicat_skin") || "ink";
+    const theme = document.documentElement.dataset.theme;
+    skinRow.replaceChildren(...SKINS.map((s) => {
+      const [bg, ac] = (theme === "light" && s.light) ? s.light : s.dark;
+      return el("button", { type: "button", class: "skin", "aria-pressed": String(s.id === current), onclick: () => {
+        store.set("anicat_skin", s.id); applyTheme(); drawSkins(); drawAppearance();
+      } }, el("i", { style: `background:${bg}` }, el("b", { style: `background:${ac}` })), s.label);
+    }));
+  };
+  const appearanceHost = el("div");
+  const drawAppearance = () => {
+    const oled = (store.get("anicat_skin") || "ink") === "oled";
+    const follow = store.get("anicat_follow_system") !== "0";
+    appearanceHost.replaceChildren(...[
+      oled ? null : setRow("Follow system appearance", "Light or dark with Windows.",
+        slash([[true, "On"], [false, "Off"]], follow, (v) => { store.set("anicat_follow_system", v ? "1" : "0"); applyTheme(); drawSkins(); drawAppearance(); })),
+      oled || follow ? null : setRow("Appearance", "Each skin has a light and a dark side.",
+        slash([["light", "Light"], ["dark", "Dark"]], store.get("anicat_theme") || "dark", (v) => { store.set("anicat_theme", v); applyTheme(); drawSkins(); })),
+    ].filter(Boolean));
+  };
+  wrap.append(setRow("Skin", "The Mac app's three skins.", skinRow), appearanceHost);
+  drawSkins();
+  drawAppearance();
 
   // The same three settings the player's Ctrl+1 / Ctrl+2 / Ctrl+4 bindings
   // toggle. Both write the server's prefs file, so a change made in mpv shows
   // here on the next visit and one made here reaches a running mpv at once.
-  const playback = el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "Playback"));
+  wrap.append(el("h2", {}, "Playback"));
   const prefRows = [
-    ["upscaling", "Anime4K upscaling", "Anime only. Off for films, TV and 2160p sources."],
-    ["autoskip", "Skip intros and outros", "Skips automatically instead of offering the Shift+S prompt."],
-    ["auto_next", "Play the next episode", "Queues the next episode near the end of the current one."],
+    ["upscaling", "Anime4K upscaling", "Anime only. Off for films, TV and 2160p sources. Ctrl+1 in the player."],
+    ["autoskip", "Skip intros and outros", "Skips on its own instead of offering the Shift+S prompt. Ctrl+2 in the player."],
+    ["auto_next", "Play the next episode", "Queues the next episode near the end of the current one. Ctrl+4 in the player."],
   ];
-  const prefInputs = {};
-  for (const [key, label, hint] of prefRows) {
-    const input = el("input", { type: "checkbox", disabled: true });
-    input.addEventListener("change", async () => {
-      input.disabled = true;
-      try {
-        const saved = await api("POST", "/api/prefs", { [key]: input.checked });
-        for (const [k, box] of Object.entries(prefInputs)) box.checked = !!saved[k];
-      } catch (e) { input.checked = !input.checked; toast(errorText(e), true); }
-      input.disabled = false;
-    });
-    prefInputs[key] = input;
-    playback.append(el("label", { class: "pref" }, input,
-      el("span", {}, el("strong", {}, label), el("span", { class: "muted", text: hint }))));
-  }
-  wrap.append(playback);
-  api("GET", "/api/prefs").then((p) => {
-    for (const [k, box] of Object.entries(prefInputs)) { box.checked = !!p[k]; box.disabled = false; }
-  }, (e) => { playback.append(el("p", { class: "error" }, errorText(e))); });
+  const prefHost = el("div", {}, el("p", { class: "muted", text: "Loading..." }));
+  wrap.append(prefHost);
+  const drawPrefs = (prefs) => {
+    prefHost.replaceChildren(...prefRows.map(([key, label, hint]) => setRow(label, hint,
+      slash([[true, "On"], [false, "Off"]], !!prefs[key], async (v) => {
+        try { drawPrefs(await api("POST", "/api/prefs", { [key]: v })); } catch (e) { toast(errorText(e), true); drawPrefs(prefs); }
+      }, label))));
+  };
+  api("GET", "/api/prefs").then(drawPrefs, (e) => prefHost.replaceChildren(el("p", { class: "error" }, errorText(e))));
 
-  const cacheText = el("p", { class: "muted", text: "Measuring..." });
-  const clearBtn = el("button", { type: "button", class: "danger", text: "Clear cache", onclick: async () => {
+  wrap.append(el("h2", {}, "Storage"));
+  const cacheText = el("span", { class: "num" }, "Measuring...");
+  const clearBtn = el("button", { type: "button", class: "btn danger", text: "Clear cache", onclick: async () => {
     if (!confirm("Delete every downloaded episode in the stream cache? Anything playing will stop.")) return;
     clearBtn.disabled = true;
     try {
       const r = await api("DELETE", "/api/cache");
-      cacheText.textContent = `Stream cache: ${bytes(r.bytes)}`;
+      cacheText.textContent = bytes(r.bytes);
     } catch (e) { toast(errorText(e), true); }
     clearBtn.disabled = false;
   } });
-  wrap.append(el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "Storage"), cacheText, clearBtn));
-  api("GET", "/api/cache").then((r) => { cacheText.textContent = `Stream cache: ${bytes(r.bytes)}`; },
+  wrap.append(setRow(el("span", {}, "Stream cache ", cacheText), "Episodes download here while they play and are evicted on their own.", clearBtn));
+  api("GET", "/api/cache").then((r) => { cacheText.textContent = bytes(r.bytes); },
     (e) => { cacheText.textContent = errorText(e); cacheText.className = "error"; });
 
-  const reportHost = el("div");
-  const copyBtn = el("button", { type: "button", text: "Copy debug report", onclick: async () => {
+  wrap.append(el("h2", {}, "Support"));
+  const reportHost = el("div", { style: "grid-column:1/-1" });
+  const copyBtn = el("button", { type: "button", class: "btn", text: "Copy debug report", onclick: async () => {
     copyBtn.disabled = true;
     try {
       const text = await api("GET", "/api/debug-report");
@@ -1078,18 +2260,36 @@ async function viewSettings(host, token) {
     } catch (e) { toast(errorText(e), true); }
     copyBtn.disabled = false;
   } });
-  wrap.append(el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "Support"),
-    el("p", {}, "The debug report holds the version, settings summary and the last log lines. Nothing is sent anywhere; paste it where you report the problem."),
-    copyBtn, reportHost));
+  const support = setRow("Debug report", "The version, a settings summary and the last log lines. Nothing is sent anywhere; paste it where you report the problem.", copyBtn);
+  support.append(reportHost);
+  wrap.append(support);
 
-  const versionText = el("p", { class: "muted", text: "Checking..." });
-  wrap.append(el("div", { class: "card" }, el("h2", { style: "margin-top:0" }, "Version"), versionText));
+  const versionText = el("span", {}, "Checking...");
+  wrap.append(setRow("Version", versionText, el("span")));
   api("GET", "/api/version").then((v) => {
     versionText.textContent = v.update_available && v.latest
       ? `Anicat ${v.current}. Version ${v.latest} is available.`
       : `Anicat ${v.current}. Up to date.`;
   }, (e) => { versionText.textContent = errorText(e); });
+
+  wrap.append(el("h2", {}, "Keyboard"));
+  wrap.append(el("dl", { class: "facts", style: "margin-top:.8rem" },
+    [["/", "Search"], ["g h", "Home"], ["g s", "Schedule"], ["g l", "Library"], ["g t", "Stats"], ["Esc", "Close a dialog or menu"]]
+      .flatMap(([k, v]) => [el("dt", { class: "num" }, k), el("dd", {}, v)])));
 }
+
+// ---- theme ------------------------------------------------------------------
+
+const systemLight = matchMedia("(prefers-color-scheme: light)");
+function applyTheme() {
+  const skin = store.get("anicat_skin") || "ink";
+  const follow = store.get("anicat_follow_system") !== "0";
+  let theme = follow ? (systemLight.matches ? "light" : "dark") : (store.get("anicat_theme") || "dark");
+  if (skin === "oled") theme = "dark";
+  document.documentElement.dataset.skin = skin;
+  document.documentElement.dataset.theme = theme;
+}
+systemLight.addEventListener("change", applyTheme);
 
 // ---- router -----------------------------------------------------------------
 
@@ -1099,10 +2299,12 @@ function setMode(mode, keepRoute) {
   for (const b of document.querySelectorAll("[data-mode]")) {
     b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
   }
+  for (const a of document.querySelectorAll("[data-anime-only]")) a.hidden = mode !== "anime";
   if (!keepRoute) {
     const tab = currentRoute().tab;
-    // A title page belongs to one catalog; switching lands on that mode's home.
-    if (tab === "title") location.hash = "#/";
+    // A title page belongs to one catalog, and the schedule is anime's alone;
+    // switching from either lands on that mode's home.
+    if (tab === "title" || (tab === "schedule" && mode !== "anime")) location.hash = "#/";
     else render();
   }
 }
@@ -1115,6 +2317,7 @@ function currentRoute() {
 
 async function render() {
   const token = ++state.renderToken;
+  closePopover();
   const { tab, parts } = currentRoute();
   // A bookmark to a cinema title opened while the switch is on Anime (or the
   // reverse) follows the title rather than showing it under the wrong tabs.
@@ -1124,62 +2327,103 @@ async function render() {
   }
   const host = document.getElementById("view");
   host.replaceChildren();
+  window.scrollTo(0, 0);
   document.title = "Anicat";
-  for (const a of document.querySelectorAll("nav.tabs a")) {
+  for (const a of document.querySelectorAll("nav.nav a")) {
     const active = a.dataset.tab === tab;
     if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   }
-  const libraryTab = document.querySelector('[data-tab="library"]');
-  libraryTab.hidden = state.mode === "anime" && !state.signedIn;
-  document.querySelector('[data-tab="home"]').textContent =
-    state.mode === "anime" && !state.signedIn ? "Home" : "Up Next";
 
   try {
     switch (tab) {
       case "home": await viewHome(host, token); break;
-      case "library": await viewLibrary(host, token); break;
+      case "schedule": await viewSchedule(host, token); break;
+      case "library": await viewLibrary(host, token, parts[1]); break;
       case "search": await viewSearch(host, token, parts[1] ? decodeURIComponent(parts[1]) : ""); break;
-      case "title": await viewTitle(host, token, parts[1], parts[2]); break;
+      case "title": await viewTitle(host, token, parts[1], parts[2], parts[3]); break;
+      case "stats": await viewStats(host, token); break;
       case "settings": await viewSettings(host, token); break;
       case "signin": await viewSignIn(host, token); break;
-      default: host.append(el("p", { class: "error", text: "Page not found." }), el("a", { href: "#/" }, "Go home"));
+      default: page(host).append(el("p", { class: "error", text: "Page not found." }), el("a", { class: "link", href: "#/" }, "Go home"));
     }
   } catch (e) {
-    if (token === state.renderToken) host.append(el("p", { class: "error", text: errorText(e) }));
+    if (token === state.renderToken) page(host).append(el("p", { class: "error", text: errorText(e) }));
   }
 }
+
+function drawWho() {
+  const who = document.getElementById("who");
+  if (state.signedIn && state.profile) {
+    who.replaceChildren(img(state.profile.avatar_url, { loading: "eager" }),
+      el("div", { style: "min-width:0" }, el("div", {}, state.profile.name), el("div", { class: "muted" }, "AniList")));
+  } else if (state.signedIn) {
+    who.replaceChildren(el("div", { class: "muted" }, state.viewerError ? "AniList unreachable" : "Signed in"));
+  } else {
+    who.replaceChildren(el("div", {}, el("div", {}, "Not signed in"), el("div", { class: "muted" }, "Sign in to AniList")));
+    who.setAttribute("href", "#/signin");
+    return;
+  }
+  who.setAttribute("href", "#/settings");
+}
+
+// ---- keyboard ---------------------------------------------------------------
+
+let pendingG = 0;
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+    if (e.key === "Escape") t.blur();
+    return;
+  }
+  if (document.querySelector(".overlay")) return;
+  if (e.key === "/") {
+    e.preventDefault();
+    const box = document.querySelector(".searchbar input");
+    if (box) box.focus(); else location.hash = "#/search";
+    return;
+  }
+  const now = Date.now();
+  if (e.key === "g") { pendingG = now; return; }
+  if (now - pendingG < 900) {
+    const to = { h: "#/", s: "#/schedule", l: "#/library", t: "#/stats" }[e.key];
+    pendingG = 0;
+    if (to) { e.preventDefault(); location.hash = to; }
+  }
+});
 
 // ---- version banner ---------------------------------------------------------
 
 async function checkVersion() {
   let v;
   try { v = await api("GET", "/api/version"); } catch { return; }
-  if (!v || !v.update_available || !v.latest) return;
+  if (!v) return;
+  document.getElementById("side-foot").textContent = v.current ? `Version ${v.current}` : "";
+  if (!v.update_available || !v.latest) return;
   if (store.get("anicat_update_dismissed") === v.latest) return;
   const banner = document.getElementById("update-banner");
   const copyHost = el("div", { style: "flex-basis:100%" });
-  banner.replaceChildren(
+  banner.replaceChildren(...[
     el("span", {}, `Anicat ${v.latest} is out. Run the install command again to update.`),
-    el("div", { class: "codebox" },
-      el("code", {}, INSTALL_COMMAND),
-      el("button", { type: "button", text: "Copy", onclick: async () => {
-        if (await copyText(INSTALL_COMMAND, copyHost)) toast("Install command copied.");
-      } }),
-    ),
-    v.page_url ? el("a", { href: v.page_url, target: "_blank", rel: "noopener noreferrer" }, "Release notes") : null,
-    el("span", { class: "spacer", style: "flex:1" }),
-    el("button", { type: "button", text: "Dismiss", onclick: () => {
+    el("code", {}, INSTALL_COMMAND),
+    el("button", { type: "button", class: "btn", text: "Copy", onclick: async () => {
+      if (await copyText(INSTALL_COMMAND, copyHost)) toast("Install command copied.");
+    } }),
+    v.page_url ? el("a", { class: "link", href: v.page_url, target: "_blank", rel: "noopener noreferrer" }, "Release notes") : null,
+    el("span", { style: "flex:1" }),
+    el("button", { type: "button", class: "btn ghost", text: "Dismiss", onclick: () => {
       store.set("anicat_update_dismissed", v.latest);
       banner.hidden = true;
     } }),
     copyHost,
-  );
+  ].filter(Boolean));
   banner.hidden = false;
 }
 
 // ---- boot -------------------------------------------------------------------
 
 async function boot() {
+  for (const n of document.querySelectorAll("[data-icon]")) n.replaceWith(icon(n.dataset.icon));
   for (const b of document.querySelectorAll("[data-mode]")) {
     b.addEventListener("click", () => { if (b.dataset.mode !== state.mode) setMode(b.dataset.mode); });
   }
@@ -1194,6 +2438,7 @@ async function boot() {
     state.signedIn = true;
     state.viewerError = errorText(e);
   }
+  drawWho();
   window.addEventListener("hashchange", render);
   if (!state.signedIn && store.get("anicat_skip_signin") !== "1" && !location.hash.startsWith("#/title")) {
     location.hash = "#/signin";

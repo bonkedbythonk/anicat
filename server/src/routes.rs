@@ -44,6 +44,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/health", get(health))
         .route("/api/version", get(version))
         .route("/api/debug-report", get(debug_report))
+        .route("/api/franchise/{id}", get(franchise))
+        .route("/api/characters/{id}", get(characters))
+        .route("/api/schedule", get(schedule))
+        .route("/api/recommendations", get(recommendations))
+        .route("/api/stats", get(stats))
+        .route("/api/favourite", post(favourite))
+        .route("/api/list-entry", post(list_entry))
+        .route("/api/cinema/genres", get(cinema_genres))
+        .route("/api/cinema/discover", get(cinema_discover))
+        .route("/api/cinema/{id}/extras", get(cinema_extras))
+        .route("/api/cinema/{id}/cast", get(cinema_cast))
         .with_state(state)
 }
 
@@ -489,4 +500,144 @@ async fn debug_report(State(s): State<AppState>) -> impl IntoResponse {
         tail = crate::logging::tail(&s.data_dir, 200),
     );
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], report)
+}
+
+// ---- title page, schedule, stats --------------------------------------------
+
+async fn franchise(State(s): State<AppState>, ApiPath(id): ApiPath<i64>) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(s.engine.franchise(id).await?)))
+}
+
+async fn characters(State(s): State<AppState>, ApiPath(id): ApiPath<i64>) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(s.engine.media_characters(id).await?)))
+}
+
+#[derive(Deserialize)]
+struct ScheduleQuery {
+    from: i64,
+    to: i64,
+}
+
+async fn schedule(State(s): State<AppState>, ApiQuery(q): ApiQuery<ScheduleQuery>) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(s.engine.airing_schedule(q.from, q.to).await?)))
+}
+
+async fn recommendations(State(s): State<AppState>, ApiQuery(q): ApiQuery<LimitQuery>) -> ApiResult<Json<Value>> {
+    if !s.signed_in() {
+        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "not signed in to AniList"));
+    }
+    Ok(Json(json!(s.engine.recommendations_for_viewer(q.limit).await?)))
+}
+
+#[derive(Deserialize)]
+struct StatsQuery {
+    #[serde(default = "default_stats_days")]
+    days: i32,
+    /// `anime` or `cinema`; the same split the Mac Stats page makes, since a
+    /// page showing films that answers about anime is a wrong answer.
+    mode: Option<String>,
+}
+
+fn default_stats_days() -> i32 {
+    182
+}
+
+async fn stats(State(s): State<AppState>, ApiQuery(q): ApiQuery<StatsQuery>) -> ApiResult<Json<Value>> {
+    let catalogs = match q.mode.as_deref() {
+        Some("anime") => vec![FfiCatalog::Anilist],
+        Some("cinema") => vec![FfiCatalog::TmdbMovie, FfiCatalog::TmdbTv],
+        _ => Vec::new(),
+    };
+    let engine = s.engine.clone();
+    let out = tokio::task::spawn_blocking(move || engine.watch_stats(q.days, catalogs))
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))??;
+    Ok(Json(json!(out)))
+}
+
+#[derive(Deserialize)]
+struct FavouriteBody {
+    catalog_id: i64,
+    currently_favourite: bool,
+}
+
+async fn favourite(State(s): State<AppState>, ApiJson(b): ApiJson<FavouriteBody>) -> ApiResult<Json<Value>> {
+    let now = s
+        .engine
+        .toggle_favourite(b.catalog_id, false, b.currently_favourite)
+        .await?;
+    Ok(Json(json!({ "is_favourite": now })))
+}
+
+#[derive(Deserialize)]
+struct ListEntryBody {
+    catalog_id: i64,
+    status: Option<String>,
+    score: Option<f64>,
+    progress: Option<i64>,
+}
+
+async fn list_entry(State(s): State<AppState>, ApiJson(b): ApiJson<ListEntryBody>) -> ApiResult<StatusCode> {
+    if !s.signed_in() {
+        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "not signed in to AniList"));
+    }
+    s.writer
+        .update_list_entry(b.catalog_id, b.status, b.score, b.progress)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct SeriesQuery {
+    #[serde(default)]
+    series: bool,
+}
+
+async fn cinema_genres(State(s): State<AppState>, ApiQuery(q): ApiQuery<SeriesQuery>) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(s.engine.cinema_genres(q.series).await?)))
+}
+
+#[derive(Deserialize)]
+struct CinemaDiscoverQuery {
+    #[serde(default)]
+    series: bool,
+    genre: Option<i64>,
+    year: Option<i32>,
+    sort: Option<String>,
+    #[serde(default = "default_page")]
+    page: i32,
+}
+
+async fn cinema_discover(
+    State(s): State<AppState>,
+    ApiQuery(q): ApiQuery<CinemaDiscoverQuery>,
+) -> ApiResult<Json<Value>> {
+    let rows = s
+        .engine
+        .cinema_discover(q.series, q.genre, q.year, q.sort, q.page)
+        .await?;
+    Ok(Json(json!(rows)))
+}
+
+fn cinema_catalog(catalog: FfiCatalog) -> ApiResult<FfiCatalog> {
+    match catalog {
+        FfiCatalog::TmdbMovie | FfiCatalog::TmdbTv => Ok(catalog),
+        _ => Err(ApiError::bad_request("catalog must be tmdb_movie or tmdb_tv")),
+    }
+}
+
+async fn cinema_extras(
+    State(s): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+    ApiQuery(q): ApiQuery<CatalogQuery>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(s.engine.cinema_extras(cinema_catalog(q.catalog)?, id).await?)))
+}
+
+async fn cinema_cast(
+    State(s): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+    ApiQuery(q): ApiQuery<CatalogQuery>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(s.engine.cinema_cast(cinema_catalog(q.catalog)?, id).await?)))
 }

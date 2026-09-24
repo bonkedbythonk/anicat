@@ -356,7 +356,7 @@ pub struct EpisodeRow {
 /// season counts) has no anime counterpart at all. Fetched from the same
 /// cached TMDB detail the page already loaded, so asking for it costs no
 /// request.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct CinemaExtras {
     pub tagline: Option<String>,
     /// ISO 639-1, as TMDB reports it. The client names it.
@@ -579,19 +579,19 @@ pub struct FfiLocalEntry {
     pub status: String,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiCinemaGenre {
     pub id: i64,
     pub name: String,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct CinemaSeason {
     pub number: i32,
     pub episode_count: i32,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiCharacter {
     pub id: i64,
     pub name: String,
@@ -615,7 +615,7 @@ pub struct FfiRelation {
 /// One title of a franchise's watch order (`AnicatEngine::franchise`).
 /// Unlike `FfiRelation` it carries the start date and episode count the
 /// timeline sorts and labels by.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiFranchiseEntry {
     pub catalog_id: i64,
     pub title: String,
@@ -783,7 +783,7 @@ pub struct FfiStudioDetail {
 }
 
 /// One episode airing at a known time, for the season calendar.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiAiringSlot {
     pub catalog_id: i64,
     pub title: String,
@@ -800,7 +800,7 @@ pub struct FfiAiringSlot {
 }
 
 /// One "Because you watched" row: a title, plus the title that suggested it.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiRecommendationRow {
     pub media: MediaSummary,
     pub because_title: String,
@@ -934,7 +934,7 @@ pub struct FfiTrackPreference {
 }
 
 /// One day of the activity calendar.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiDayCount {
     /// `YYYY-MM-DD`, in the device's own timezone.
     pub date: String,
@@ -942,7 +942,7 @@ pub struct FfiDayCount {
     pub seconds: i64,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiTitleCount {
     pub catalog: FfiCatalog,
     pub catalog_id: i64,
@@ -953,7 +953,7 @@ pub struct FfiTitleCount {
 /// What the local watch history adds up to. Nothing here comes from AniList:
 /// it tracks whole episodes and records no time of day, so a calendar, a
 /// streak and an hour histogram can only be built from this device's rows.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize)]
 pub struct FfiWatchStats {
     pub total_watch_seconds: i64,
     /// Episodes past 85%, the same threshold the player advances progress at.

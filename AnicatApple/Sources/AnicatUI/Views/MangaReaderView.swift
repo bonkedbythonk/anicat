@@ -446,7 +446,14 @@ public struct MangaReaderView: View {
                 .gesture(
                     MagnificationGesture()
                         .onChanged { value in
-                            currentZoom = value
+                            // A hard pinch-in on a trackpad drives `value`
+                            // to 0, and a scale of 0 on the webtoon scroll
+                            // view is a singular transform: AppKit asserts
+                            // in NSCGSizeApplyInverseAffineTransform and the
+                            // app aborts (a user's M1, macOS 26.4.1). Held
+                            // at the unzoomed size, where onEnded settles it
+                            // anyway.
+                            currentZoom = max(value, 1 / finalZoom)
                         }
                         .onEnded { value in
                             finalZoom = min(max(finalZoom * value, 1.0), 3.5)

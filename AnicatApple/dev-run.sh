@@ -18,6 +18,12 @@ pkill -f "dist/Anicat.app/Contents/MacOS/Anicat" 2>/dev/null || true
 # before anyone noticed the fix was not in it.
 BIN="$(swift build --product Anicat -c debug --show-bin-path)/Anicat"
 cp "$BIN" dist/Anicat.app/Contents/MacOS/Anicat
+# The resource bundle too, or the binary runs against whatever art the last
+# packaging run left: a Sep 11 bundle drew the retired cat watermark in a
+# dev build while the shipped app drew the paw. rsync, not `cp -R`, which
+# nests a second copy inside an existing bundle directory.
+rsync -a --delete "$(dirname "$BIN")/AnicatApple_AnicatUI.bundle/" \
+    dist/Anicat.app/Contents/Resources/AnicatApple_AnicatUI.bundle/
 # The bundle's Info.plist was written once by a packaging run and never
 # touched again, so Settings > Maintenance kept reporting whatever version
 # that run had (1.0.0, for months). Stamp it from version.txt every run.

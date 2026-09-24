@@ -146,6 +146,9 @@
   }
   .popover button:hover, .popover button.hot { background: var(--card-2); }
   .popover button[aria-checked=true] { color: var(--accent); font-weight: 600; }
+  .popover button.danger { color: var(--danger); }
+  .popover .sep { height: 1px; background: var(--line); margin: .3rem .45rem; }
+  .popover .head { font-size: 11.5px; color: var(--faint); padding: .35rem .65rem .15rem; }
   @keyframes pop { from { opacity: 0; transform: translateY(-4px); } }
 
   input.field, textarea.field {
@@ -861,6 +864,155 @@ function menu({ label, options, value, onChange }) {
   return btn;
 }
 
+// The right-click menu. `items` holds { label, run, danger, checked },
+// "-" for a divider and { heading } for a label.
+function contextMenu(x, y, items) {
+  closePopover();
+  const pop = el("div", { class: "popover", role: "menu" });
+  const buttons = [];
+  let lastSep = true;
+  for (const it of items) {
+    if (!it) continue;
+    if (it === "-") { if (!lastSep) pop.append(el("div", { class: "sep" })); lastSep = true; continue; }
+    lastSep = false;
+    if (it.heading) { pop.append(el("div", { class: "head", text: it.heading })); continue; }
+    const b = el("button", { type: "button", role: "menuitem", class: it.danger ? "danger" : null,
+      "aria-checked": it.checked ? "true" : null, text: it.label,
+      onclick: () => { closePopover(); it.run(); } });
+    buttons.push(b);
+    pop.append(b);
+  }
+  if (pop.lastChild && pop.lastChild.className === "sep") pop.lastChild.remove();
+  pop.addEventListener("keydown", (e) => {
+    const i = buttons.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { buttons[Math.min(buttons.length - 1, i + 1)].focus(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { buttons[Math.max(0, i - 1)].focus(); e.preventDefault(); }
+    else if (e.key === "Escape") { closePopover(); e.stopPropagation(); }
+  });
+  document.getElementById("overlay-root").append(pop);
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = `${Math.max(8, Math.min(x, innerWidth - w - 8))}px`;
+  pop.style.top = `${Math.max(8, Math.min(y, innerHeight - h - 8))}px`;
+  openPopover = pop;
+  if (buttons[0]) buttons[0].focus({ preventScroll: true });
+}
+
+// The Menu key and Shift+F10 fire contextmenu too, at the focused element,
+// with no pointer position; the menu then opens at the element's corner.
+function attachMenu(node, itemsFn) {
+  node.addEventListener("contextmenu", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let { clientX: x, clientY: y } = e;
+    if (!x && !y) { const r = node.getBoundingClientRect(); x = r.left + 12; y = r.top + 12; }
+    const items = await itemsFn();
+    contextMenu(x, y, items);
+  });
+}
+
+// What a title's own menu offers, wherever its card sits. `hooks.status(s)`
+// and `hooks.removed()` let the view drop a card that no longer belongs there;
+// `hooks.noPlay` is for a card whose own menu already leads with Play.
+async function titleMenuItems(catalog, id, summary, hooks = {}) {
+  const items = [{ label: "Open", run: () => { location.hash = titleHref(catalog, id); } }];
+  const done = () => { listMemo.clear(); detailMemo.delete(`${catalog}:${id}`); };
+  if (catalog === "anilist") {
+    let d = null;
+    try { d = await fetchDetail("anilist", id); } catch { /* the summary's fields below */ }
+    const next = !hooks.noPlay && d && nextEpisode(d);
+    if (next) {
+      items.push({ label: `Play episode ${next.number}`, run: () =>
+        play({ catalog, catalogId: id, episode: next.number, title: d.title, cover: d.cover_image }) });
+    }
+    if (state.signedIn) {
+      const status = d ? d.list_status : summary && summary.list_status;
+      const entry = d ? d.list_entry_id : summary && summary.list_entry_id;
+      items.push("-", { heading: status ? "On your list" : "Add to your list" });
+      for (const st of ANIME_STATUSES) {
+        items.push({ label: STATUS_LABELS[st], checked: st === status, run: async () => {
+          if (st === status) return;
+          try {
+            await api("POST", "/api/list-entry", { catalog_id: id, status: st });
+            done();
+            toast(`Saved as ${STATUS_LABELS[st]}.`);
+            if (hooks.status) hooks.status(st);
+          } catch (e) { toast(errorText(e), true); }
+        } });
+      }
+      if (d) {
+        items.push("-", { label: d.is_favourite ? "Remove from favourites" : "Add to favourites", run: async () => {
+          try {
+            const r = await api("POST", "/api/favourite", { catalog_id: id, currently_favourite: d.is_favourite });
+            done();
+            toast(r.is_favourite ? "Added to favourites." : "Removed from favourites.");
+          } catch (e) { toast(errorText(e), true); }
+        } });
+      }
+      if (entry) {
+        items.push("-", { label: "Remove from list", danger: true, run: async () => {
+          const name = (d && d.title) || (summary && summary.title) || "this title";
+          if (!confirm(`Remove "${name}" from your AniList list?`)) return;
+          try {
+            await api("DELETE", `/api/list/${entry}`);
+            done();
+            toast("Removed from your list.");
+            if (hooks.removed) hooks.removed();
+          } catch (e) { toast(errorText(e), true); }
+        } });
+      }
+    }
+    items.push("-", { label: "Open on AniList", run: () => window.open(`https://anilist.co/anime/${id}`, "_blank", "noopener") });
+  } else {
+    let status = null;
+    try {
+      const rows = await api("GET", "/api/cinema/list");
+      const hit = rows.find((r) => r.catalog === catalog && r.catalog_id === id);
+      status = hit ? hit.status : null;
+    } catch { /* offered as not on the list */ }
+    const save = async (st) => {
+      try {
+        await api("POST", "/api/cinema/list", { catalog, catalog_id: id, status: st });
+        toast(st ? `Saved as ${STATUS_LABELS[st]}.` : "Removed from your list.");
+        if (st && hooks.status) hooks.status(st);
+        if (!st && hooks.removed) hooks.removed();
+      } catch (e) { toast(errorText(e), true); }
+    };
+    items.push("-", { heading: status ? "On your list" : "Add to your list" });
+    for (const st of CINEMA_STATUSES) items.push({ label: STATUS_LABELS[st], checked: st === status, run: () => { if (st !== status) save(st); } });
+    if (status) items.push("-", { label: "Remove from list", danger: true, run: () => save(null) });
+    items.push("-", { label: "Open on TMDB", run: () =>
+      window.open(`https://www.themoviedb.org/${catalog === "tmdb_movie" ? "movie" : "tv"}/${id}`, "_blank", "noopener") });
+  }
+  return items;
+}
+
+// The episode a title's Play means: the one in progress, the one after the
+// list's progress, or the first aired.
+function nextEpisode(d) {
+  const eps = d.episodes || [];
+  const at = (n) => eps.find((e) => e.number === n && e.is_aired);
+  return (d.resume_episode && at(d.resume_episode)) || (d.list_progress && at(d.list_progress + 1)) || eps.find((e) => e.is_aired) || null;
+}
+
+// "Mark unwatched" forgets this episode and every later one on this
+// computer, and moves AniList back only when its count had reached it:
+// writing episode - 1 for an episode past the list's progress would move
+// the list forward instead.
+async function markUnwatched(catalog, catalogId, episode, d) {
+  try {
+    await api("POST", "/api/forget", { catalog, catalog_id: catalogId, from_episode: episode });
+    let synced = false;
+    if (catalog === "anilist" && state.signedIn && (d.list_progress || 0) >= episode) {
+      await api("POST", "/api/list-entry", { catalog_id: catalogId, progress: episode - 1,
+        status: d.list_status === "COMPLETED" ? "CURRENT" : null });
+      synced = true;
+    }
+    listMemo.clear();
+    toast(synced ? "Marked unwatched and synced to AniList." : "Marked unwatched.");
+    render();
+  } catch (e) { toast(errorText(e), true); }
+}
+
 function modal(title, ...body) {
   const root = document.getElementById("overlay-root");
   const prev = document.activeElement;
@@ -888,7 +1040,7 @@ function posterCard(item, opts = {}) {
   const href = opts.href || titleHref(item.catalog, item.catalog_id);
   const total = item.episodes || 0;
   const frac = opts.fraction !== undefined ? opts.fraction : (total && item.progress ? Math.min(1, item.progress / total) : 0);
-  return el("div", { class: "pc" },
+  const node = el("div", { class: "pc" },
     el("a", { class: "frame", href, "aria-label": item.title },
       img(item.cover_image),
       opts.score ? el("span", { class: "score num" }, opts.score) : null,
@@ -897,6 +1049,11 @@ function posterCard(item, opts = {}) {
     el("a", { class: "name t-name", href }, item.title),
     opts.sub !== "" ? el("div", { class: "meta" }, opts.sub !== undefined ? opts.sub : summarySub(item)) : null,
   );
+  if (item.catalog && item.catalog_id) {
+    const hooks = opts.menu ? opts.menu(node) : {};
+    attachMenu(node, () => titleMenuItems(item.catalog, item.catalog_id, item, hooks));
+  }
+  return node;
 }
 
 function summarySub(item) {
@@ -1196,7 +1353,7 @@ async function upNextCards() {
       const episode = (m.progress || 0) + 1;
       const row = (detail.episodes || []).find((e) => e.number === episode);
       if (row && !row.is_aired) return null;
-      return { detail, catalog: "anilist", episode, resumable: false, at: 0, fraction: 0 };
+      return { detail, catalog: "anilist", episode, resumable: false, at: 0, fraction: 0, fromList: true };
     });
     cards.push(...more.filter((c) => c && !c.error));
   }
@@ -1227,6 +1384,26 @@ function wideCard(c) {
       el("span", { class: "go num" }, c.resumable ? "Resume" : "Play")),
     el("div", { class: "meta" }, cardLabel(c), row && row.title && c.catalog !== "tmdb_movie" ? el("span", { class: "dot" }, row.title) : null),
   );
+  const id = c.detail.catalog_id;
+  const opts = { catalog: c.catalog, catalogId: id, episode: c.episode, title: c.detail.title, cover: c.detail.cover_image };
+  attachMenu(node, async () => [
+    { label: c.catalog === "tmdb_movie" ? (c.resumable ? "Resume" : "Play") : `${c.resumable ? "Resume" : "Play"} episode ${c.episode}`, run: () => playCard(c) },
+    c.resumable ? { label: "Play from the start", run: () => play(Object.assign({ fromStart: true }, opts)) } : null,
+    { label: "Choose a release", run: () => openReleases(opts) },
+    { label: "Mark watched", run: () => markWatched(c.catalog, id, c.episode) },
+    "-",
+    ...(await titleMenuItems(c.catalog, id, null, { noPlay: true, removed: () => node.remove() })),
+    // A card from the AniList list comes back from the list, whatever the
+    // history says; only a card built from this computer's history can go.
+    c.fromList ? null : "-",
+    c.fromList ? null : { label: "Remove from Continue watching", danger: true, run: async () => {
+      try {
+        await api("POST", "/api/forget", { catalog: c.catalog, catalog_id: id });
+        node.remove();
+        toast("Removed from Continue watching.");
+      } catch (e) { toast(errorText(e), true); }
+    } },
+  ]);
   return node;
 }
 
@@ -1426,7 +1603,7 @@ async function viewSchedule(host, token) {
     for (const s of today) {
       if (!nowDrawn && s.airing_at > now) { rows.push(el("div", { class: "nowline" }, `Now, ${timeOf(now)}`)); nowDrawn = true; }
       const left = s.airing_at - now;
-      rows.push(el("a", { class: "slot" + (s.airing_at <= now ? " past" : "") + (s.on_user_list ? " mine" : ""), href: titleHref("anilist", s.catalog_id) },
+      const slotNode = el("a", { class: "slot" + (s.airing_at <= now ? " past" : "") + (s.on_user_list ? " mine" : ""), href: titleHref("anilist", s.catalog_id) },
         el("time", {}, timeOf(s.airing_at)),
         img(s.cover_image),
         el("div", { style: "min-width:0" },
@@ -1435,7 +1612,9 @@ async function viewSchedule(host, token) {
             s.format ? el("span", { class: "dot" }, formatLabel(s.format)) : null,
             s.user_status ? el("span", { class: "dot", style: "color:var(--accent)" }, STATUS_LABELS[s.user_status] || humanize(s.user_status)) : null)),
         el("div", { class: "r meta" }, left > 0 ? `in ${until(left)}` : "Aired"),
-      ));
+      );
+      attachMenu(slotNode, () => titleMenuItems("anilist", s.catalog_id, { title: s.title, list_status: s.user_status }));
+      rows.push(slotNode);
     }
     list.replaceChildren(...rows);
   }
@@ -1544,7 +1723,11 @@ async function viewLibrary(host, token, statusArg) {
       } else {
         bits.push(m.catalog === "tmdb_tv" ? "Series" : "Film");
       }
-      return { sub: bits.join(" · "), score: m.user_score ? String(m.user_score) : null };
+      return { sub: bits.join(" · "), score: m.user_score ? String(m.user_score) : null,
+        menu: (node) => ({
+          status: (st) => { if (st !== status) { items = items.filter((x) => x !== m); node.remove(); } },
+          removed: () => { items = items.filter((x) => x !== m); node.remove(); },
+        }) };
     }));
   }
   filterInput.addEventListener("input", () => { filter = filterInput.value; draw(); });
@@ -1875,6 +2058,16 @@ function drawEpisodes(host, { d, catalog, catalogId, episodes, token, extrasP })
           ep.is_aired ? el("button", { type: "button", class: "lk", text: "Releases", onclick: () => openReleases({ catalog, catalogId, episode: ep.number, title, cover }) }) : null,
           ep.is_aired && !ep.is_watched ? el("button", { type: "button", class: "lk", text: "Mark watched", onclick: () => markWatched(catalog, catalogId, ep.number) }) : null),
       );
+      const epOpts = { catalog, catalogId, episode: ep.number, title, cover };
+      attachMenu(cell, () => [
+        ep.is_aired ? { label: `Play episode ${shown}`, run: () => play(epOpts) } : null,
+        ep.is_aired && frac ? { label: "Play from the start", run: () => play(Object.assign({ fromStart: true }, epOpts)) } : null,
+        ep.is_aired ? { label: "Choose a release", run: () => openReleases(epOpts) } : null,
+        "-",
+        ep.is_watched || frac ? { label: ep.is_watched ? "Mark unwatched" : "Clear progress", run: () => markUnwatched(catalog, catalogId, ep.number, d) } : null,
+        ep.is_aired && !ep.is_watched ? { label: "Mark watched", run: () => markWatched(catalog, catalogId, ep.number) } : null,
+        ep.is_aired ? null : { heading: ep.air_date ? `Airs ${ep.air_date}` : "Not aired yet" },
+      ]);
       if (frac) {
         api("GET", `/api/progress/${catalogId}?episode=${ep.number}&catalog=${catalog}`).then((pr) => {
           if (pr && pr.stop_time > 0 && token === state.renderToken) pos.textContent = `Stopped at ${clock(pr.stop_time)}`;
@@ -1930,6 +2123,7 @@ async function drawTimeline(host, catalogId) {
       el("a", { class: "name t-name", href: titleHref("anilist", e.catalog_id) }, e.title),
       el("div", { class: "meta" }, bits.join(" · "),
         e.list_status ? el("div", { style: "color:var(--accent)" }, STATUS_LABELS[e.list_status] || humanize(e.list_status)) : null));
+    attachMenu(node, () => titleMenuItems("anilist", e.catalog_id, e));
     return node;
   }));
   host.replaceChildren(el("p", { class: "meta", style: "margin:0 0 .4rem" }, `${entries.length} entries in watch order. Side stories are dimmed.`), line);
@@ -2274,7 +2468,7 @@ async function viewSettings(host) {
 
   wrap.append(el("h2", {}, "Keyboard"));
   wrap.append(el("dl", { class: "facts", style: "margin-top:.8rem" },
-    [["/", "Search"], ["g h", "Home"], ["g s", "Schedule"], ["g l", "Library"], ["g t", "Stats"], ["Esc", "Close a dialog or menu"]]
+    [["/", "Search"], ["g h", "Home"], ["g s", "Schedule"], ["g l", "Library"], ["g t", "Stats"], ["Right-click or Menu key", "Actions for a title or episode"], ["Esc", "Close a dialog or menu"]]
       .flatMap(([k, v]) => [el("dt", { class: "num" }, k), el("dd", {}, v)])));
 }
 

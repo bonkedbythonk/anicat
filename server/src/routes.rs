@@ -38,6 +38,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/track-preference", post(track_preference))
         .route("/api/watched", post(watched))
         .route("/api/list/{entry}", delete(remove_from_list))
+        .route("/api/forget", post(forget))
         .route("/api/cache", get(cache_bytes).delete(purge_cache))
         .route("/api/token", post(set_token))
         .route("/api/viewer", get(viewer))
@@ -392,6 +393,30 @@ async fn watched(State(s): State<AppState>, ApiJson(b): ApiJson<WatchedBody>) ->
             .await?;
     }
     Ok(Json(json!({ "anilist_synced": synced })))
+}
+
+#[derive(Deserialize)]
+struct ForgetBody {
+    #[serde(default = "default_catalog")]
+    catalog: FfiCatalog,
+    catalog_id: i64,
+    /// Forget this episode and every later one; 1 forgets the whole title.
+    #[serde(default = "first_episode")]
+    from_episode: i64,
+}
+
+fn first_episode() -> i64 {
+    1
+}
+
+/// Local watch history only. Up Next and the watched ticks are built from
+/// it, so a zeroed row instead of a deleted one would keep offering the
+/// title; AniList's list is a separate write the page makes itself.
+async fn forget(State(s): State<AppState>, ApiJson(b): ApiJson<ForgetBody>) -> ApiResult<StatusCode> {
+    s.writer
+        .submit_blocking(move |e| e.clear_progress_from(b.catalog, b.catalog_id, b.from_episode))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn remove_from_list(State(s): State<AppState>, ApiPath(entry): ApiPath<i64>) -> ApiResult<StatusCode> {

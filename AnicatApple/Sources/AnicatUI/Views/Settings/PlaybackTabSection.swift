@@ -121,7 +121,7 @@ struct PlaybackTabSection: View {
         ) {
             SettingField(
                 label: "GPU upscaling",
-                description: "Anime4K — real-time neural upscaling that sharpens lines and adds depth with minimal battery impact. Renders directly in-app via libmpv Metal shaders. Best on screens above 1080p; smaller displays won't show much difference."
+                description: "Anime4K shaders redraw the line art as a 1080p episode is scaled up to your screen. Little to see on a 1080p display; turn it off on battery."
             ) {
                 SumiSwitch(isOn: $gpuUpscaling)
             }

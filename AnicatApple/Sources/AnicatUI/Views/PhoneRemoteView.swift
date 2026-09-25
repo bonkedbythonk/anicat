@@ -257,7 +257,8 @@ struct PhoneRemoteView: View {
                 Button {
                     client.send(.setUpscaling(!state.upscalingEnabled))
                 } label: {
-                    Label("Upscale", systemImage: "sparkles")
+                    // The Mac bar's glyph; "sparkles" reads as an AI feature.
+                    Label("Upscale", systemImage: "4k.tv")
                         .font(.system(size: 14))
                         .foregroundStyle(state.upscalingEnabled ? SumiTheme.indigo : SumiTheme.muted)
                 }

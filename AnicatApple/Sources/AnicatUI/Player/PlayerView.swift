@@ -621,16 +621,16 @@ public struct PlayerView: View {
                         .allowsHitTesting(false)
                 }
 
-                // Toggle confirmation, top centre of the picture, under the
-                // top bar rather than over the transport it came from.
+                // Toggle confirmation, top left of the picture under the top
+                // bar, as bare OSD text the way mpv and VLC print it. A
+                // centred glass pill with an indigo symbol sliding in read
+                // to the owner as "ai".
                 if let hud = controller.hudFlash {
                     hudBadge(hud)
                         .id(hud.token)
+                        .frame(width: max(0, videoRect.width - 48), alignment: .leading)
                         .position(x: videoRect.midX, y: videoRect.minY + 72)
-                        .transition(reduceMotion ? .opacity : .asymmetric(
-                            insertion: .move(edge: .top).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                        .transition(.opacity)
                         .allowsHitTesting(false)
                 }
 
@@ -992,17 +992,11 @@ public struct PlayerView: View {
     }
 
     private func hudBadge(_ hud: PlayerController.HUDFlash) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: hud.symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(SumiTheme.indigo)
-            Text(hud.text)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .playerScrim(Capsule())
+        Text(hud.text)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .chromeLegibility()
     }
 
     /// What the chrome bars sit on. See the top bar's comment.

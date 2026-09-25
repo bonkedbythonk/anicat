@@ -941,9 +941,9 @@ public final class PlayerController {
         isAnime4KEnabled.toggle()
         UserDefaults.standard.set(isAnime4KEnabled, forKey: "anicat_gpu_upscaling")
         showControlsBriefly()
-        // "Anime4K", not "Upscaling": the name says where it applies, so a
-        // film staying as it was after "on" does not read as broken.
-        flashHUD(isAnime4KEnabled ? "Anime4K on" : "Anime4K off", symbol: "sparkles")
+        // Names Anime4K: the name says where it applies, so a film staying
+        // as it was after "on" does not read as broken.
+        flashHUD(isAnime4KEnabled ? "Upscaling: Anime4K" : "Upscaling: off", symbol: "4k.tv")
     }
 
     public func cycleAnime4K() {

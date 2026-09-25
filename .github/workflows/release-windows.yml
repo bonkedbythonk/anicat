@@ -121,10 +121,24 @@ jobs:
           # Download, drop any earlier line for this file (a re-run), append,
           # replace. A release that has no SHA256SUMS at all predates the
           # checksums and gets one holding the Windows line only.
+          #
+          # On 1.0.2 this step replaced the file with the Windows line alone:
+          # `mktemp` creates the file, `gh release download --output` refuses
+          # an existing one without --clobber, and the error went to
+          # /dev/null and fell through to "no SHA256SUMS". A failed download
+          # of a file the release does have now fails the job instead.
           sums="$(mktemp)"
-          gh release download "$tag" --pattern SHA256SUMS --output "$sums" --repo "$GITHUB_REPOSITORY" 2>/dev/null || : > "$sums"
-          grep -v " $(basename "$zip")\$" "$sums" > "$sums.new" || true
-          (cd "$(dirname "$zip")" && sha256sum "$(basename "$zip")") >> "$sums.new"
+          if gh release view "$tag" --json assets --jq '.assets[].name' --repo "$GITHUB_REPOSITORY" | grep -qx SHA256SUMS; then
+            gh release download "$tag" --pattern SHA256SUMS --output "$sums" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            : > "$sums"
+          fi
+          name="$(basename "$zip")"
+          grep -v "[ *]$name\$" "$sums" > "$sums.new" || true
+          # printf, not sha256sum's own line: Git Bash's sha256sum writes
+          # binary mode, `hash *name`, and both installers match a space
+          # right before the name, so they found no entry for the zip.
+          printf '%s  %s\n' "$(sha256sum "$zip" | cut -d' ' -f1)" "$name" >> "$sums.new"
           mv "$sums.new" SHA256SUMS
           gh release upload "$tag" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
           echo "Updated SHA256SUMS on $tag"

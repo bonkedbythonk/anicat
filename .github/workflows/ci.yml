@@ -144,9 +144,18 @@ jobs:
       # (BridgeTests, RealDataWiringTests, EngineBridgeTests) skip themselves
       # unless ANICAT_LIVE=1 is set, which it is not here: they went red
       # through every AniList outage for reasons unrelated to the change.
+      #
+      # The suite takes about 35 s here, but on 2026-09-24 it hung twice
+      # (ca638172, d3b0cd0d) until the 120-minute job limit, and the log
+      # named no test: piped output is block-buffered, so it stopped at the
+      # last flush, 173 passes in. `script` gives swift test a terminal, which
+      # line-buffers every "started" line as it happens, and the step limit
+      # turns a hang into a red step after 15 minutes instead of two hours.
+      # The stuck test is the one that started and never passed.
       - name: swift test
         working-directory: AnicatApple
-        run: swift test
+        timeout-minutes: 15
+        run: script -q /dev/null swift test
 
   windows:
     name: Windows server

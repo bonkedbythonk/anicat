@@ -56,7 +56,15 @@ struct NowPlayingBridgeTests {
         #expect(bridge.lastPublished == nil)
     }
 
-    @Test("attach enables the transport commands and mirrors the controller's neighbours")
+    // Not on CI: on the GitHub runner this test started and never finished
+    // (run 36143800407, 2026-09-25), and because it holds the main actor
+    // about fifty other main-actor tests queued behind it until the step
+    // limit. The suite hung four times in two days; this is the one run
+    // whose log names the test. Locally it passes in milliseconds. MPRemoteCommandCenter talks to the system's media
+    // daemon, which the headless runner evidently does not always answer.
+    @Test("attach enables the transport commands and mirrors the controller's neighbours",
+          .disabled(if: ProcessInfo.processInfo.environment["CI"] == "true",
+                    "MPRemoteCommandCenter can block forever on the headless CI runner"))
     @MainActor
     func attachMirrorsNavigation() {
         let controller = PlayerController(title: "Frieren", episodeNumber: 3)

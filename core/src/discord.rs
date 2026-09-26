@@ -17,6 +17,11 @@
 //! over a mini-player episode, and a single slot let closing the reader wipe
 //! the episode's presence. Playback wins while both are set; clearing it
 //! brings the reading presence back.
+//!
+//! A paused episode shows nothing, Spotify's convention. Discord has no
+//! paused state: an activity sent without timestamps gets a clock of
+//! Discord's own, counting up from when it was set, so "E3 · Paused" read
+//! as still watching and its timer kept climbing for as long as the pause.
 
 use discord_rich_presence::{
     activity::{self, ActivityType, StatusDisplayType},
@@ -86,6 +91,8 @@ pub struct DiscordPresence {
     pub position_secs: i64,
     /// Zero or less when unknown, or for reading: no countdown is shown.
     pub duration_secs: i64,
+    /// Playback only: withdraws the presence while set, letting a reading
+    /// presence underneath show.
     pub paused: bool,
 }
 
@@ -127,7 +134,7 @@ fn build_payload(p: &DiscordPresence, detail: DiscordPresenceDetail, now_ms: i64
     let watching = p.source == DiscordPresenceSource::Playback;
     let verb = if watching { "Watching" } else { "Reading" };
 
-    let (start_ms, end_ms) = if p.paused || p.position_secs < 0 {
+    let (start_ms, end_ms) = if p.position_secs < 0 {
         (None, None)
     } else if p.duration_secs > 0 && p.position_secs < p.duration_secs {
         let start = now_ms - p.position_secs * 1000;
@@ -145,7 +152,7 @@ fn build_payload(p: &DiscordPresence, detail: DiscordPresenceDetail, now_ms: i64
         DiscordPresenceDetail::Private => Payload {
             watching,
             details: private_line(),
-            state: p.paused.then(|| "Paused".to_string()),
+            state: None,
             large_image: APP_IMAGE_KEY.to_string(),
             large_text: None,
             with_small_image: false,
@@ -156,11 +163,7 @@ fn build_payload(p: &DiscordPresence, detail: DiscordPresenceDetail, now_ms: i64
         },
         DiscordPresenceDetail::Full => {
             let details = text(&p.title).unwrap_or_else(private_line);
-            let state = match (text(&p.subtitle), p.paused) {
-                (Some(s), true) => text(&format!("{s} · Paused")),
-                (None, true) => Some("Paused".to_string()),
-                (s, false) => s,
-            };
+            let state = text(&p.subtitle);
             let cover = https_url(p.cover_url.as_deref(), IMAGE_URL_MAX_CHARS);
             let button = match (
                 p.link_label.as_deref().and_then(text),
@@ -225,9 +228,10 @@ fn to_activity(p: &Payload) -> activity::Activity<'_> {
         assets = assets.small_image(APP_IMAGE_KEY).small_text("Anicat");
     }
 
-    // An explicit empty timestamps object clears Discord's running clock;
-    // omitting the field left the previous activity's timer ticking under a
-    // "Paused" label.
+    // Omitting the field kept the previous activity's timer running. An
+    // empty object does not stop the clock either: Discord then counts up
+    // from when the activity was set, which is why a pause withdraws the
+    // activity instead of sending one without times.
     let mut timestamps = activity::Timestamps::new();
     if let Some(start) = p.start_ms {
         timestamps = timestamps.start(start);
@@ -257,6 +261,16 @@ fn to_activity(p: &Payload) -> activity::Activity<'_> {
         act = act.buttons(vec![activity::Button::new(label.as_str(), url.as_str())]);
     }
     act
+}
+
+/// Which presence the profile should show: playing beats reading, and a
+/// paused episode steps aside for the reader or, with none open, for nothing.
+fn shown(state: &State) -> Option<(DiscordPresence, i64)> {
+    state
+        .playback
+        .clone()
+        .filter(|(p, _)| !p.paused)
+        .or_else(|| state.reading.clone())
 }
 
 fn now_ms() -> i64 {
@@ -434,11 +448,7 @@ fn run_worker(shared: Arc<Shared>) {
             }
             state.dirty = false;
             retry_at = None;
-            (
-                state.enabled,
-                state.detail,
-                state.playback.clone().or_else(|| state.reading.clone()),
-            )
+            (state.enabled, state.detail, shown(&state))
         };
 
         if !enabled {
@@ -590,17 +600,24 @@ mod tests {
     }
 
     #[test]
-    fn paused_drops_the_clock() {
-        let p = build_payload(
-            &DiscordPresence {
-                paused: true,
-                ..episode()
-            },
-            DiscordPresenceDetail::Full,
-            NOW,
-        );
-        assert_eq!((p.start_ms, p.end_ms), (None, None));
-        assert_eq!(p.state.as_deref(), Some("E3 · Killing Magic · Paused"));
+    fn a_paused_episode_shows_nothing_or_the_reader_under_it() {
+        let paused = DiscordPresence {
+            paused: true,
+            ..episode()
+        };
+        let chapter = DiscordPresence {
+            source: DiscordPresenceSource::Reading,
+            ..episode()
+        };
+        let mut state = State {
+            playback: Some((paused, NOW)),
+            ..State::default()
+        };
+        assert_eq!(shown(&state), None);
+        state.reading = Some((chapter.clone(), NOW));
+        assert_eq!(shown(&state), Some((chapter, NOW)));
+        state.playback = Some((episode(), NOW));
+        assert_eq!(shown(&state), Some((episode(), NOW)));
     }
 
     #[test]
@@ -656,19 +673,11 @@ mod tests {
     }
 
     #[test]
-    fn a_seek_a_pause_and_a_new_episode_are_changes() {
+    fn a_seek_and_a_new_episode_are_changes() {
         let a = Some(build_payload(&episode(), DiscordPresenceDetail::Full, NOW));
         let seek = build_payload(
             &DiscordPresence {
                 position_secs: 150,
-                ..episode()
-            },
-            DiscordPresenceDetail::Full,
-            NOW,
-        );
-        let pause = build_payload(
-            &DiscordPresence {
-                paused: true,
                 ..episode()
             },
             DiscordPresenceDetail::Full,
@@ -683,7 +692,6 @@ mod tests {
             NOW,
         );
         assert!(!same_on_profile(&a, &Some(seek)));
-        assert!(!same_on_profile(&a, &Some(pause)));
         assert!(!same_on_profile(&a, &Some(next)));
         assert!(!same_on_profile(&a, &None));
     }

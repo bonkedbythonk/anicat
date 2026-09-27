@@ -913,7 +913,8 @@ public struct RootView: View {
                             append: true
                         )
                     }
-                }
+                },
+                isCovered: model.isSectionCovered
             )
             }
         case .settings:

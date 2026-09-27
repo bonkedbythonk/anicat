@@ -128,6 +128,10 @@ struct CinemaHomeView: View {
             }
             if focusSearchOnAppear { searchFocused = true }
         }
+        // See `AppModel.isSectionCovered`.
+        .onChange(of: model.isSectionCovered) { _, covered in
+            if focusSearchOnAppear { searchFocused = !covered }
+        }
         }
     }
 

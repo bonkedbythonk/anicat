@@ -34,6 +34,8 @@ public struct SearchView: View {
     public var hasMoreDiscoverPages: Bool = true
     public var isLoadingMoreDiscover: Bool = false
     public var onLoadMoreDiscover: (String) -> Void = { _ in }
+    /// `AppModel.isSectionCovered`.
+    public var isCovered: Bool = false
 
     @State private var searchType: String = "ANIME"
 
@@ -74,7 +76,8 @@ public struct SearchView: View {
         onLoadMore: @escaping (String, String, SearchFilters) -> Void = { _, _, _ in },
         hasMoreDiscoverPages: Bool = true,
         isLoadingMoreDiscover: Bool = false,
-        onLoadMoreDiscover: @escaping (String) -> Void = { _ in }
+        onLoadMoreDiscover: @escaping (String) -> Void = { _ in },
+        isCovered: Bool = false
     ) {
         self._searchText = searchText
         self.results = results
@@ -92,6 +95,7 @@ public struct SearchView: View {
         self.hasMorePages = hasMorePages
         self.isLoadingMore = isLoadingMore
         self.onLoadMore = onLoadMore
+        self.isCovered = isCovered
     }
 
     private var searchPlaceholder: String {
@@ -603,6 +607,9 @@ public struct SearchView: View {
             try? await Task.sleep(nanoseconds: 80_000_000)
             if !searchFocused { searchFocused = true }
         }
+        // Back on the page the caret returns, or typing goes to the global
+        // letter shortcuts -- the "hyouka" jump above.
+        .onChange(of: isCovered) { _, covered in searchFocused = !covered }
         .onChange(of: page.size.width, initial: true) { _, width in pageWidth = width }
         }
         }

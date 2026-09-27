@@ -259,6 +259,14 @@ public final class AppModel {
     /// everything whenever `activeStreamURL` was non-nil regardless of which
     /// section was actually selected underneath.
     public var isPlayerMinimized: Bool = false
+    /// The section page stays mounted under the detail page and the player,
+    /// so a search field focused there kept the keyboard: both key monitors
+    /// hand keys to a focused text field, and Space and the arrows went into
+    /// the hidden field instead of the player. The search pages drop focus
+    /// while this is true.
+    public var isSectionCovered: Bool {
+        selectedMediaDetails != nil || (activeStreamURL != nil && !isPlayerMinimized)
+    }
 
     /// Which episode thumbnail this play was started from, as
     /// "episode:<catalogId>:<number>" for a detail-page row or

@@ -1145,6 +1145,19 @@ public struct MpvSurface {
             }
         }
 
+        /// Called where frames flow again: a seek landing, a cache stall
+        /// ending. A nudge only reconfigures when a frame passes through
+        /// mpv's filters, so a stalled stream spends all three attempts on
+        /// nothing: fullscreen entered 0.5s into a resume at 61s, still
+        /// fetching that point, used them up by 39.8s, and after the owner
+        /// seeked back the 3024x1732 picture sat in the top of a 3024x1898
+        /// screen with black under it for a minute, the check given up.
+        func rearmSizeCheck(after reason: String) {
+            guard reconfigAttemptsForSize > 0 else { return }
+            PlayerLog.write("[libmpv] size check re-armed after \(reason), \(reconfigAttemptsForSize) attempts spent")
+            reconfigAttemptsForSize = 0
+        }
+
         func runCommand(_ args: [String]) {
             guard let mpv = mpv else { return }
             var cArgs = args.map { UnsafePointer<CChar>?(strdup($0)) }
@@ -1852,6 +1865,9 @@ public struct MpvSurface {
                     if ev.event_id == MPV_EVENT_AUDIO_RECONFIG {
                         PlayerLog.write("[libmpv] audio reconfig: ao \(self.stringProperty("current-ao") ?? "-") device \(self.stringProperty("audio-device") ?? "-") time-pos \(self.stringProperty("time-pos") ?? "-")")
                     }
+                    if ev.event_id == MPV_EVENT_PLAYBACK_RESTART {
+                        self.rearmSizeCheck(after: "restart")
+                    }
                     if ev.event_id == MPV_EVENT_VIDEO_RECONFIG {
                         PlayerLog.write(String(format: "[libmpv] video reconfig: out %@x%@ osd %@x%@ time-pos %@", self.stringProperty("video-out-params/dw") ?? "-", self.stringProperty("video-out-params/dh") ?? "-", self.stringProperty("osd-dimensions/w") ?? "-", self.stringProperty("osd-dimensions/h") ?? "-", self.stringProperty("time-pos") ?? "-"))
                         // Read here as well as from the property observer.
@@ -1996,6 +2012,7 @@ public struct MpvSurface {
                             } else if !buffering, let began = self.cacheStallBegan {
                                 self.cacheStallBegan = nil
                                 PlayerLog.write(String(format: "[buffer] resumed after %.1fs at time-pos %@", now - began, at))
+                                self.rearmSizeCheck(after: "cache resume")
                             }
                             await MainActor.run {
                                 self.controller.isBuffering = buffering

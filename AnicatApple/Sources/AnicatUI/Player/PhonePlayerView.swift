@@ -286,9 +286,29 @@ struct PhonePlayerView: View {
             // the gesture layer underneath, so a tap on the scrim never
             // reached that layer: the controls could be summoned but not
             // dismissed, and only the 3.5s timer ever put them away.
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { toggleControls() }
+            //
+            // It also carries the double-tap seek. A first tap shows the
+            // controls at once, so the second tap of a double tap lands on
+            // this layer, not on the gesture layer; without a recogniser
+            // here it only dismissed the controls, and skipping worked
+            // solely when both taps beat the chrome onto the screen. The
+            // single tap waits out the double-tap window so a seek does not
+            // flash the controls away first.
+            GeometryReader { geo in
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        tapTask?.cancel()
+                        tapTask = Task {
+                            try? await Task.sleep(for: .milliseconds(250))
+                            guard !Task.isCancelled else { return }
+                            toggleControls()
+                        }
+                    }
+                    .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { event in
+                        skipTap(trailing: event.location.x > geo.size.width / 2)
+                    })
+            }
 
             // Scrims rather than a flat dim: white glyphs over a bright frame
             // are unreadable without one, and dimming the whole picture to
@@ -916,17 +936,7 @@ struct PhonePlayerView: View {
                 // independently: the first tap shows the controls at once and
                 // a second one seeks.
                 .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { event in
-                    tapTask?.cancel()
-                    let location = event.location
-                    let trailing = location.x > geo.size.width / 2
-                    seek(by: trailing ? 10 : -10)
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        flash = (trailing ? "goforward.10" : "gobackward.10", trailing)
-                    }
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(450))
-                        withAnimation(.easeIn(duration: 0.2)) { flash = nil }
-                    }
+                    skipTap(trailing: event.location.x > geo.size.width / 2)
                 })
                 // One recogniser for tap, hold and drag. Three separate ones
                 // (`onTapGesture`, `onLongPressGesture`, a `DragGesture`)
@@ -1036,18 +1046,31 @@ struct PhonePlayerView: View {
                                 controller.setPlaybackRate(storedSpeed)
                                 withAnimation(.easeIn(duration: 0.2)) { hud = nil }
                             } else if dragAxis == nil {
-                                // A tap. Shows the controls; it does not
-                                // toggle playback. The system player behaves
-                                // the same way, and a tap that pauses is the
-                                // thing people hit by accident reaching for a
-                                // button. Deferred a beat so a double tap can
-                                // cancel it, and only while the chrome is
-                                // down: up, it has its own dismiss layer.
-                                tapTask?.cancel()
-                                tapTask = Task {
-                                    try? await Task.sleep(for: .milliseconds(250))
-                                    guard !Task.isCancelled, !controller.areControlsVisible else { return }
-                                    toggleControls()
+                                // A tap. Shows the controls at once; it does
+                                // not toggle playback. The system player
+                                // behaves the same way, and a tap that pauses
+                                // is the thing people hit by accident
+                                // reaching for a button. Not deferred for a
+                                // double tap: the 250ms wait read as the
+                                // controls lagging, and the second tap of a
+                                // double tap is heard by the chrome's own
+                                // layer. Up, the chrome has its own dismiss
+                                // layer. A tap where a transport button
+                                // will appear acts as that button, so
+                                // pausing or skipping from a bare picture is
+                                // one tap, not a tap to summon the chrome and
+                                // a second to press the button.
+                                if !controller.areControlsVisible {
+                                    withAnimation(.easeOut(duration: 0.2)) {
+                                        switch transportButton(at: drag.location, in: geo.size) {
+                                        case .rewind?: seek(by: -10)
+                                        case .playPause?:
+                                            controller.togglePlayPause()
+                                            controller.showControlsBriefly()
+                                        case .forward?: seek(by: 10)
+                                        case nil: toggleControls()
+                                        }
+                                    }
                                 }
                             } else {
                                 if dragAxis == .horizontal, let target = scrubTarget {
@@ -1066,6 +1089,39 @@ struct PhonePlayerView: View {
                 )
         }
         .ignoresSafeArea()
+    }
+
+    private enum TransportButton { case rewind, playPause, forward }
+
+    /// The transport row sits at the centre of the screen: play/pause 54pt
+    /// wide, a 46pt gap, and a rewind or forward glyph about 32pt wide on
+    /// each side, so the neighbours are centred roughly 89pt out. The zones
+    /// are the buttons' cells plus the gap, a little taller than the glyphs
+    /// so a thumb that lands near one still counts.
+    private func transportButton(at point: CGPoint, in size: CGSize) -> TransportButton? {
+        let dx = point.x - size.width / 2
+        let dy = point.y - size.height / 2
+        guard abs(dy) <= 44 else { return nil }
+        switch dx {
+        case -45...45: return .playPause
+        case -135 ..< -45: return .rewind
+        case 45 ..< 135: return .forward
+        default: return nil
+        }
+    }
+
+    /// The double-tap seek, shared by the gesture layer (controls hidden)
+    /// and the chrome's scrim (controls up).
+    private func skipTap(trailing: Bool) {
+        tapTask?.cancel()
+        seek(by: trailing ? 10 : -10)
+        withAnimation(.easeOut(duration: 0.12)) {
+            flash = (trailing ? "goforward.10" : "gobackward.10", trailing)
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            withAnimation(.easeIn(duration: 0.2)) { flash = nil }
+        }
     }
 
     private func seek(by delta: Double) {

@@ -30,12 +30,6 @@ public struct UpNextQueueView: View {
         /// title has never been opened (no detail snapshot to read it
         /// from); the cover stands in. Optional for the `HomeCache` reason.
         public let bannerURL: URL?
-        /// The next episode's title and still, read from the detail snapshot
-        /// of a title the viewer has opened, for the row's middle. Nil for a
-        /// title never opened; the row keeps its old shape then. Optional for
-        /// the `HomeCache` reason.
-        public var nextEpisodeTitle: String? = nil
-        public var nextEpisodeStillURL: URL? = nil
 
         /// Three nouns, not two: cinema's queue passes "FILM" as well as "EP".
         var countLabel: String {
@@ -374,40 +368,6 @@ public struct UpNextQueueView: View {
 
         @State private var isHovered = false
 
-        /// The episode the Play button plays, in the middle of the row that
-        /// otherwise stood empty between the progress bar and the button.
-        /// Drawn only when the title's detail snapshot has it.
-        @ViewBuilder
-        private var nextEpisode: some View {
-            if entry.nextEpisodeStillURL != nil || entry.nextEpisodeTitle != nil {
-                HStack(spacing: 12) {
-                    CachedAsyncImage(url: entry.nextEpisodeStillURL, maxPixelSize: 192) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Rectangle().fill(SumiTheme.card)
-                    }
-                    .frame(width: 96, height: 54)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-                    .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusSm).stroke(SumiTheme.border, lineWidth: 1))
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Next · Ep \(entry.nextEpisodeOrChapter)")
-                            .sumiTabularMono(size: 11, weight: .semibold)
-                            .foregroundColor(SumiTheme.muted)
-                        // One line, truncated: at 180pt and two lines,
-                        // "Triangle... of Missed Encounters" broke after its
-                        // second word.
-                        Text(entry.nextEpisodeTitle ?? entry.countLabel)
-                            .font(.system(size: 12.5))
-                            .foregroundColor(SumiTheme.foreground)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    .frame(width: 240, alignment: .leading)
-                }
-            }
-        }
-
         var body: some View {
             HStack(spacing: 16) {
                 // Clickable Body: Thumbnail + Text
@@ -487,8 +447,6 @@ public struct UpNextQueueView: View {
                             .padding(.top, 6)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-
-                        nextEpisode
                     }
                     .contentShape(Rectangle())
                 }

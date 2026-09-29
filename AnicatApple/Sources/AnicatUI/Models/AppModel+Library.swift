@@ -904,8 +904,7 @@ extension AppModel {
             // progress is the one AniList has not aired. The row said
             // "EP 12 / 12" with Resume a day before episode 12 aired.
             let awaiting = s.nextEpisode.map { progress + 1 >= Int($0) } ?? false
-            let next = awaiting ? nil : DetailCache.peekEpisode(id: s.catalogId, number: progress + 1)
-            var entry = UpNextQueueView.QueueEntry(
+            return UpNextQueueView.QueueEntry(
                 id: s.catalogId,
                 title: s.title,
                 thumbnailURL: URL(string: s.coverImage),
@@ -919,9 +918,6 @@ extension AppModel {
                 isRewatch: s.listStatus == "REPEATING",
                 bannerURL: DetailCache.peekBanner(id: s.catalogId, isManga: false)
             )
-            entry.nextEpisodeTitle = next?.title
-            entry.nextEpisodeStillURL = next?.stillURL
-            return entry
         }
         // Something playable on top: the first row is the big Resume, and
         // the menu bar and Shortcuts read `first` as "continue watching".

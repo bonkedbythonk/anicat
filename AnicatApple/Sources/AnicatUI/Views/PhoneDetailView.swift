@@ -16,13 +16,13 @@ struct PhoneDetailView: View {
 
     enum Section: String, CaseIterable, Identifiable {
         case episodes = "Episodes"
-        case about = "About"
         case cast = "Cast"
         case more = "More"
         var id: String { rawValue }
     }
 
     @State private var showTrailer = false
+    @State private var showGallery = false
 
     /// A manga's first segment lists chapters, a light novel's lists
     /// volumes. Same slot, same enum: the label is the only thing that
@@ -61,24 +61,19 @@ struct PhoneDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let details = model.selectedMediaDetails {
-                    Hero(details: details)
+                    header(details)
 
                     if !isManga, !isNovel {
                         watchButton
                     }
 
-                    Picker("", selection: $section) {
-                        ForEach(Section.allCases) {
-                            Text($0 == .episodes ? listLabel : $0.rawValue).tag($0)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 16)
+                    overview(details)
+
+                    tabStrip
 
                     switch section {
                     case .episodes:
                         if isNovel { volumeList(details) } else if isManga { chapterList(details) } else { episodeList }
-                    case .about: about(details)
                     case .cast: castGrid
                     case .more: more(details)
                     }
@@ -112,7 +107,9 @@ struct PhoneDetailView: View {
             .padding(.bottom, 24)
         }
         .background(SumiTheme.background)
-        .navigationTitle(model.selectedMediaDetails?.title ?? "")
+        // The header carries the title; a second copy in the bar above it read
+        // as a stutter.
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         // The item is unconditional and the menu handles the not-yet-loaded
@@ -496,8 +493,172 @@ struct PhoneDetailView: View {
     }
 
     @ViewBuilder
-    private func about(_ details: HeroBanner.Details) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+    private func header(_ details: HeroBanner.Details) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            // Tapping the poster opens the title's other artwork. Fixed width
+            // and height together: an image with `contentMode: .fill` sized by
+            // one axis reports the width that covers it, and that width became
+            // the whole page's width.
+            Button { showGallery = true } label: {
+                CachedAsyncImage(url: details.coverURL, maxPixelSize: 300) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    SumiTheme.card
+                }
+                .frame(width: 92, height: 132)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show more images")
+            .sheet(isPresented: $showGallery) { gallery(details) }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(details.title)
+                    .font(.sumiHeading(size: 20, weight: .bold))
+                    .foregroundStyle(SumiTheme.foreground)
+                    .lineLimit(3)
+                studioLine(details)
+                ForEach(factLines(details), id: \.self) { line in
+                    Text(line)
+                        .sumiTabularMono(size: 11.5)
+                        .foregroundStyle(SumiTheme.muted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    // Every credited studio is a production committee of licensors and music
+    // labels; `isMain` is the animation studio, which is the only one worth a
+    // line on a phone. One button per main studio: each has an AniList id and
+    // a page of its own (`openStudio`).
+    @ViewBuilder
+    private func studioLine(_ details: HeroBanner.Details) -> some View {
+        if let studios = details.studios, !studios.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(studios.filter(\.isMain)) { studio in
+                    Button { model.openStudio(id: studio.id) } label: {
+                        Text(studio.name)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(SumiTheme.indigo)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        } else if let studio = details.studio {
+            Text(studio)
+                .font(.system(size: 13))
+                .foregroundStyle(SumiTheme.foreground)
+        }
+    }
+
+    /// The facts the About tab used to hold, as up to three short lines: what
+    /// it is, where it stands, and the viewer's own place in it.
+    private func factLines(_ details: HeroBanner.Details) -> [String] {
+        let what = [
+            details.format.map(MediaCard.displayFormat),
+            details.episodeCount.map { "\($0) eps" },
+            details.year.map(String.init)
+        ].compactMap { $0 }
+        let standing = [
+            details.status.map(Self.mediaStatus),
+            details.averageScore.map { "Score " + String(format: "%.1f", Double($0) / 10) }
+        ].compactMap { $0 }
+        let mine = [
+            details.listStatus.map(Self.listStatus),
+            details.userScore.flatMap { $0 > 0 ? "Your score " + String(format: "%.1f", $0) : nil }
+        ].compactMap { $0 }
+        return [what, standing, mine].filter { !$0.isEmpty }.map { $0.joined(separator: " · ") }
+    }
+
+    /// The cover, the banner, the trailer's still and the episode stills, once
+    /// each: the artwork AniList and the episode list already carry.
+    private func galleryImages(_ details: HeroBanner.Details) -> [URL] {
+        var urls: [URL?] = [details.coverURL, details.bannerURL, details.trailerThumbnail.flatMap(URL.init(string:))]
+        urls += model.selectedEpisodes.prefix(12).map(\.thumbnailURL)
+        var seen = Set<URL>()
+        return urls.compactMap { $0 }.filter { seen.insert($0).inserted }
+    }
+
+    private func gallery(_ details: HeroBanner.Details) -> some View {
+        TabView {
+            ForEach(galleryImages(details), id: \.self) { url in
+                CachedAsyncImage(url: url, maxPixelSize: 1600) { image in
+                    image.resizable().aspectRatio(contentMode: .fit)
+                } placeholder: {
+                    ProgressView().tint(.white)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .tabViewStyle(.page)
+        .background(Color.black.ignoresSafeArea())
+        .presentationDragIndicator(.visible)
+    }
+
+    /// Plain text tabs with an underline, not the stock segmented control the
+    /// owner rejected as not fitting the app.
+    private var tabStrip: some View {
+        HStack(spacing: 24) {
+            ForEach(Section.allCases) { tab in
+                let selected = section == tab
+                Button {
+                    withAnimation(.snappy) { section = tab }
+                } label: {
+                    VStack(spacing: 6) {
+                        Text(tab == .episodes ? listLabel : tab.rawValue)
+                            .font(.system(size: 15, weight: selected ? .semibold : .regular))
+                            .foregroundStyle(selected ? SumiTheme.foreground : SumiTheme.muted)
+                        Rectangle()
+                            .fill(selected ? SumiTheme.indigo : Color.clear)
+                            .frame(height: 2)
+                    }
+                    .frame(minHeight: 40, alignment: .bottom)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(SumiTheme.muted.opacity(0.2)).frame(height: 0.5)
+        }
+    }
+
+    @ViewBuilder
+    private func overview(_ details: HeroBanner.Details) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let next = details.nextEpisodeText, !next.isEmpty {
+                Text(next)
+                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(SumiTheme.indigo)
+            }
+
+            if let synopsis = details.synopsis, !synopsis.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(synopsis)
+                        .font(.system(size: 14))
+                        .lineSpacing(4)
+                        .foregroundStyle(SumiTheme.foreground.opacity(0.85))
+                        .lineLimit(synopsisExpanded ? nil : 4)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(synopsisExpanded ? "Show less" : "Read more") {
+                        withAnimation(.snappy) { synopsisExpanded.toggle() }
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                }
+            }
+
+            if !details.genres.isEmpty {
+                details.genres.dropFirst().reduce(Text(details.genres[0]).foregroundStyle(SumiTheme.muted)) { (line: Text, genre: String) -> Text in
+                    line + Text(" / ").foregroundStyle(SumiTheme.muted.opacity(0.4)) + Text(genre).foregroundStyle(SumiTheme.muted)
+                }
+                .font(.system(size: 13))
+            }
+
             if hasTrailer {
                 Button {
                     showTrailer = true
@@ -521,98 +682,8 @@ struct PhoneDetailView: View {
                     }
                 }
             }
-
-            if let next = details.nextEpisodeText, !next.isEmpty {
-                Text(next)
-                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(SumiTheme.indigo)
-            }
-
-            factRow(details)
-
-            if let synopsis = details.synopsis, !synopsis.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(synopsis)
-                        .font(.system(size: 14))
-                        .lineSpacing(4)
-                        .foregroundStyle(SumiTheme.foreground.opacity(0.85))
-                        .lineLimit(synopsisExpanded ? nil : 4)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button(synopsisExpanded ? "Show less" : "Read more") {
-                        withAnimation(.snappy) { synopsisExpanded.toggle() }
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                }
-            }
-
-            if !details.genres.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    metaLabel("Genres")
-                    details.genres.dropFirst().reduce(Text(details.genres[0]).foregroundStyle(SumiTheme.muted)) { (line: Text, genre: String) -> Text in
-                        line + Text(" / ").foregroundStyle(SumiTheme.muted.opacity(0.4)) + Text(genre).foregroundStyle(SumiTheme.muted)
-                    }
-                    .font(.system(size: 14))
-                }
-            }
-
-            // Every credited studio is a production committee of licensors
-            // and music labels; `isMain` is the animation studio, which is
-            // the only one worth a line on a phone.
-            if let studios = details.studios, !studios.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    metaLabel("Studio")
-                    // One button per main studio: each has an AniList id and
-                    // a page of its own (`openStudio`).
-                    HStack(spacing: 8) {
-                        ForEach(studios.filter(\.isMain)) { studio in
-                            Button { model.openStudio(id: studio.id) } label: {
-                                Text(studio.name)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(SumiTheme.indigo)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            } else if let studio = details.studio {
-                VStack(alignment: .leading, spacing: 6) {
-                    metaLabel("Studio")
-                    Text(studio)
-                        .font(.system(size: 13))
-                        .foregroundStyle(SumiTheme.foreground)
-                }
-            }
-
         }
         .padding(.horizontal, 16)
-        .padding(.top, 4)
-    }
-
-    @ViewBuilder
-    private func factRow(_ details: HeroBanner.Details) -> some View {
-        let facts: [(String, String)] = [
-            ("Status", details.status.map(Self.mediaStatus)),
-            ("Format", details.format.map(MediaCard.displayFormat)),
-            ("Episodes", details.episodeCount.map(String.init)),
-            ("Score", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
-            ("Your score", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
-            ("On your list", details.listStatus.map(Self.listStatus))
-        ].compactMap { name, value in value.map { (name, $0) } }
-
-        if !facts.isEmpty {
-            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading),
-                                GridItem(.flexible(), alignment: .leading)],
-                      alignment: .leading, spacing: 12) {
-                ForEach(facts, id: \.0) { fact in
-                    VStack(alignment: .leading, spacing: 3) {
-                        metaLabel(fact.0)
-                        Text(fact.1)
-                            .font(.system(size: 13))
-                            .foregroundStyle(SumiTheme.foreground)
-                    }
-                }
-            }
-        }
     }
 
     /// Every character with their voice actor, two across. A tap opens the
@@ -850,82 +921,6 @@ struct PhoneDetailView: View {
         case "DROPPED": return "Dropped"
         case "REPEATING": return "Rewatching"
         default: return raw.capitalized
-        }
-    }
-
-    private struct Hero: View {
-        let details: HeroBanner.Details
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 10) {
-                ZStack(alignment: .bottomLeading) {
-                    // `Color.clear` sets the box and the artwork is an
-                    // overlay on it, rather than the image being framed
-                    // directly. An image with `contentMode: .fill` and only
-                    // its height pinned reports the width that covers that
-                    // height — about 900pt for a banner — and a `maxWidth`
-                    // frame centres an oversized child instead of shrinking
-                    // it, so that width became the whole page's width and the
-                    // column rendered with its left half off the screen.
-                    Color.clear
-                        .frame(height: 250)
-                        .overlay {
-                            CachedAsyncImage(url: details.bannerURL ?? details.coverURL, maxPixelSize: 900) { image in
-                                image.resizable().aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                SumiTheme.card
-                            }
-                        }
-                        .clipped()
-                        // The art runs up under the status bar. Before this it
-                        // started below the navigation bar and met the black
-                        // page in a hard horizontal line across the screen.
-                        .ignoresSafeArea(edges: .top)
-                        // Its own scrim, so the back chevron and title stay
-                        // readable over a bright banner.
-                        .overlay(alignment: .top) {
-                            LinearGradient(
-                                colors: [.black.opacity(0.55), .clear],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            .frame(height: 120)
-                            .ignoresSafeArea(edges: .top)
-                            .allowsHitTesting(false)
-                        }
-
-                    // The title sits on the artwork, so it needs its own
-                    // ground: a bright banner made white text unreadable.
-                    LinearGradient(
-                        colors: [.clear, SumiTheme.background.opacity(0.95)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 190)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(details.title)
-                            .font(.sumiHeading(size: 22, weight: .bold))
-                            .foregroundStyle(SumiTheme.foreground)
-                            .lineLimit(2)
-                        Text(metaLine)
-                            .font(.system(size: 11)).monospacedDigit()
-                            .foregroundStyle(SumiTheme.muted)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                }
-                .frame(height: 190)
-                .clipped()
-            }
-        }
-
-        private var metaLine: String {
-            var parts: [String] = []
-            if let score = details.averageScore { parts.append("\(Double(score) / 10.0)") }
-            if let year = details.year { parts.append("\(year)") }
-            if let count = details.episodeCount { parts.append("\(count) eps") }
-            return parts.joined(separator: " · ")
         }
     }
 

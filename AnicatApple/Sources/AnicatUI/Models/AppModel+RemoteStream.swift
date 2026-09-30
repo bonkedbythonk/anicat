@@ -5,8 +5,12 @@ import AnicatCoreKit
 public extension AppModel {
     static let streamFromMacKey = "anicat_stream_from_mac"
 
+    /// Off unless the viewer turns it on. It was on by default until a phone
+    /// playing through a Mac skipped through episodes and marked each one
+    /// watched on AniList; that was never traced, and the local engine plays
+    /// everything the Mac path does.
     static var isStreamFromMacEnabled: Bool {
-        UserDefaults.standard.object(forKey: streamFromMacKey) as? Bool ?? true
+        UserDefaults.standard.object(forKey: streamFromMacKey) as? Bool ?? false
     }
 
     /// Resolves this episode on a Mac and returns a loopback URL the player

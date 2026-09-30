@@ -40,7 +40,7 @@ struct PhoneSettingsView: View {
     @AppStorage(AppModel.deleteWatchedDownloadsKey) private var deleteWatchedDownloads: Bool = true
     @AppStorage(AppModel.backgroundDownloadsKey) private var backgroundDownloads: Bool = true
     // `AppModel.isStreamFromMacEnabled` owns the reader and the default.
-    @AppStorage("anicat_stream_from_mac") private var streamFromMac: Bool = true
+    @AppStorage("anicat_stream_from_mac") private var streamFromMac: Bool = false
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     // `SystemNotifications` owns the reader and the default (on).
     @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true

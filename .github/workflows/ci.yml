@@ -155,7 +155,7 @@ jobs:
       - name: swift test
         working-directory: AnicatApple
         timeout-minutes: 15
-        run: script -q /dev/null swift test
+        run: script -q /dev/null swift test --no-parallel --verbose
 
   windows:
     name: Windows server

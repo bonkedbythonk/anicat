@@ -152,10 +152,17 @@ jobs:
       # line-buffers every "started" line as it happens, and the step limit
       # turns a hang into a red step after 15 minutes instead of two hours.
       # The stuck test is the one that started and never passed.
+      #
+      # That did not name the culprit on 2026-09-30 (23f52c50): tests run in
+      # parallel, so 39 had started without a pass line when the hang hit.
+      # --verbose is SwiftPM's informational output; whether it helps name
+      # the stuck test is untested. --no-parallel is not here: with it the
+      # same suite passed in 37 s, which would hide the hang this step
+      # exists to catch.
       - name: swift test
         working-directory: AnicatApple
         timeout-minutes: 15
-        run: script -q /dev/null swift test
+        run: script -q /dev/null swift test --verbose
 
   windows:
     name: Windows server

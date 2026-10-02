@@ -7,6 +7,7 @@ mod ipc;
 mod mpv;
 mod policy;
 pub mod prefs;
+mod proc;
 pub mod routes;
 mod session;
 mod upscale;

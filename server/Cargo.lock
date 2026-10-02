@@ -77,6 +77,7 @@ dependencies = [
  "axum",
  "dirs",
  "embed-resource",
+ "jni",
  "libc",
  "log",
  "open",

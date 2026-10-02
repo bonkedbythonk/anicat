@@ -1,5 +1,8 @@
 //! Finding mpv and the command line it is started with.
 
+// Android has no executable to find: the app's player screen is the mpv.
+#![cfg_attr(target_os = "android", allow(dead_code))]
+
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]

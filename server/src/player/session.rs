@@ -3,13 +3,11 @@
 //! `upscale::decide`'s.
 
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anicat_core::ffi::{AnicatEngine, FfiCatalog, StreamRequest};
 use serde_json::{json, Value};
-use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
@@ -17,6 +15,7 @@ use super::aniskip::{self, Segment};
 use super::ipc::{self, IpcClient};
 use super::policy::{self, Tracker};
 use super::prefs::{Prefs, PrefsStore};
+use super::proc::MpvProc;
 use super::upscale::{self, Decision};
 use super::{mpv, PlayRequest, Snapshot};
 use crate::writer::Writer;
@@ -130,7 +129,6 @@ pub async fn start(
     url: String,
     request: PlayRequest,
 ) -> Result<Handle, String> {
-    let binary = mpv::locate().ok_or_else(|| mpv::NOT_FOUND.to_string())?;
     let data_dir = crate::config::data_dir();
     let endpoint = ipc::endpoint(&data_dir);
     remove_socket(&endpoint);
@@ -151,24 +149,12 @@ pub async fn start(
         shader_cache: shader_cache.as_deref(),
         extra: &extra,
     });
-    log::info!("[player] spawning {} {:?}", binary.display(), args);
-    let mut child = Command::new(&binary)
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        // The server exiting any way but through `stop` must not leave a
-        // player behind reading from a range server that is gone.
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("could not start mpv at {}: {e}", binary.display()))?;
-    #[cfg(windows)]
-    bind_to_server_lifetime(&child);
+    let mut child = MpvProc::spawn(&args)?;
 
-    let (ipc, mut events) = match IpcClient::connect(&endpoint, || matches!(child.try_wait(), Ok(None))).await {
+    let (ipc, mut events) = match IpcClient::connect(&endpoint, || child.alive()).await {
         Ok(pair) => pair,
         Err(e) => {
-            let _ = child.kill().await;
+            child.kill().await;
             remove_socket(&endpoint);
             return Err(e);
         }
@@ -225,6 +211,8 @@ pub async fn start(
     session.publish();
 
     let join = tokio::spawn(async move {
+        // Never cleared on Android, where the IPC closing ends the loop.
+        #[cfg_attr(target_os = "android", allow(unused_mut))]
         let mut events_open = true;
         let mut cmds_open = true;
         let mut kill_at: Option<tokio::time::Instant> = None;
@@ -237,11 +225,17 @@ pub async fn start(
             };
             tokio::select! {
                 status = child.wait() => {
-                    log::info!("[player] mpv exited: {status:?}");
+                    log::info!("[player] mpv exited: {status}");
                     break;
                 }
                 ev = events.recv(), if events_open => match ev {
                     Some(ev) => session.on_event(ev).await,
+                    // No child to end the loop on Android: the IPC closing is
+                    // the player screen going away, and without this `finish`
+                    // never wrote the last position or paused the download.
+                    #[cfg(target_os = "android")]
+                    None => break,
+                    #[cfg(not(target_os = "android"))]
                     None => events_open = false,
                 },
                 cmd = cmd_rx.recv(), if cmds_open => match cmd {
@@ -259,7 +253,7 @@ pub async fn start(
                 Some(msg) = internal_rx.recv() => session.on_internal(msg).await,
                 _ = kill_sleep => {
                     log::warn!("[player] mpv ignored quit, killing it");
-                    let _ = child.kill().await;
+                    child.kill().await;
                     kill_at = None;
                 }
             }
@@ -881,36 +875,3 @@ fn remove_socket(endpoint: &std::path::Path) {
 /// A named pipe goes away with its last handle; there is no file to remove.
 #[cfg(windows)]
 fn remove_socket(_endpoint: &std::path::Path) {}
-
-/// Puts mpv in a job object that dies with this process. `kill_on_drop` only
-/// runs when the server unwinds normally; Task Manager, a crash, or the
-/// installer's `Stop-Process` end the server without dropping anything, and
-/// mpv would stay open on a stream whose server is gone. The job handle is
-/// deliberately leaked: closing it is what kills the children, and the OS
-/// closes it when this process exits, however it exits.
-#[cfg(windows)]
-fn bind_to_server_lifetime(child: &tokio::process::Child) {
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-    let Some(process) = child.raw_handle() else { return };
-    unsafe {
-        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-        if job.is_null() {
-            log::warn!("[player] could not create a job object; mpv may outlive a crashed server");
-            return;
-        }
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let ok = SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const core::ffi::c_void,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        );
-        if ok == 0 || AssignProcessToJobObject(job, process as _) == 0 {
-            log::warn!("[player] could not bind mpv to the server's lifetime; mpv may outlive a crashed server");
-        }
-    }
-}

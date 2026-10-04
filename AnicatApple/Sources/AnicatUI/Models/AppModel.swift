@@ -1446,6 +1446,12 @@ public final class AppModel {
             paletteOpen = false
             return true
         }
+        // A dub or release switch resolving under the playing video: Escape
+        // drops the switch, not the episode being watched.
+        if activeStreamURL != nil, resolveStartedAt != nil {
+            cancelResolve()
+            return true
+        }
         if activeStreamURL != nil {
             stopPlayback()
             return true

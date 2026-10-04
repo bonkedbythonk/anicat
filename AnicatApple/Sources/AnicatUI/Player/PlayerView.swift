@@ -37,6 +37,15 @@ public struct PlayerView: View {
     /// from here: after the picture is up, so the zoom carries a picture
     /// and nothing else animates under it.
     public let onFirstFrame: () -> Void
+    /// A resolve is running under the playing video (a dub or release
+    /// switch). `isBuffering` stays false for all of it, since mpv is still
+    /// playing the old file until the new URL arrives, so without this the
+    /// spinner below never showed and the strip across the top of the window
+    /// was the only sign anything was happening.
+    public let isResolving: Bool
+    /// Stops waiting on that resolve. The strip used to carry this button
+    /// and covered the picture to do it.
+    public let onCancelResolve: () -> Void
     @State private var showInfoMenu = false
     @State private var isMiniHovered = false
     /// The skip window whose pill has timed out. A pill left up for a whole
@@ -125,7 +134,9 @@ public struct PlayerView: View {
         onRestore: @escaping () -> Void = {},
         morphSource: EpisodeMorphSource? = nil,
         morphThumbnailURL: URL? = nil,
-        onFirstFrame: @escaping () -> Void = {}
+        onFirstFrame: @escaping () -> Void = {},
+        isResolving: Bool = false,
+        onCancelResolve: @escaping () -> Void = {}
     ) {
         self.controller = controller
         self.streamURL = streamURL
@@ -136,6 +147,8 @@ public struct PlayerView: View {
         self.morphSource = morphSource
         self.morphThumbnailURL = morphThumbnailURL
         self.onFirstFrame = onFirstFrame
+        self.isResolving = isResolving
+        self.onCancelResolve = onCancelResolve
     }
 
     /// mpv has decoded and presented a frame of the file this session opened
@@ -562,7 +575,7 @@ public struct PlayerView: View {
                 // Buffering Spinner — covers both the initial resolve-to-first-frame
                 // stretch and any mid-playback stall, so the black canvas never
                 // sits with nothing on screen while mpv is still working.
-                if controller.isBuffering || (streamURL == nil && !isMinimized) {
+                if controller.isBuffering || (streamURL == nil && !isMinimized) || (isResolving && !isMinimized) {
                     if isFlyingIn && !flyInSettled {
                         // Under the still's card: one quiet line, its top a
                         // fixed gap below the card's edge. The stacked 1.4x
@@ -588,6 +601,20 @@ public struct PlayerView: View {
                             Text(bufferingLabel)
                                 .sumiTabularMono(size: 12)
                                 .foregroundColor(PlayerChrome.muted)
+                            // A switch resolving under the playing video: the
+                            // way out lives here, with the status it belongs
+                            // to, not in a strip over the top of the picture.
+                            if isResolving, streamURL != nil {
+                                Button(action: onCancelResolve) {
+                                    Text("Cancel")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(PlayerChrome.muted)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.sumiPressable)
+                            }
                         }
                         .transition(.opacity)
                     }
@@ -961,6 +988,11 @@ public struct PlayerView: View {
         }
         if let percent = controller.bufferingPercent, percent > 0 {
             return "Buffering \(percent)%"
+        }
+        // The engine has published nothing yet for a switch just started: the
+        // strip this replaces said the same.
+        if isResolving {
+            return PlayerController.withElapsed("Finding a stream…", controller.resolveElapsedSeconds)
         }
         return PlayerController.withElapsed("Buffering…", controller.resolveElapsedSeconds)
     }

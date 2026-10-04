@@ -70,6 +70,18 @@ public struct RootView: View {
         return PlayerView.minBottomBarHeight + 12
     }
 
+    /// The full-size player draws a resolve's status itself, with its own
+    /// Cancel: under the still while a play opens, and under the spinner when
+    /// a dub or release switch resolves beneath the playing video. The strip
+    /// across the top covered the picture for that second one, an opaque bar
+    /// over the video for the length of the search, with the same words in
+    /// the middle of the screen. Minimized, the mini-player has no spinner,
+    /// so the strip stays for it.
+    private var playerCarriesResolve: Bool {
+        guard model.activeStreamURL != nil else { return model.openingPlayerSourceKey != nil }
+        return !model.isPlayerMinimized
+    }
+
     private func dismissError() {
         withAnimation(.snappy) {
             model.errorMessage = nil
@@ -394,7 +406,9 @@ public struct RootView: View {
                     // had kept the toggle clear of that by accident.
                     onFirstFrame: {
                         DispatchQueue.main.async { enterFullscreenForPlaybackIfWanted() }
-                    }
+                    },
+                    isResolving: model.resolveStartedAt != nil,
+                    onCancelResolve: { model.cancelResolve() }
                 )
                 // The player measures the window through its own
                 // GeometryReader. In a window the safe area is the strip
@@ -603,8 +617,7 @@ public struct RootView: View {
                     // Not while the player itself is up for the wait: the status
             // line sits under the card there and this would be the same
             // words twice.
-            if let startedAt = model.resolveStartedAt,
-               model.activeStreamURL != nil || model.openingPlayerSourceKey == nil {
+            if let startedAt = model.resolveStartedAt, !playerCarriesResolve {
                         ResolvingStreamCard(
                             startedAt: startedAt,
                             status: model.playerController.resolveStatus,

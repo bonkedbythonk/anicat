@@ -2149,14 +2149,22 @@ impl TorrentManager {
                 });
                 if bps >= required_bps {
                     stages.prebuffer_ms = stages.take();
+                    // The piece length is what a 60s head-piece wait is read
+                    // against: Maoyu ep 1 handed off at 228 KB/s (needs
+                    // 189) and mpv's byte-0 read then timed out after 60s,
+                    // with nothing in the log to say how big the piece was.
                     log::info!(
                         "torrent: swarm proven at {:.0} KB/s (needs {:.0} KB/s) after {:?}; \
-                         handing off with {} of {} KB read -- mpv waits out the head piece",
+                         handing off with {} of {} KB read, piece length {} KB -- mpv waits out the head piece",
                         bps / 1024.0,
                         required_bps / 1024.0,
                         waited,
                         got / 1024,
-                        want / 1024
+                        want / 1024,
+                        handle
+                            .with_metadata(|m| m.lengths.default_piece_length())
+                            .unwrap_or(0)
+                            / 1024
                     );
                     return Ok(());
                 }

@@ -572,6 +572,21 @@ extension AppModel {
         // 10 s). A failure below puts the old status back.
         let previousStatus = details.listStatus
         if let status { selectedMediaDetails?.listStatus = status }
+        // Before the save, not after it: the buffering does not depend on
+        // AniList accepting the write, and a held save should not hold it.
+        // Only on the move into Watching: re-picking the status a title
+        // already has would search again for nothing. A mark-watched that
+        // flips a planned title to Watching passes its own progress, which
+        // is the newer of the two.
+        if status == "CURRENT", previousStatus != "CURRENT", previousStatus != "REPEATING",
+           !currentDetailIsManga() {
+            preresolveStartedTitle(
+                id: details.id,
+                title: details.title,
+                progress: Int(progress ?? Int64(details.listProgress ?? 0)),
+                total: Int(details.episodeCount ?? 0)
+            )
+        }
         let began = Date()
         do {
             try await engine.updateListEntry(catalogId: details.id, status: status, score: score, progress: progress)

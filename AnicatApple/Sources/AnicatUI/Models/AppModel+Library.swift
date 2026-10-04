@@ -640,33 +640,56 @@ extension AppModel {
         guard !hasPreresolvedUpNext else { return }
         hasPreresolvedUpNext = true
         guard UserDefaults.standard.object(forKey: Self.preresolveUpNextKey) as? Bool ?? true,
-              let engine, activeStreamURL == nil, resolveStartedAt == nil,
+              activeStreamURL == nil, resolveStartedAt == nil,
               let entry = upNextItems.first, entry.unit == "EP" else { return }
         let next = entry.nextEpisodeOrChapter
         // The schedule is built from the same watching list: a row naming
         // this title with an episode number at or below the one wanted is
         // AniList saying it has not aired.
         if scheduleItems.contains(where: { $0.id == entry.id && $0.episodeNumber <= next }) { return }
+        preresolve(id: entry.id, title: entry.title, episode: next, total: entry.totalCount)
+    }
+
+    /// The same speculative resolve for a title the viewer has just put on
+    /// Watching: its next episode (the first, for a title not started) is
+    /// searched and pre-buffered now, so the click that follows is the reuse
+    /// path and not a cold resolve. Measured on Maoyu, a cold first episode
+    /// took 11s to resolve and then 60s for the head piece, all after Play.
+    func preresolveStartedTitle(id: Int64, title: String, progress: Int, total: Int) {
+        guard UserDefaults.standard.object(forKey: Self.preresolveUpNextKey) as? Bool ?? true else { return }
+        preresolve(id: id, title: title, episode: progress + 1, total: total)
+    }
+
+    /// One `preload: true` resolve of `next`, tracked in `preresolveInFlight`.
+    /// Both callers rely on its guards: nothing starts while a play is up or
+    /// resolving, and an episode that has not aired is left alone.
+    private func preresolve(id: Int64, title: String, episode next: Int, total: Int) {
+        guard let engine, activeStreamURL == nil, resolveStartedAt == nil else { return }
         let request = StreamRequest(
             catalog: .anilist,
-            catalogId: entry.id,
+            catalogId: id,
             episode: Int64(next),
-            title: entry.title,
+            title: title,
             preferDub: UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed",
             chosenName: nil,
             resumeFraction: nil,
             preload: true
         )
-        let total = entry.totalCount
-        let entryId = entry.id
         // On the main actor, with only the file read sent off it: the idle
         // recheck and the in-flight bookkeeping below both read model state.
         let task = Task(priority: .utility) { @MainActor [weak self] in
-            defer { self?.preresolveInFlight = nil }
+            // Only its own entry: a newer preresolve may have replaced this
+            // one while it ran, and clearing that would hide it from a play
+            // waiting on it.
+            defer {
+                if self?.preresolveInFlight?.catalogId == id, self?.preresolveInFlight?.episode == Int64(next) {
+                    self?.preresolveInFlight = nil
+                }
+            }
             // The snapshot's own row, when there is one; the list's episode
             // count otherwise.
             let aired = await Task.detached(priority: .utility) {
-                DetailCache.peekAired(id: entryId, episode: next)
+                DetailCache.peekAired(id: id, episode: next)
             }.value
             switch aired {
             case .some(false):
@@ -686,10 +709,10 @@ extension AppModel {
             } catch {
                 // Nothing visible depends on this: the real play resolves
                 // cold exactly as it did before.
-                print("[preload] up next episode \(next) of \(entry.id) not preresolved: \(error)")
+                print("[preload] episode \(next) of \(id) not preresolved: \(error)")
             }
         }
-        preresolveInFlight = (entry.id, Int64(next), task)
+        preresolveInFlight = (id, Int64(next), task)
     }
 
     /// The registry records every catalog in one table and `watch_activity`

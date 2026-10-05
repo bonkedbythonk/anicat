@@ -449,6 +449,40 @@ fn season_episode(t: &str) -> Option<(u32, u32)> {
     Some((season.parse().ok()?, episode.parse().ok()?))
 }
 
+/// Does an unbracketed `Title S01E06 ...` release lead with a title that is
+/// none of this entry's own?
+///
+/// `title_matches_with_alts` lets a release in on any segment, and VARYG puts
+/// an alias in parentheses after the title: "MAO S01E06 ... (Maoyuu Maou
+/// Yuusha, Multi-Subs)" is the 2026 MAO (AniDB 19469) tagged with the 2013
+/// show's name, and it passed as that show for three episodes in a row.
+/// AnimeTosho had not indexed the newest releases, so the AniDB check in
+/// `verify` said Unknown and the name decided.
+///
+/// Deliberately narrow: only the no-bracket naming with an `SxxEyy` token,
+/// where the words before it are the release's own title. A `[Group] A ~ B
+/// (C)` name has no such lead -- the correct "[YURI] Maoyu ~ Archenemy & Hero
+/// (Maoyuu Maou Yuusha)" reaches this entry the same way MAO does. The lead
+/// may be a whole-word prefix of a title (a subtitle left off) or match it
+/// with the apostrophes closed up ("Demon Kings Daughter").
+pub(crate) fn leads_with_foreign_title(name: &str, titles: &[String]) -> bool {
+    if name.trim_start().starts_with('[') {
+        return false;
+    }
+    let norm = normalize(name);
+    let words: Vec<&str> = norm.split(' ').collect();
+    let Some(cut) = words.iter().position(|t| season_episode(t).is_some()).filter(|&c| c > 0) else {
+        return false;
+    };
+    let lead = words[..cut].join(" ");
+    let lead_flat = lead.replace(' ', "");
+    !titles.iter().any(|t| {
+        let t = normalize(t);
+        let tokens: Vec<&str> = t.split(' ').collect();
+        segment_matches(&t, &lead) || (1..=tokens.len()).any(|k| tokens[..k].concat() == lead_flat)
+    })
+}
+
 /// Is this token a season marker in any of the forms in circulation?
 fn is_season_marker(t: &str) -> bool {
     if t == "season" || t == "seasons" || roman_numeral(t).is_some() {
@@ -3572,5 +3606,44 @@ mod extras_tests {
         assert!(title_matches_with_alts(&normalize("Tenkou-saki no Seiso"), "[G] Tenkousaki no Seiso - 01 [1080p]", &[]));
         assert!(!title_matches_with_alts(&normalize("Monster"), "[G] Monsters - 01 [1080p]", &[]));
         assert!(!title_matches_with_alts(&normalize("Re Monster"), "[G] Remonsterland - 01 [1080p]", &[]));
+    }
+
+    #[test]
+    fn a_release_of_another_show_carrying_this_title_as_an_alias_is_foreign() {
+        let maoyu: Vec<String> = vec!["Maoyuu Maou Yuusha".into(), "Maoyu: Archenemy & Hero".into(), "Maoyu Maou Yusha".into()];
+        // MAO (2026) tagged by VARYG with the 2013 show's name: all four play
+        // as episodes of anilist:14833 today.
+        for name in [
+            "MAO S01E06 Memories of That Day 1080p BILI WEB-DL AAC2.0 H 264-VARYG (Maoyuu Maou Yuusha, Multi-Subs)",
+            "MAO S01E06 Memories of That Day 1080p DSNP WEB-DL AAC2.0 H 264-VARYG (Maoyuu Maou Yuusha, Multi-Subs)",
+            "MAO S01E08 Hyakka 1080p DSNP WEB-DL AAC2.0 H 264-VARYG (Maoyuu Maou Yuusha, Multi-Subs)",
+        ] {
+            assert!(title_matches_with_alts(&normalize(&maoyu[0]), name, &[]), "{name} is in the pool");
+            assert!(leads_with_foreign_title(name, &maoyu), "{name}");
+        }
+        // The releases AniDB confirmed for this entry, and the shapes that
+        // reach it through an alias legitimately.
+        for name in [
+            "[Anime Time] Maoyu Archenemy & Hero (Season 1) [BD][1080p][HEVC 10bit x265][AAC][Eng Sub] [Batch] Maoyuu Maou Yuusha",
+            "[HorribleSubs] Maoyuu Maou Yuusha - 05 [1080p].mkv",
+            "[YURI] Maoyu ~ Archenemy & Hero (Maoyuu Maou Yuusha) [BD 1080p x264 10bit FLAC]",
+            "Maoyuu Maou Yuusha S01E05 1080p WEB-DL AAC2.0 H 264-GRP",
+        ] {
+            assert!(!leads_with_foreign_title(name, &maoyu), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_scene_title_that_only_differs_in_punctuation_or_a_subtitle_is_not_foreign() {
+        let kind: Vec<String> = vec!["Maou no Musume wa Yasashi Sugiru!!".into(), "The Demon King's Daughter is Too Kind!!".into()];
+        assert!(!leads_with_foreign_title(
+            "The Demon Kings Daughter is Too Kind S01E06 1080p CR WEB-DL AAC2.0 H 264-VARYG (Maou no Musume wa Yasashi Sugiru!!, Multi-Subs)",
+            &kind
+        ));
+        // A subtitle left off the front of a longer English title.
+        let long: Vec<String> = vec!["Roll Over and Die: I Was Exiled from the Hero Party".into()];
+        assert!(!leads_with_foreign_title("ROLL OVER AND DIE S01E06 An Ordinary Life 1080p CR WEB-DL AAC2.0 H 264-VARYG", &long));
+        // No SxxEyy token, nothing to read a lead from.
+        assert!(!leads_with_foreign_title("MAO 06 1080p", &["Maoyuu Maou Yuusha".into()]));
     }
 }

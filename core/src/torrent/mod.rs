@@ -1180,12 +1180,22 @@ impl TorrentManager {
         // is dropped here rather than trusted: Sword Art Online II had the
         // Gun Gale Online spin-off stored for three episodes, and this path
         // never looks at a name.
+        //
+        // A cinema search matches on TMDB titles and a series episode names
+        // its show in its own way, so the foreign-lead check is anime only.
+        let plain_anime = movie.is_none() && series_criteria.is_none();
         let remembered = remembered.filter(|rem| !rejected.contains(&rem.name)).filter(|rem| {
             let disowned = search::names_a_sibling(&search::normalize(&rem.name), titles, sibling_titles);
             if disowned {
                 log::warn!("[resolve] remembered release '{}' names a related entry, searching", rem.name);
             }
             !disowned
+        }).filter(|rem| {
+            let foreign = plain_anime && search::leads_with_foreign_title(&rem.name, titles);
+            if foreign {
+                log::warn!("[resolve] remembered release '{}' leads with another show's title, searching", rem.name);
+            }
+            !foreign
         });
         if let (Some(rem), None) = (remembered.as_ref(), chosen_name.as_ref()) {
             const REMEMBERED_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
@@ -1322,6 +1332,12 @@ impl TorrentManager {
         candidates.retain(|c| !rejected.contains(&c.name) || chosen_name.as_deref() == Some(c.name.as_str()));
         if prefer_small && chosen_name.is_none() {
             search::prefer_smaller(&mut candidates);
+        }
+        // Behind everything else, not dropped: a show airing now can have only
+        // releases whose title is the streaming service's own, and those must
+        // stay playable. A stable sort keeps the rest in score order.
+        if plain_anime && chosen_name.is_none() {
+            candidates.sort_by_key(|c| search::leads_with_foreign_title(&c.name, titles));
         }
         // The other half of the picture is per-candidate (see
         // `CandidateStages`); this half is everything that happens before the

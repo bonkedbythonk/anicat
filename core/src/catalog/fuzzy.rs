@@ -17,6 +17,8 @@ const MIN_SCORE: f64 = 0.6;
 /// "naru") out once Naruto (one edit) has been found, while a query with only
 /// two-edit matches still shows them.
 const BEST_MARGIN: f64 = 0.15;
+/// What a match on the title's first word adds to a title's score.
+const LEAD_BONUS: f64 = 0.03;
 /// Each rewrite is a request through AniList's rate limit (measured
 /// 2026-10-08: six at once drew 429s and a 52 s wait on the next search).
 const MAX_VARIANTS: usize = 5;
@@ -123,7 +125,10 @@ fn title_score(query: &[Vec<char>], title: &str) -> f64 {
         sum += best * typed.len() as f64;
         weight += typed.len() as f64;
     }
-    sum / weight
+    // Titles are typed from the front: the same word near the start of a title
+    // beats it in the middle ("anothr" is Another, not Re:Zero's "Another World").
+    let lead = query.first().map_or(0.0, |typed| word_score(typed, &words[0]));
+    (sum / weight + LEAD_BONUS * lead).min(1.0)
 }
 
 fn item_score(query: &[Vec<char>], item: &MediaItem) -> f64 {
@@ -135,6 +140,54 @@ fn item_score(query: &[Vec<char>], item: &MediaItem) -> f64 {
         names.extend(s.iter().map(String::as_str));
     }
     names.into_iter().map(|n| title_score(query, n)).fold(0.0, f64::max)
+}
+
+/// Kitsu's text search forgives typos where AniList's matches only whole words
+/// and word starts (measured 2026-10-08: "driffters", "bakkuman", "rosrio to"
+/// and "soousei no onmyouji" find Drifters, Bakuman., Rosario + Vampire and
+/// Twin Star Exorcists there, and nothing on AniList). It is used to learn the
+/// spelling, never as a catalog: the corrected title is searched on AniList.
+const KITSU_URL: &str = "https://kitsu.io/api/edge";
+const KITSU_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// Up to `n` titles Kitsu's search returns for the query, in the romaji AniList
+/// matches best, accents folded. Empty when Kitsu is down or slow: a miss here
+/// only means one fewer guess.
+pub async fn kitsu_titles(http: &reqwest::Client, query: &str, manga: bool, n: usize) -> Vec<String> {
+    let kind = if manga { "manga" } else { "anime" };
+    let sent = http
+        .get(format!("{KITSU_URL}/{kind}"))
+        .query(&[("filter[text]", query), ("page[limit]", "3")])
+        .header("Accept", "application/vnd.api+json")
+        .timeout(KITSU_TIMEOUT)
+        .send()
+        .await;
+    let Ok(res) = sent else { return Vec::new() };
+    if !res.status().is_success() {
+        return Vec::new();
+    }
+    match res.json::<serde_json::Value>().await {
+        Ok(body) => kitsu_names(&body, n),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn kitsu_names(body: &serde_json::Value, n: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for entry in body["data"].as_array().into_iter().flatten() {
+        let attrs = &entry["attributes"];
+        let name = [&attrs["titles"]["en_jp"], &attrs["canonicalTitle"], &attrs["titles"]["en"]]
+            .into_iter()
+            .find_map(|v| v.as_str().filter(|t| !t.trim().is_empty()));
+        if let Some(name) = name {
+            let name = fold(name);
+            if !out.contains(&name) {
+                out.push(name);
+            }
+        }
+    }
+    out.truncate(n);
+    out
 }
 
 /// Pages of 50 in the index of popular titles. Beyond these the shows are
@@ -403,6 +456,36 @@ mod tests {
         assert_eq!(fold("ハンター"), "ハンター");
         let index = vec![vec!["Pokémon".to_string()]];
         assert_eq!(closest("pokemon", &index, 1), vec!["Pokemon".to_string()]);
+    }
+
+    #[test]
+    fn kitsu_names_prefer_the_romaji_and_fold_accents() {
+        let body = serde_json::json!({ "data": [
+            { "attributes": { "canonicalTitle": "Drifters", "titles": { "en": "Drifters", "en_jp": "Drifters" } } },
+            { "attributes": { "canonicalTitle": "Sousei no Onmyouji", "titles": { "en": "Twin Star Exorcists", "en_jp": "Sousei no Onmyouji" } } },
+            { "attributes": { "canonicalTitle": "Steins;Gate: Déjà vu", "titles": {} } },
+            { "attributes": { "canonicalTitle": "Drifters", "titles": { "en_jp": "Drifters" } } },
+        ] });
+        assert_eq!(kitsu_names(&body, 3), vec!["Drifters", "Sousei no Onmyouji", "Steins;Gate: Deja vu"]);
+        assert_eq!(kitsu_names(&body, 1), vec!["Drifters"]);
+        assert!(kitsu_names(&serde_json::json!({}), 3).is_empty());
+    }
+
+    #[test]
+    fn a_word_at_the_start_of_a_title_beats_the_same_word_later_on() {
+        let mut re_zero = item(1, "Re:Zero kara Hajimeru Isekai Seikatsu", Some("Re:ZERO -Starting Life in Another World-"));
+        re_zero.popularity = Some(900_000);
+        let another = item(2, "Another", None);
+        assert_eq!(first("anothr", vec![re_zero, another]), Some(2));
+        let mut ore = item(3, "Ore Monogatari!!", Some("My Love Story!!"));
+        ore.popularity = Some(500_000);
+        assert_eq!(first("omnogatari", vec![ore, item(4, "Monogatari Series: Second Season", None)]), Some(4));
+    }
+
+    #[test]
+    fn a_word_in_the_middle_of_a_title_still_finds_it() {
+        let pool = vec![item(1, "Tate no Yuusha no Nariagari", Some("The Rising of the Shield Hero"))];
+        assert_eq!(first("shield hreo", pool), Some(1));
     }
 
     #[test]

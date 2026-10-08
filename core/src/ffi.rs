@@ -1260,35 +1260,23 @@ impl AnicatEngine {
         let typed = query.as_deref().map(str::trim).filter(|q| !q.is_empty());
         if let (1, true, Some(typed)) = (page_num, items.len() < FUZZY_BELOW, typed) {
             // One at a time, stopping at the first close title: AniList's
-            // rate limit made six at once cost a minute's wait.
+            // rate limit made six at once cost a minute's wait. Cheapest
+            // first: titles close to what was typed from the local index of
+            // popular titles, then Kitsu's typo-tolerant search for a show
+            // outside it, then generic rewrites. NOVEL has no index of its own.
+            let kind = media_type.as_deref().unwrap_or("ANIME");
             let mut extra = Vec::new();
-            // Titles close to what was typed come first: they are the likeliest
-            // to be what was meant. NOVEL has no popularity index of its own.
-            let mut rewrites = match media_type.as_deref().unwrap_or("ANIME") {
-                kind @ ("ANIME" | "MANGA") => {
-                    fuzzy::closest(typed, &title_index(&self.catalogs, kind).await, 3)
-                }
+            let mut budget = MAX_REWRITE_REQUESTS;
+            let indexed = match kind {
+                "ANIME" | "MANGA" => fuzzy::closest(typed, &title_index(&self.catalogs, kind).await, 3),
                 _ => Vec::new(),
             };
-            rewrites.extend(fuzzy::variants(typed));
-            rewrites.truncate(MAX_REWRITE_REQUESTS);
-            for rewrite in rewrites {
-                if fuzzy::has_close_match(typed, &extra) {
-                    break;
-                }
-                // A rewrite that fails is one fewer guess, not a failed search.
-                if let Ok(more) = search_page(
-                    &self.catalogs.anilist,
-                    Some(&rewrite),
-                    media_type.as_deref(),
-                    filters.as_ref(),
-                    page_num,
-                )
-                .await
-                {
-                    extra.extend(more);
-                }
+            ask_rewrites(&self.catalogs, typed, indexed, media_type.as_deref(), filters.as_ref(), page_num, &mut extra, &mut budget).await;
+            if !fuzzy::has_close_match(typed, &extra) {
+                let spelled = fuzzy::kitsu_titles(&self.http, typed, kind != "ANIME", 2).await;
+                ask_rewrites(&self.catalogs, typed, spelled, media_type.as_deref(), filters.as_ref(), page_num, &mut extra, &mut budget).await;
             }
+            ask_rewrites(&self.catalogs, typed, fuzzy::variants(typed), media_type.as_deref(), filters.as_ref(), page_num, &mut extra, &mut budget).await;
             log::debug!("[search] '{}' found {}, rewrites added {}", typed, items.len(), extra.len());
             items = fuzzy::rank(typed, items, extra);
         }
@@ -4780,10 +4768,10 @@ fn is_mangakatana_id(id: &str) -> bool {
 /// happens to be a word prefix with one unrelated title.
 const FUZZY_BELOW: usize = 3;
 
-/// Requests a thin search may spend on rewrites. The title index puts its
-/// three closest titles first: offline they hold the right show 98% of the
-/// time after one typing slip and 92% after two, against 97% and 90% with only
-/// two. The generic rewrites behind them are for shows outside the index.
+/// AniList requests a thin search may spend on rewrites. In order: the three
+/// closest titles from the local index (right show held 98% of the time after
+/// one typing slip, 92% after two, offline), the two Kitsu answers for a show
+/// outside it, then the generic rewrites.
 const MAX_REWRITE_REQUESTS: usize = 6;
 
 /// The names of the most popular titles of one media type, for correcting a
@@ -4823,6 +4811,31 @@ async fn title_index(catalogs: &Catalogs, media_type: &str) -> Vec<Vec<String>> 
         }
     }
     index
+}
+
+/// Searches AniList for each rewrite in turn into `found`, until one of them
+/// is a close match to what was typed or `budget` requests are spent.
+#[allow(clippy::too_many_arguments)]
+async fn ask_rewrites(
+    catalogs: &Catalogs,
+    typed: &str,
+    rewrites: Vec<String>,
+    media_type: Option<&str>,
+    filters: Option<&SearchFilters>,
+    page: i32,
+    found: &mut Vec<anilist::types::MediaItem>,
+    budget: &mut usize,
+) {
+    for rewrite in rewrites {
+        if *budget == 0 || fuzzy::has_close_match(typed, found) {
+            return;
+        }
+        *budget -= 1;
+        // A rewrite that fails is one fewer guess, not a failed search.
+        if let Ok(more) = search_page(&catalogs.anilist, Some(&rewrite), media_type, filters, page).await {
+            found.extend(more);
+        }
+    }
 }
 
 /// One page of AniList's title search, no cache and no rewriting.

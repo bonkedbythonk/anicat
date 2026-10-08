@@ -195,6 +195,10 @@ impl AniListCache {
             // effectively static; characters never change. Both are fetched
             // repeatedly for the same id across a single open+watch flow.
             "media_detail" => Duration::from_secs(60 * 60),
+            // One title out of a batched lookup. Shorter than media_detail
+            // because the row carries the viewer's own list entry, and a title
+            // added to the list meanwhile should not keep being offered.
+            "media_by_id" => Duration::from_secs(30 * 60),
             // Same lifetime as media_detail: it's fetched alongside it and
             // changes on the same cadence (a new episode airing).
             "anizip_meta" => Duration::from_secs(60 * 60),

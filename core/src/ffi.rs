@@ -810,6 +810,14 @@ pub struct FfiRecommendationRow {
     pub rating: i32,
 }
 
+/// A title with the facts a recommendation chat reasons over: the summary plus
+/// the genres, which `MediaSummary` leaves out.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiMediaFacts {
+    pub media: MediaSummary,
+    pub genres: Vec<String>,
+}
+
 /// One comment, already flattened out of AniList's nested reply blob.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiThreadComment {
@@ -1245,7 +1253,10 @@ impl AnicatEngine {
                 return Ok(items.iter().map(summarize).collect());
             }
         }
-        let mut items = search_page(
+        if let Some(stale) = self.catalogs.stale_if_cooling::<Vec<anilist::types::MediaItem>>(&cache_key) {
+            return Ok(stale.iter().map(summarize).collect());
+        }
+        let mut items = match search_page(
             &self.catalogs.anilist,
             query.as_deref(),
             media_type.as_deref(),
@@ -1253,7 +1264,16 @@ impl AnicatEngine {
             page_num,
         )
         .await
-            .map_err(|msg| AnicatError::Network { msg })?;
+        {
+            Ok(items) => items,
+            Err(msg) => {
+                let stale: Vec<anilist::types::MediaItem> = self
+                    .catalogs
+                    .stale_or(&cache_key, msg)
+                    .map_err(|msg| AnicatError::Network { msg })?;
+                return Ok(stale.iter().map(summarize).collect());
+            }
+        };
         // AniList forgives no typo and needs the apostrophe, so a thin first
         // page is asked again in rewritten forms (see `catalog::fuzzy`). Later
         // pages are not: the first page is where a wrong query shows.
@@ -3878,6 +3898,21 @@ impl AnicatEngine {
                     user_status: entry.and_then(|e| e.status.clone()),
                 }
             })
+            .collect())
+    }
+
+    /// Up to fifty anime in one request, in the order asked, each with its
+    /// genres and the viewer's own list status. Ids AniList has no adult-free
+    /// entry for are left out.
+    pub async fn media_facts(&self, catalog_ids: Vec<i64>) -> FfiResult<Vec<FfiMediaFacts>> {
+        let items = self
+            .catalogs
+            .media_by_ids(&catalog_ids[..catalog_ids.len().min(50)])
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(items
+            .iter()
+            .map(|m| FfiMediaFacts { media: summarize(m), genres: m.genres.clone().unwrap_or_default() })
             .collect())
     }
 

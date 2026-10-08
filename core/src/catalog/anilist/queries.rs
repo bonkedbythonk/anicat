@@ -118,6 +118,24 @@ query ($page: Int, $type: MediaType) {
 }
 "#;
 
+/// Several titles by id in one request, with the fields a candidate list needs
+/// (genres, length, the viewer's own list entry). Page.media takes `id_in`, so
+/// twenty titles cost the one request a single `MEDIA_DETAIL_QUERY` does.
+pub const MEDIA_BY_IDS_QUERY: &str = r#"
+query ($ids: [Int], $type: MediaType) {
+  Page(page: 1, perPage: 50) {
+    media(id_in: $ids, type: $type, isAdult: false) {
+      id type
+      title { romaji english native }
+      coverImage { large medium }
+      format status episodes duration genres averageScore
+      nextAiringEpisode { airingAt episode timeUntilAiring }
+      mediaListEntry { id status score progress }
+    }
+  }
+}
+"#;
+
 pub const MEDIA_TRENDING_QUERY: &str = r#"
 query ($page: Int, $perPage: Int, $type: MediaType, $isAdult: Boolean) {
   Page(page: $page, perPage: $perPage) {

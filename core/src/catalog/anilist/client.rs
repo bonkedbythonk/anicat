@@ -68,6 +68,19 @@ impl AniListClient {
         self.username.lock().ok().and_then(|u| u.clone())
     }
 
+    /// True while a 429 cooldown is running. `execute` does not fail during it,
+    /// it sleeps out the rest (up to `Retry-After`, a minute by default) and
+    /// then sends the request, so a caller with an old copy to show has to ask
+    /// first or its user watches a spinner for that minute.
+    pub fn cooling_down(&self) -> bool {
+        self.rate_limited_until.lock().unwrap().is_some_and(|until| Instant::now() < until)
+    }
+
+    #[cfg(test)]
+    pub fn start_cooldown_for_test(&self, d: std::time::Duration) {
+        *self.rate_limited_until.lock().unwrap() = Some(Instant::now() + d);
+    }
+
     pub async fn execute<T: DeserializeOwned>(
         &self,
         query: &str,

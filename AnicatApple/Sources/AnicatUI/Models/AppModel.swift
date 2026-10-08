@@ -173,6 +173,8 @@ public final class AppModel {
         }
     }
     public var searchQuery: String = ""
+    /// The conversation the Search page turns into when a request is asked.
+    let askChat = AskChat()
     public var selectedMediaDetails: HeroBanner.Details?
     public var isDetailLoading: Bool = false
     var activePrefetches: Set<Int64> = []

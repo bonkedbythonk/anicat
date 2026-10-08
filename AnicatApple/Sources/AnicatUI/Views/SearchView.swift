@@ -36,6 +36,9 @@ public struct SearchView: View {
     public var onLoadMoreDiscover: (String) -> Void = { _ in }
     /// `AppModel.isSectionCovered`.
     public var isCovered: Bool = false
+    /// Return on a request ("something like Frieren but darker") hands the
+    /// text here instead of searching for it.
+    public var onAsk: (String) -> Void = { _ in }
 
     @State private var searchType: String = "ANIME"
 
@@ -77,7 +80,8 @@ public struct SearchView: View {
         hasMoreDiscoverPages: Bool = true,
         isLoadingMoreDiscover: Bool = false,
         onLoadMoreDiscover: @escaping (String) -> Void = { _ in },
-        isCovered: Bool = false
+        isCovered: Bool = false,
+        onAsk: @escaping (String) -> Void = { _ in }
     ) {
         self._searchText = searchText
         self.results = results
@@ -96,6 +100,7 @@ public struct SearchView: View {
         self.isLoadingMore = isLoadingMore
         self.onLoadMore = onLoadMore
         self.isCovered = isCovered
+        self.onAsk = onAsk
     }
 
     /// Titles to complete the query with, from the results already on screen
@@ -274,6 +279,12 @@ public struct SearchView: View {
         onSelectMedia(item, key)
     }
 
+    /// A request, with the model there to take it. Typing one must not search
+    /// for the sentence word by word, and Return asks it.
+    private var isRequest: Bool {
+        searchType == "ANIME" && !hasActiveFilters && AskSearch.looksLikeRequest(searchText) && AskSearch.isAvailable
+    }
+
     private func commitSearch() {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         // A blank query with a filter set is a legitimate browse ("show me
@@ -330,6 +341,8 @@ public struct SearchView: View {
                             .onSubmit {
                                 if let index = keyboardIndex, keyboardItems.indices.contains(index) {
                                     openKeyboardItem(at: index)
+                                } else if isRequest {
+                                    onAsk(searchText.trimmingCharacters(in: .whitespacesAndNewlines))
                                 } else {
                                     commitSearch()
                                 }
@@ -470,7 +483,7 @@ public struct SearchView: View {
                 // feedback was the (also broken, see SumiFilterDropdown) filter
                 // row, so the whole search page read as unresponsive.
                 .task(id: searchText) {
-                    guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isRequest else { return }
                     try? await Task.sleep(nanoseconds: 350_000_000)
                     guard !Task.isCancelled else { return }
                     commitSearch()
@@ -615,6 +628,13 @@ public struct SearchView: View {
                     } else if isLoading {
                         MediaGridSkeleton(count: 12)
                             .padding(.horizontal, 40)
+                    } else if isRequest {
+                        // "No titles found for" a sentence would be wrong: Return
+                        // asks it. Preloading the model here hides its first-call
+                        // load while the viewer is still typing.
+                        SumiEmptyState(headline: "Press Return to ask", detail: "Anicat will pick from AniList and from what you have watched.")
+                            .padding(.horizontal, 40)
+                            .task { AskSearch.prewarm() }
                     } else if !searchText.isEmpty || hasActiveFilters {
                         SumiEmptyState(headline: searchText.isEmpty ? "No titles found" : "No titles found for \"\(searchText)\"")
                             .padding(.horizontal, 40)

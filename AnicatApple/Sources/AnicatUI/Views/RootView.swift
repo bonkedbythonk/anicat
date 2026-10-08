@@ -883,6 +883,14 @@ public struct RootView: View {
                 // genres, sorts and discover grid `SearchView` is built
                 // around have nothing to drive here.
                 CinemaHomeView(model: model, namespace: cardNamespace, page: .search, focusSearchOnAppear: true)
+            } else if model.askChat.isOpen {
+                AskChatView(
+                    chat: model.askChat,
+                    onSend: { model.askChat.send($0, model: model) },
+                    onSelectMedia: { item in
+                        openDetailFor(id: item.id, title: item.title, coverURL: item.coverImageURL, isManga: false)
+                    }
+                )
             } else {
             SearchView(
                 searchText: $model.searchQuery,
@@ -927,7 +935,8 @@ public struct RootView: View {
                         )
                     }
                 },
-                isCovered: model.isSectionCovered
+                isCovered: model.isSectionCovered,
+                onAsk: { model.askChat.open($0, model: model) }
             )
             }
         case .settings:

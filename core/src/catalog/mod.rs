@@ -134,10 +134,17 @@ impl Catalogs {
                 return Ok(parsed);
             }
         }
-        let res: anilist::responses::ViewerResponse = self
+        if let Some(stale) = self.stale_if_cooling(&key) {
+            return Ok(stale);
+        }
+        let res: anilist::responses::ViewerResponse = match self
             .anilist
             .execute(anilist::queries::USER_PROFILE_QUERY, HashMap::new())
-            .await?;
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => return self.stale_or(&key, err),
+        };
         if let Ok(v) = serde_json::to_value(&res) {
             self.cache.set(key, v, "get_user_profile");
         }
@@ -186,6 +193,9 @@ impl Catalogs {
                 return Ok(parsed);
             }
         }
+        if let Some(stale) = self.stale_if_cooling(&key) {
+            return Ok(stale);
+        }
         let mut vars = HashMap::new();
         vars.insert("userName".to_string(), serde_json::json!(user_name));
         vars.insert("type".to_string(), serde_json::json!(media_type));
@@ -197,10 +207,14 @@ impl Catalogs {
             vars.insert("status".to_string(), serde_json::json!(status));
         }
         vars.insert("sort".to_string(), serde_json::json!(["UPDATED_TIME_DESC"]));
-        let res: anilist::responses::MediaListCollectionResponse = self
+        let res: anilist::responses::MediaListCollectionResponse = match self
             .anilist
             .execute(anilist::queries::USER_LIST_QUERY, vars)
-            .await?;
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => return self.stale_or(&key, err),
+        };
 
         let mut out = Vec::new();
         for list in res.media_list_collection.into_iter().flat_map(|c| c.lists.unwrap_or_default()) {
@@ -261,19 +275,26 @@ impl Catalogs {
                 return Ok(parsed);
             }
         }
+        if let Some(stale) = self.stale_if_cooling(&key) {
+            return Ok(stale);
+        }
         let mut vars = HashMap::new();
         vars.insert("page".to_string(), serde_json::json!(1));
         vars.insert("perPage".to_string(), serde_json::json!(per_page));
         vars.insert("type".to_string(), serde_json::json!(media_type));
         vars.insert("isAdult".to_string(), serde_json::json!(false));
 
-        let page: anilist::responses::PageResponse<anilist::types::MediaItem> = match format {
+        let fetched: Result<anilist::responses::PageResponse<anilist::types::MediaItem>, String> = match format {
             Some(f) => {
                 vars.insert("format".to_string(), serde_json::json!([f]));
                 vars.insert("sort".to_string(), serde_json::json!(["TRENDING_DESC", "POPULARITY_DESC"]));
-                self.anilist.execute(anilist::queries::MEDIA_SEARCH_QUERY, vars).await?
+                self.anilist.execute(anilist::queries::MEDIA_SEARCH_QUERY, vars).await
             }
-            None => self.anilist.execute(anilist::queries::MEDIA_TRENDING_QUERY, vars).await?,
+            None => self.anilist.execute(anilist::queries::MEDIA_TRENDING_QUERY, vars).await,
+        };
+        let page = match fetched {
+            Ok(page) => page,
+            Err(err) => return self.stale_or(&key, err),
         };
         let items = page.page.media.unwrap_or_default();
         if let Ok(v) = serde_json::to_value(&items) {
@@ -312,6 +333,9 @@ impl Catalogs {
                 return Ok(parsed);
             }
         }
+        if let Some(stale) = self.stale_if_cooling(&key) {
+            return Ok(stale);
+        }
         let mut vars = HashMap::new();
         vars.insert("page".to_string(), serde_json::json!(1));
         vars.insert("perPage".to_string(), serde_json::json!(per_page));
@@ -334,12 +358,86 @@ impl Catalogs {
             vars.insert("seasonYear".to_string(), serde_json::json!(y));
         }
         let page: anilist::responses::PageResponse<anilist::types::MediaItem> =
-            self.anilist.execute(anilist::queries::MEDIA_SEARCH_QUERY, vars).await?;
+            match self.anilist.execute(anilist::queries::MEDIA_SEARCH_QUERY, vars).await {
+                Ok(page) => page,
+                Err(err) => return self.stale_or(&key, err),
+            };
         let items = page.page.media.unwrap_or_default();
         if let Ok(v) = serde_json::to_value(&items) {
             self.cache.set(key, v, "get_discover");
         }
         Ok(items)
+    }
+
+    /// A live fetch failed (rate limited, down): answer from the last copy of
+    /// that row, however old the cache still holds it, instead of an error.
+    /// `AniListCache` kept the rows for exactly this and nothing read them: a
+    /// 429 cooldown of up to a minute turned every home shelf and detail page
+    /// into an error although the same row had been on disk since launch.
+    pub(crate) fn stale_or<T: serde::de::DeserializeOwned>(&self, key: &str, err: String) -> Result<T, String> {
+        self.cache
+            .stale_or_err(key, err.clone())
+            .and_then(|v| serde_json::from_value(v).map_err(|_| err))
+    }
+
+    /// The last copy of `key`, only while AniList is cooling down: the caller
+    /// is about to ask, `execute` would sleep out the cooldown first, and an
+    /// old row now beats the right one a minute from now.
+    pub(crate) fn stale_if_cooling<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
+        if !self.anilist.cooling_down() {
+            return None;
+        }
+        self.cache.get_stale(key).and_then(|v| serde_json::from_value(v).ok())
+    }
+
+    /// Several anime by id in one request. Each title is cached on its own, so
+    /// only the ids not already held are fetched, and a follow-up asking about
+    /// mostly the same shows costs nothing. When the request fails the held
+    /// copies, stale ones included, are all that is returned.
+    pub async fn media_by_ids(&self, ids: &[i64]) -> Result<Vec<anilist::types::MediaItem>, String> {
+        let key_of = |id: i64| AniListCache::key("media_by_id", &[("id", &id.to_string())]);
+        let mut found: HashMap<i64, anilist::types::MediaItem> = HashMap::new();
+        let mut missing = Vec::new();
+        for &id in ids {
+            match self.cache.get(&key_of(id)).and_then(|v| serde_json::from_value(v).ok()) {
+                Some(item) => {
+                    found.insert(id, item);
+                }
+                None => missing.push(id),
+            }
+        }
+        if !missing.is_empty() {
+            let mut vars = HashMap::new();
+            vars.insert("ids".to_string(), serde_json::json!(missing));
+            vars.insert("type".to_string(), serde_json::json!("ANIME"));
+            let fetched: Result<anilist::responses::PageResponse<anilist::types::MediaItem>, String> =
+                if self.anilist.cooling_down() {
+                    Err("AniList is rate limiting; using what is cached".to_string())
+                } else {
+                    self.anilist.execute(anilist::queries::MEDIA_BY_IDS_QUERY, vars).await
+                };
+            match fetched {
+                Ok(page) => {
+                    for item in page.page.media.unwrap_or_default() {
+                        if let Ok(v) = serde_json::to_value(&item) {
+                            self.cache.set(key_of(item.id), v, "media_by_id");
+                        }
+                        found.insert(item.id, item);
+                    }
+                }
+                Err(err) => {
+                    for &id in &missing {
+                        if let Some(item) = self.cache.get_stale(&key_of(id)).and_then(|v| serde_json::from_value(v).ok()) {
+                            found.insert(id, item);
+                        }
+                    }
+                    if found.is_empty() {
+                        return Err(err);
+                    }
+                }
+            }
+        }
+        Ok(ids.iter().filter_map(|id| found.remove(id)).collect())
     }
 
     /// One AniList entry, served from the response cache when it is warm.
@@ -389,13 +487,20 @@ impl Catalogs {
                 }
             }
         }
+        if let Some(stale) = self.stale_if_cooling(&key) {
+            return Ok(stale);
+        }
         let mut vars = HashMap::new();
         vars.insert("id".to_string(), serde_json::json!(anilist_id));
         vars.insert("type".to_string(), serde_json::json!(media_type));
-        let result: anilist::responses::MediaResponse = self
+        let result: anilist::responses::MediaResponse = match self
             .anilist
             .execute(anilist::queries::MEDIA_DETAIL_QUERY, vars)
-            .await?;
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => return self.stale_or(&key, err),
+        };
         if let Ok(v) = serde_json::to_value(&result) {
             self.cache.set(key, v, "media_detail");
         }
@@ -683,14 +788,24 @@ impl Catalogs {
             }
         }
 
+        if let Some(rows) = self.stale_if_cooling::<Vec<RecommendationRow>>(&key) {
+            return Ok(rows.into_iter().filter(|row| !on_list.contains(&row.media.id)).take(limit).collect());
+        }
         let mut vars = HashMap::new();
         vars.insert("ids".to_string(), serde_json::json!(seed_ids));
         vars.insert("perPage".to_string(), serde_json::json!(RECOMMENDATIONS_PER_SEED));
         vars.insert("type".to_string(), serde_json::json!("ANIME"));
-        let res: anilist::responses::BatchRecommendationsResponse = self
+        let res: anilist::responses::BatchRecommendationsResponse = match self
             .anilist
             .execute(anilist::queries::MEDIA_BATCH_RECOMMENDATIONS_QUERY, vars)
-            .await?;
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                let rows: Vec<RecommendationRow> = self.stale_or(&key, err)?;
+                return Ok(rows.into_iter().filter(|row| !on_list.contains(&row.media.id)).take(limit).collect());
+            }
+        };
 
         // The batch query asks each seed for its id and its edges and nothing
         // else, so the caption has to come from the list entry we already
@@ -947,6 +1062,73 @@ mod tests {
         }
         assert!(entries.iter().any(|e| e.aside.is_none()
             && e.media.title.as_ref().and_then(|t| t.romaji.as_deref()).is_some_and(|t| t.contains("Alicization"))));
+    }
+
+    #[tokio::test]
+    async fn media_by_ids_answers_from_the_cache_without_asking_anilist() {
+        let c = catalogs();
+        for id in [3_i64, 7] {
+            let item = serde_json::json!({ "id": id, "genres": ["Romance"] });
+            c.cache.set(AniListCache::key("media_by_id", &[("id", &id.to_string())]), item, "media_by_id");
+        }
+        // Asked in the opposite order, and one id (9) AniList was never asked
+        // about: a held id costs no request, so with both held the call must
+        // succeed with no network.
+        let got = c.media_by_ids(&[7, 3]).await.expect("both held");
+        assert_eq!(got.iter().map(|m| m.id).collect::<Vec<_>>(), vec![7, 3]);
+        assert_eq!(got[0].genres.as_deref(), Some(&["Romance".to_string()][..]));
+    }
+
+    /// The whole fetch path, not the helper: during a cooldown `media_detail`
+    /// must answer from the last copy at once. Without the check `execute`
+    /// would sleep the cooldown out first, which is up to a minute of spinner.
+    /// The row is two hours old on disk (past `media_detail`'s hour, inside the
+    /// day of grace) so it is stale, which a row set a moment ago never is.
+    #[tokio::test]
+    async fn media_detail_answers_from_an_expired_row_during_a_cooldown() {
+        let key = AniListCache::key("media_detail", &[("id", "42"), ("type", "ANIME")]);
+        let dir = std::env::temp_dir().join(format!("anicat-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("catalog-cache.sqlite");
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE entries (key TEXT PRIMARY KEY, cmd TEXT NOT NULL, value TEXT NOT NULL, stored_at INTEGER NOT NULL);",
+            )
+            .unwrap();
+            let two_hours_ago = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+                - 7200;
+            conn.execute(
+                "INSERT INTO entries (key, cmd, value, stored_at) VALUES (?1, 'media_detail', ?2, ?3)",
+                rusqlite::params![key, r#"{"Media":{"id":42}}"#, two_hours_ago],
+            )
+            .unwrap();
+        }
+        let mut c = catalogs();
+        c.cache = Arc::new(AniListCache::persistent(&path));
+        assert!(c.cache.get(&key).is_none(), "the row must read as expired");
+
+        c.anilist.start_cooldown_for_test(std::time::Duration::from_secs(300));
+        let began = std::time::Instant::now();
+        let got = c.media_detail(42, false).await.expect("served from the expired row");
+        assert_eq!(got.media.map(|m| m.id), Some(42));
+        assert!(began.elapsed() < std::time::Duration::from_secs(2), "slept through the cooldown");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stale_row_is_served_only_while_cooling_down() {
+        let c = catalogs();
+        let key = "media_detail|id=1|type=ANIME";
+        c.cache.set(key.to_string(), serde_json::json!([{ "id": 1 }]), "media_detail");
+        assert!(c.stale_if_cooling::<Vec<anilist::types::MediaItem>>(key).is_none());
+        c.anilist.start_cooldown_for_test(std::time::Duration::from_secs(30));
+        let rows: Vec<anilist::types::MediaItem> = c.stale_if_cooling(key).expect("cooling down");
+        assert_eq!(rows[0].id, 1);
     }
 
     /// These exist to prove the query strings are valid against the real

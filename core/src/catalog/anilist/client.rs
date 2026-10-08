@@ -73,7 +73,14 @@ impl AniListClient {
     /// then sends the request, so a caller with an old copy to show has to ask
     /// first or its user watches a spinner for that minute.
     pub fn cooling_down(&self) -> bool {
-        self.rate_limited_until.lock().unwrap().is_some_and(|until| Instant::now() < until)
+        self.cooldown_remaining().is_some()
+    }
+
+    /// How much of a 429 cooldown is left, if one is running.
+    pub fn cooldown_remaining(&self) -> Option<std::time::Duration> {
+        let until = (*self.rate_limited_until.lock().unwrap())?;
+        let now = Instant::now();
+        (now < until).then(|| until - now)
     }
 
     #[cfg(test)]

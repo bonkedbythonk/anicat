@@ -199,7 +199,7 @@ final class AskChat {
         isThinking = true
         running = Task { [weak self] in
             guard let self else { return }
-            let reply = await self.answer(text, model: model)
+            let reply = await self.answerWithin(seconds: 45, text, model: model)
             guard !Task.isCancelled else { return }
             self.messages.append(reply)
             self.isThinking = false
@@ -223,6 +223,38 @@ final class AskChat {
         isThinking = false
         status = ""
         isOpen = false
+    }
+
+    /// Hands out the one answer a turn gets: the reply, or the time-out.
+    @MainActor private final class Gate {
+        private var used = false
+        func open() -> Bool {
+            if used { return false }
+            used = true
+            return true
+        }
+    }
+
+    /// A reply, or a plain message once `seconds` have passed. One turn makes
+    /// several AniList calls and the engine sleeps a rate-limit cooldown out
+    /// inside each, up to a minute apiece; the model's first call has also taken
+    /// ~18 s. Without a limit a bad minute was a spinner that never ended. The
+    /// slow work is not cancelled (it sits in calls that do not observe
+    /// cancellation); its late answer is dropped.
+    private func answerWithin(seconds: UInt64, _ text: String, model: AppModel) async -> Message {
+        let gate = Gate()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Message, Never>) in
+            Task { @MainActor in
+                let reply = await self.answer(text, model: model)
+                if gate.open() { continuation.resume(returning: reply) }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                if gate.open() {
+                    continuation.resume(returning: Message(role: .assistant, text: "That is taking too long. Try asking again in a moment."))
+                }
+            }
+        }
     }
 
     private func answer(_ text: String, model: AppModel) async -> Message {
@@ -285,6 +317,12 @@ final class AskChat {
     private func converse(_ text: String, model: AppModel, engine: AnicatEngine) async -> Message {
         if let reply = AskSearch.smallTalk(text) {
             return Message(role: .assistant, text: reply, suggestions: ["Surprise me", "Something I've seen already"])
+        }
+        // Every call below would sleep a rate-limit cooldown out one after the
+        // other, so say so now instead of after minutes.
+        let cooldown = Int(engine.anilistCooldownSeconds())
+        if cooldown > 0 {
+            return Message(role: .assistant, text: "AniList is rate limiting right now. Try again in about \(cooldown) seconds.")
         }
         status = "Reading your message"
         let intent = (try? await LanguageModelSession(instructions: "Read an anime viewer's message.")

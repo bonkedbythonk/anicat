@@ -3901,6 +3901,18 @@ impl AnicatEngine {
             .collect())
     }
 
+    /// Seconds left of an AniList 429 cooldown, 0 when none is running. The
+    /// engine sleeps a cooldown out inside every call instead of failing, so a
+    /// caller that makes several calls in a row (the Ask chat) would wait out
+    /// the minute once per call; it asks first and answers at once instead.
+    pub fn anilist_cooldown_seconds(&self) -> i32 {
+        self.catalogs
+            .anilist
+            .cooldown_remaining()
+            .map(|d| d.as_secs_f64().ceil() as i32)
+            .unwrap_or(0)
+    }
+
     /// Up to fifty anime in one request, in the order asked, each with its
     /// genres and the viewer's own list status. Ids AniList has no adult-free
     /// entry for are left out.

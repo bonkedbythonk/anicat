@@ -4775,11 +4775,16 @@ const FUZZY_BELOW: usize = 3;
 const MAX_REWRITE_REQUESTS: usize = 6;
 
 /// The names of the most popular titles of one media type, for correcting a
-/// misspelling against (`fuzzy::closest`). Cached for a week; an index that
-/// could not be finished is used for this search and not kept.
+/// misspelling against (`fuzzy::closest`). Cached for a week; one that could not
+/// be finished is cached for ten minutes.
 async fn title_index(catalogs: &Catalogs, media_type: &str) -> Vec<Vec<String>> {
-    let key = AniListCache::key("title_index", &[("type", media_type)]);
-    let cached = || catalogs.cache.get(&key).and_then(|v| serde_json::from_value(v).ok());
+    let args = [("type", media_type)];
+    let (key, partial_key) = (AniListCache::key("title_index", &args), AniListCache::key("title_index_partial", &args));
+    let cached = || {
+        [&key, &partial_key]
+            .into_iter()
+            .find_map(|k| catalogs.cache.get(k).and_then(|v| serde_json::from_value(v).ok()))
+    };
     if let Some(index) = cached() {
         return index;
     }
@@ -4805,9 +4810,13 @@ async fn title_index(catalogs: &Catalogs, media_type: &str) -> Vec<Vec<String>> 
             }
         }
     }
-    if complete {
-        if let Ok(v) = serde_json::to_value(&index) {
+    // Kept either way: a week when whole, ten minutes when not, so that a rate
+    // limit does not make every following search pay for ten requests again.
+    if let Ok(v) = serde_json::to_value(&index) {
+        if complete {
             catalogs.cache.set(key, v, "title_index");
+        } else {
+            catalogs.cache.set(partial_key, v, "title_index_partial");
         }
     }
     index

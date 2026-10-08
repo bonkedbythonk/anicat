@@ -64,27 +64,31 @@ fn tokens(s: &str) -> Vec<String> {
 /// with one between: "naurto" and "naturo" are one slip of the fingers, not two.
 fn distance(a: &[char], b: &[char]) -> usize {
     let (n, m) = (a.len(), b.len());
-    let mut d = vec![vec![0usize; m + 1]; n + 1];
-    for (i, row) in d.iter_mut().enumerate() {
-        row[0] = i;
+    // One flat table: a table of rows was an allocation per row, and this runs
+    // for every title word against every typed word (75 ms a search, measured).
+    let w = m + 1;
+    let mut d = vec![0usize; (n + 1) * w];
+    for i in 0..=n {
+        d[i * w] = i;
     }
-    for (j, cell) in d[0].iter_mut().enumerate() {
+    for (j, cell) in d.iter_mut().enumerate().take(m + 1) {
         *cell = j;
     }
     for i in 1..=n {
         for j in 1..=m {
             let cost = usize::from(a[i - 1] != b[j - 1]);
-            d[i][j] = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+            let mut best = (d[(i - 1) * w + j] + 1).min(d[i * w + j - 1] + 1).min(d[(i - 1) * w + j - 1] + cost);
             if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                d[i][j] = d[i][j].min(d[i - 2][j - 2] + 1);
+                best = best.min(d[(i - 2) * w + j - 2] + 1);
             }
             // "naturo" for "naruto": two letters traded across the one between.
             if i > 2 && j > 2 && a[i - 1] == b[j - 3] && a[i - 3] == b[j - 1] && a[i - 2] == b[j - 2] {
-                d[i][j] = d[i][j].min(d[i - 3][j - 3] + 1);
+                best = best.min(d[(i - 3) * w + j - 3] + 1);
             }
+            d[i * w + j] = best;
         }
     }
-    d[n][m]
+    d[n * w + m]
 }
 
 fn similarity(a: &[char], b: &[char]) -> f64 {
@@ -109,18 +113,47 @@ fn word_score(typed: &[char], title: &[char]) -> f64 {
 /// 0.0 to 1.0: how close the title is to the query, weighting longer typed
 /// words more so a stray "my" or "the" cannot decide the order.
 fn title_score(query: &[Vec<char>], title: &str) -> f64 {
+    let direct = title_score_words(query, title);
+    if query.len() < 2 {
+        return direct;
+    }
+    // "shin geki": a space typed inside a word. The query closed up is one word
+    // that has to meet the title's own words, or runs of them closed up.
+    let closed: Vec<char> = query.iter().flatten().copied().collect();
+    direct.max(title_score_words(&[closed], title))
+}
+
+fn title_score_words(query: &[Vec<char>], title: &str) -> f64 {
     let words: Vec<Vec<char>> = tokens(title).iter().map(|t| t.chars().collect()).collect();
     if words.is_empty() || query.is_empty() {
         return 0.0;
     }
-    // "steinsgate" for "Steins;Gate": the title with its gaps closed.
-    let joined: Vec<char> = words.iter().flatten().copied().collect();
+    // "steinsgate" for "Steins;Gate", "nokyojin" for "no Kyojin": every run of
+    // neighbouring title words with its gaps closed, with the length of its
+    // first word.
+    let mut runs: Vec<(Vec<char>, usize)> = Vec::new();
+    for from in 0..words.len() {
+        let mut run: Vec<char> = words[from].clone();
+        for next in &words[from + 1..] {
+            run.extend(next);
+            runs.push((run.clone(), words[from].len()));
+        }
+    }
     let (mut sum, mut weight) = (0.0, 0.0);
     for typed in query {
+        // A run only helps a typed word about its own length: skipping the rest
+        // keeps the comparison from costing a distance table per run.
+        let near = |run: &&(Vec<char>, usize)| run.0.len() + 3 >= typed.len() && run.0.len() <= typed.len() * 2;
+        // The start of a run counts as typed only once it reaches past the
+        // run's first word: "greatt" is Great plus a slip, not the start of
+        // "greatteacher" (GTO: Great Teacher Onizuka outscored Great Pretender).
+        let run_score = |(run, first): &(Vec<char>, usize)| {
+            if typed.len() >= first + 2 { word_score(typed, run) } else { similarity(typed, run) }
+        };
         let best = words
             .iter()
-            .chain(std::iter::once(&joined))
             .map(|w| word_score(typed, w))
+            .chain(runs.iter().filter(near).map(run_score))
             .fold(0.0, f64::max);
         sum += best * typed.len() as f64;
         weight += typed.len() as f64;
@@ -486,6 +519,29 @@ mod tests {
     fn a_word_in_the_middle_of_a_title_still_finds_it() {
         let pool = vec![item(1, "Tate no Yuusha no Nariagari", Some("The Rising of the Shield Hero"))];
         assert_eq!(first("shield hreo", pool), Some(1));
+    }
+
+    #[test]
+    fn words_run_together_find_the_title_or_part_of_it() {
+        let pool = vec![item(1, "Shingeki no Kyojin", Some("Attack on Titan")), item(2, "Gate", None)];
+        assert_eq!(first("attackontitan", pool.clone()), Some(1));
+        assert_eq!(first("shingekinokyojin", pool.clone()), Some(1));
+        assert_eq!(first("nokyojin", pool), Some(1));
+    }
+
+    #[test]
+    fn a_stray_space_inside_a_word_still_finds_the_title() {
+        let pool = vec![item(1, "Shingeki no Kyojin", None), item(2, "Shin Seiki Evangelion", None)];
+        assert_eq!(first("shin geki no kyojin", pool.clone()), Some(1));
+        assert_eq!(first("shing eki", pool), Some(1));
+    }
+
+    #[test]
+    fn a_typo_does_not_match_the_start_of_two_title_words_glued_together() {
+        let mut gto = item(1, "GTO: Great Teacher Onizuka", None);
+        gto.popularity = Some(600_000);
+        let pretender = item(2, "Great Pretender", None);
+        assert_eq!(first("greatt", vec![gto, pretender]), Some(2));
     }
 
     #[test]

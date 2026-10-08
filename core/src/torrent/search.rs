@@ -483,6 +483,26 @@ pub(crate) fn leads_with_foreign_title(name: &str, titles: &[String]) -> bool {
     })
 }
 
+/// Does the release's own `SxxEyy` numbering name a season other than the one
+/// this entry is known to be?
+///
+/// `entry_season` is `Some` only when the engine established it: the title
+/// states it, or the entry has no TV prequel and is therefore season 1. It is
+/// the only thing that can tell "[ToonsHub] The Detective Is Already Dead
+/// S02E01 ... (Tantei wa Mou, Shindeiru., Multi-Subs)" -- season 2, with the
+/// title this entry's query names sitting in a parenthesised alias that states
+/// no season, so the title match read it as season 1 -- from "[AnoZu] Bleach
+/// S17E41 ... | Bleach: Thousand-Year Blood War", whose TVDB season number means
+/// nothing for an AniList entry that has a prequel and so has no known season.
+/// Season 0 is the specials numbering, not a season.
+pub(crate) fn names_another_season(name: &str, entry_season: Option<u32>) -> bool {
+    let Some(entry) = entry_season else { return false };
+    normalize(name)
+        .split(' ')
+        .find_map(season_episode)
+        .is_some_and(|(stated, _)| stated > 0 && stated != entry)
+}
+
 /// Is this token a season marker in any of the forms in circulation?
 fn is_season_marker(t: &str) -> bool {
     if t == "season" || t == "seasons" || roman_numeral(t).is_some() {
@@ -3606,6 +3626,20 @@ mod extras_tests {
         assert!(title_matches_with_alts(&normalize("Tenkou-saki no Seiso"), "[G] Tenkousaki no Seiso - 01 [1080p]", &[]));
         assert!(!title_matches_with_alts(&normalize("Monster"), "[G] Monsters - 01 [1080p]", &[]));
         assert!(!title_matches_with_alts(&normalize("Re Monster"), "[G] Remonsterland - 01 [1080p]", &[]));
+    }
+
+    #[test]
+    fn a_release_stating_another_season_than_the_known_one_is_named() {
+        let toons = "[ToonsHub] The Detective Is Already Dead S02E01 1080p CR WEB-DL AAC2.0 H.264 (Tantei wa Mou, Shindeiru., Multi-Subs)";
+        assert!(names_another_season(toons, Some(1)));
+        assert!(!names_another_season(toons, Some(2)));
+        // No known season: TVDB numbering ("S17E41" for Thousand-Year Blood
+        // War, an entry with a prequel) is not evidence of anything.
+        let bleach = "[AnoZu] Bleach S17E41 1080p DSNP WEB-DL AAC 2.0 H.264 | Bleach: Thousand-Year Blood War - The Calamity";
+        assert!(!names_another_season(bleach, None));
+        assert!(!names_another_season("[SubsPlease] Tantei wa Mou, Shindeiru. - 01 (1080p)", Some(1)));
+        assert!(!names_another_season("[SeaDex] YURASUKA", Some(1)));
+        assert!(!names_another_season("[SCY] Show - S00E03-E08 - Specials (BD 1080p)", Some(1)));
     }
 
     #[test]

@@ -2413,6 +2413,13 @@ impl TorrentManager {
             p.attempt += 1;
             p.bytes_per_second = 0;
         });
+        // Before the AniDB check, which answers Unknown for a release it has
+        // not indexed. Every path comes through here -- the remembered release,
+        // the race and its fallbacks -- so a season-2 release that scored as
+        // season 1 cannot be played as episode 1 by any of them.
+        if matches!(ctx.hint.kind, layout::EntryKind::Tv) && search::names_another_season(&cand.name, ctx.hint.season) {
+            return Err(format!("release states another season than season {}", ctx.hint.season.unwrap_or(0)));
+        }
         if let Some(franchise) = ctx.franchise {
             self.verify_candidate(client, cand, franchise).await?;
         }

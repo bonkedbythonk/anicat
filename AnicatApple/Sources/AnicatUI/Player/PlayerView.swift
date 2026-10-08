@@ -1461,6 +1461,23 @@ public struct PlayerView: View {
                 Text("Episode \(controller.episodeNumber) · \(controller.formattedCurrentTime) / \(controller.formattedDuration)")
                     .sumiTabularMono(size: 11)
                     .foregroundColor(SumiTheme.muted)
+                // The release being watched, at the top where it is seen
+                // without scrolling: a wrong-season release plays as a
+                // normal episode and the only tell is its name. A pick made
+                // by hand wins over the remembered winner. Not while the file
+                // is still resolving: the registry then holds the previous
+                // play's release, and a 44s resolve showed that stale name
+                // as if it were the one coming.
+                if !controller.awaitingNewFile,
+                   let stream = controller.currentReleaseName ?? controller.rememberedReleaseName {
+                    Text(stream)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(SumiTheme.muted)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                        .textSelection(.enabled)
+                }
             }
 
             Rectangle().fill(SumiTheme.border).frame(height: 1)

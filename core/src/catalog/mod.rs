@@ -9,6 +9,7 @@ pub mod anizip;
 pub mod cache;
 pub mod cinema;
 pub mod franchise;
+pub mod fuzzy;
 pub mod jikan;
 pub mod recommend;
 pub mod tmdb;

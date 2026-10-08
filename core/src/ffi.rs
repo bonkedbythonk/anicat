@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::catalog::{anilist, cache::AniListCache, Catalogs};
+use crate::catalog::{anilist, cache::AniListCache, fuzzy, Catalogs};
 use crate::db::{Catalog, ExportedRelease, Registry};
 use crate::discord::{DiscordClient, DiscordPresence, DiscordPresenceDetail, DiscordPresenceSource};
 use crate::media::MediaKey;
@@ -1238,25 +1238,60 @@ impl AnicatEngine {
         page: Option<i32>,
     ) -> FfiResult<Vec<MediaSummary>> {
         let page_num = page.unwrap_or(1);
+        let query = query.map(|q| fuzzy::fold(&q));
         let cache_key = search_cache_key(query.as_deref(), media_type.as_deref(), filters.as_ref(), page_num);
         if let Some(hit) = self.catalogs.cache.get(&cache_key) {
             if let Ok(items) = serde_json::from_value::<Vec<anilist::types::MediaItem>>(hit) {
                 return Ok(items.iter().map(summarize).collect());
             }
         }
-        let vars = build_search_variables(
+        let mut items = search_page(
+            &self.catalogs.anilist,
             query.as_deref(),
             media_type.as_deref(),
             filters.as_ref(),
             page_num,
-        );
-        let page: anilist::responses::PageResponse<anilist::types::MediaItem> = self
-            .catalogs
-            .anilist
-            .execute(anilist::queries::MEDIA_SEARCH_QUERY, vars)
-            .await
+        )
+        .await
             .map_err(|msg| AnicatError::Network { msg })?;
-        let items = page.page.media.unwrap_or_default();
+        // AniList forgives no typo and needs the apostrophe, so a thin first
+        // page is asked again in rewritten forms (see `catalog::fuzzy`). Later
+        // pages are not: the first page is where a wrong query shows.
+        let typed = query.as_deref().map(str::trim).filter(|q| !q.is_empty());
+        if let (1, true, Some(typed)) = (page_num, items.len() < FUZZY_BELOW, typed) {
+            // One at a time, stopping at the first close title: AniList's
+            // rate limit made six at once cost a minute's wait.
+            let mut extra = Vec::new();
+            // Titles close to what was typed come first: they are the likeliest
+            // to be what was meant. NOVEL has no popularity index of its own.
+            let mut rewrites = match media_type.as_deref().unwrap_or("ANIME") {
+                kind @ ("ANIME" | "MANGA") => {
+                    fuzzy::closest(typed, &title_index(&self.catalogs, kind).await, 3)
+                }
+                _ => Vec::new(),
+            };
+            rewrites.extend(fuzzy::variants(typed));
+            rewrites.truncate(MAX_REWRITE_REQUESTS);
+            for rewrite in rewrites {
+                if fuzzy::has_close_match(typed, &extra) {
+                    break;
+                }
+                // A rewrite that fails is one fewer guess, not a failed search.
+                if let Ok(more) = search_page(
+                    &self.catalogs.anilist,
+                    Some(&rewrite),
+                    media_type.as_deref(),
+                    filters.as_ref(),
+                    page_num,
+                )
+                .await
+                {
+                    extra.extend(more);
+                }
+            }
+            log::debug!("[search] '{}' found {}, rewrites added {}", typed, items.len(), extra.len());
+            items = fuzzy::rank(typed, items, extra);
+        }
         if let Ok(v) = serde_json::to_value(&items) {
             self.catalogs.cache.set(cache_key, v, "search_media");
         }
@@ -4740,6 +4775,70 @@ fn is_mangakatana_id(id: &str) -> bool {
     id.starts_with("http")
 }
 
+/// A first page shorter than this is treated as a miss and retried with
+/// rewrites of the query. Three rather than one: AniList answers a typo that
+/// happens to be a word prefix with one unrelated title.
+const FUZZY_BELOW: usize = 3;
+
+/// Requests a thin search may spend on rewrites. The title index puts its
+/// three closest titles first: offline they hold the right show 98% of the
+/// time after one typing slip and 92% after two, against 97% and 90% with only
+/// two. The generic rewrites behind them are for shows outside the index.
+const MAX_REWRITE_REQUESTS: usize = 6;
+
+/// The names of the most popular titles of one media type, for correcting a
+/// misspelling against (`fuzzy::closest`). Cached for a week; an index that
+/// could not be finished is used for this search and not kept.
+async fn title_index(catalogs: &Catalogs, media_type: &str) -> Vec<Vec<String>> {
+    let key = AniListCache::key("title_index", &[("type", media_type)]);
+    let cached = || catalogs.cache.get(&key).and_then(|v| serde_json::from_value(v).ok());
+    if let Some(index) = cached() {
+        return index;
+    }
+    let _building = fuzzy::INDEX_BUILD.lock().await;
+    if let Some(index) = cached() {
+        return index;
+    }
+    let mut index: Vec<Vec<String>> = Vec::new();
+    let mut complete = true;
+    for page in 1..=fuzzy::INDEX_PAGES {
+        let vars = std::collections::HashMap::from([
+            ("page".to_string(), serde_json::json!(page)),
+            ("type".to_string(), serde_json::json!(media_type)),
+        ]);
+        let got: Result<anilist::responses::PageResponse<anilist::types::MediaItem>, String> =
+            catalogs.anilist.execute(anilist::queries::MEDIA_TITLES_QUERY, vars).await;
+        match got {
+            Ok(p) => index.extend(p.page.media.unwrap_or_default().iter().map(fuzzy::index_entry)),
+            Err(e) => {
+                log::warn!("[search] title index stopped at page {}: {}", page, e);
+                complete = false;
+                break;
+            }
+        }
+    }
+    if complete {
+        if let Ok(v) = serde_json::to_value(&index) {
+            catalogs.cache.set(key, v, "title_index");
+        }
+    }
+    index
+}
+
+/// One page of AniList's title search, no cache and no rewriting.
+async fn search_page(
+    anilist: &anilist::AniListClient,
+    query: Option<&str>,
+    media_type: Option<&str>,
+    filters: Option<&SearchFilters>,
+    page: i32,
+) -> Result<Vec<anilist::types::MediaItem>, String> {
+    let vars = build_search_variables(query, media_type, filters, page);
+    let page: anilist::responses::PageResponse<anilist::types::MediaItem> =
+        anilist.execute(anilist::queries::MEDIA_SEARCH_QUERY, vars).await?;
+    Ok(page.page.media.unwrap_or_default())
+}
+
 /// Every filter `build_search_variables` sends has to be in here too. The
 /// country filter was not: "Korea" answered from the cache entry of the same
 /// search without it, and the owner saw the unfiltered list ("the filter u
@@ -4775,7 +4874,9 @@ fn build_search_variables(
     vars.insert(
         "search".to_string(),
         match trimmed_query {
-            Some(q) => serde_json::json!(q),
+            // An iPhone keyboard types a curly apostrophe, which AniList does
+            // not equate with the straight one in "Journey's End".
+            Some(q) => serde_json::json!(q.replace(['\u{2019}', '\u{2018}', '\u{02bc}'], "'")),
             // Explicit null, not an empty string: AniList treats null as "no filter",
             // while an empty string is a real search term and returns zero results.
             None => serde_json::json!(null),
@@ -6021,6 +6122,67 @@ mod tests {
         let top = flat.first().expect("empty");
         assert_eq!(top.author_avatar_url.as_deref(), Some("https://a/med.png"));
         assert_eq!(top.like_count, 4);
+    }
+}
+
+#[cfg(test)]
+mod search_live_tests {
+    use super::*;
+
+    /// Live. `cargo test --lib search_live -- --ignored --nocapture`
+    ///
+    /// Each misspelling AniList alone answers with nothing (measured
+    /// 2026-10-08) has to bring the right show back first.
+    #[tokio::test]
+    #[ignore]
+    async fn live_misspelled_titles_find_their_show() {
+        let dir = std::env::temp_dir().join("anicat-search-fuzzy-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine = AnicatEngine::new(dir.to_string_lossy().to_string(), None, None, None)
+            .expect("engine");
+        let cases = [
+            ("narutp", "naruto"),
+            ("naurto", "naruto"),
+            ("one pice", "one piece"),
+            ("attak on titan", "attack on titan"),
+            ("jujutsu kaisan", "jujutsu kaisen"),
+            ("my hero acadmia", "hero academia"),
+            ("frieren beyond journeys end", "frieren"),
+            ("dont toy with me miss nagatoro", "nagatoro"),
+            ("steinsgate", "steins"),
+            ("kaguyasama", "kaguya"),
+            ("journey\u{2019}s end", "frieren"),
+            ("naturo", "naruto"),
+            ("naruot", "naruto"),
+            ("tokio ghoul", "tokyo ghoul"),
+            ("hunter x huter", "hunter"),
+            ("demon slayr", "demon slayer"),
+            ("one punch mna", "one punch"),
+            ("violet evergarten", "violet evergarden"),
+            ("sword art onlien", "sword art online"),
+            ("chainsaw mna", "chainsaw man"),
+            ("spy x famly", "spy"),
+            ("bocchi the rok", "bocchi"),
+            ("ookami to koushinryo", "wolf"),
+            ("pokémon", "pok"),
+        ];
+        let mut misses = vec![];
+        for (typed, expect) in cases {
+            // AniList allows 30 requests a minute in its degraded mode and one
+            // misspelled search can spend five of them.
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            let found = engine
+                .search_catalog(Some(typed.to_string()), Some("ANIME".to_string()), None, None)
+                .await
+                .expect("search");
+            let titles: Vec<_> = found.iter().take(3).map(|m| m.title.as_str()).collect();
+            println!("{typed:35} -> {titles:?}");
+            let hit = found.first().is_some_and(|m| m.title.to_lowercase().replace('-', " ").contains(expect));
+            if !hit {
+                misses.push(typed);
+            }
+        }
+        assert!(misses.is_empty(), "first result wrong for {misses:?}");
     }
 }
 

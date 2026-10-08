@@ -229,6 +229,9 @@ impl AniListCache {
             // unique queries while typing, which no cache helps (debounce
             // does). This mainly spares repeats/back-navigation.
             "search_media" => Duration::from_secs(10 * 60),
+            // The popularity ranking of the 500 biggest titles moves slowly,
+            // and rebuilding it costs ten requests.
+            "title_index" => Duration::from_secs(7 * 24 * 3600),
             // TMDB's own lists turn over slowly (trending is weekly, popular
             // barely moves day to day), and a detail record is near-static.
             "tmdb_row" => Duration::from_secs(6 * 3600),

@@ -105,6 +105,19 @@ query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $genre: [St
 }
 "#;
 
+/// Names only, for the typo-correction index in `catalog::fuzzy`.
+pub const MEDIA_TITLES_QUERY: &str = r#"
+query ($page: Int, $type: MediaType) {
+  Page(page: $page, perPage: 50) {
+    media(sort: [POPULARITY_DESC], type: $type, isAdult: false) {
+      id
+      title { romaji english }
+      synonyms
+    }
+  }
+}
+"#;
+
 pub const MEDIA_TRENDING_QUERY: &str = r#"
 query ($page: Int, $perPage: Int, $type: MediaType, $isAdult: Boolean) {
   Page(page: $page, perPage: $perPage) {

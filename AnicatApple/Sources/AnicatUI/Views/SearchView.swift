@@ -98,6 +98,18 @@ public struct SearchView: View {
         self.isCovered = isCovered
     }
 
+    /// Titles to complete the query with, from the results already on screen
+    /// (the engine corrects a misspelling before they arrive). Gone once the
+    /// field holds one of them exactly, so picking one closes the list.
+    private var suggestions: [String] {
+        let typed = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !typed.isEmpty else { return [] }
+        let titles = results.map(\.title)
+        guard !titles.contains(where: { $0.lowercased() == typed }) else { return [] }
+        var seen = Set<String>()
+        return titles.filter { seen.insert($0.lowercased()).inserted }.prefix(5).map { $0 }
+    }
+
     private var searchPlaceholder: String {
         switch searchType {
         case "MANGA": return "Search manga, authors, genres…"
@@ -357,6 +369,31 @@ public struct SearchView: View {
                         RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
+
+                    if searchFocused, !suggestions.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(suggestions, id: \.self) { title in
+                                Button {
+                                    searchText = title
+                                } label: {
+                                    Text(title)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(SumiTheme.foreground)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.sumiPressable)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                    }
 
                     // Filter row. Always visible rather than behind a
                     // disclosure toggle — a hidden panel is easy to forget is

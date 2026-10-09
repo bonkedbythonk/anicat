@@ -18,43 +18,70 @@ struct ResolvingStreamCard: View {
     let onCancel: () -> Void
 
     var body: some View {
-        // A line across the top of the window, the same shape as the error
-        // line: it shows on every play press, if only for a moment, and a
-        // card floating in the corner with a drop shadow read as a web toast.
-        HStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(SumiTheme.indigo)
+        // A 2pt moving line across the top of the window with the status
+        // tucked under its trailing end. The first version was a full-width
+        // opaque strip with a border and a spinner: it shows on every play
+        // press, if only for a moment, and read as a heavy bar for that.
+        // The text keeps a backing of the window colour, since bare text
+        // over a poster grid is unreadable.
+        VStack(spacing: 0) {
+            SweepLine()
 
-            Text(status ?? "Finding a stream…")
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundColor(SumiTheme.foreground)
-                .lineLimit(1)
-                .contentTransition(.opacity)
-                .animation(.smooth, value: status)
-
-            TimelineView(.periodic(from: startedAt, by: 1)) { context in
-                let elapsed = max(0, Int(context.date.timeIntervalSince(startedAt)))
-                Text("\(elapsed)s")
-                    .sumiTabularMono(size: 11.5)
+            HStack(spacing: 10) {
+                Text(status ?? "Finding a stream…")
+                    .font(.system(size: 12))
                     .foregroundColor(SumiTheme.muted)
-            }
+                    .lineLimit(1)
+                    .contentTransition(.opacity)
+                    .animation(.smooth, value: status)
 
-            Spacer()
+                TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                    let elapsed = max(0, Int(context.date.timeIntervalSince(startedAt)))
+                    Text("\(elapsed)s")
+                        .sumiTabularMono(size: 11.5)
+                        .foregroundColor(SumiTheme.muted)
+                }
 
-            Button(action: onCancel) {
-                Text("Cancel")
-                    .font(.system(size: 12.5))
-                    .foregroundColor(SumiTheme.muted)
-                    .contentShape(Rectangle())
+                Button(action: onCancel) {
+                    Text("Cancel")
+                        .font(.system(size: 12))
+                        .foregroundColor(SumiTheme.foreground)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
             }
-            .buttonStyle(.sumiPressable)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(SumiTheme.background.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.top, 6)
+            .padding(.horizontal, 14)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 9)
-        .background(SumiTheme.background)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(SumiTheme.border).frame(height: 1)
+    }
+}
+
+/// Indeterminate: the resolve is one opaque FFI call with no fraction to
+/// show, so a bar that fills to the right would promise progress it cannot
+/// measure.
+private struct SweepLine: View {
+    @State private var sweeping = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let bar = geo.size.width * 0.3
+            Rectangle()
+                .fill(SumiTheme.indigo)
+                .frame(width: bar)
+                .offset(x: sweeping ? geo.size.width : -bar)
+        }
+        .frame(height: 2)
+        .background(SumiTheme.border)
+        .clipped()
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: false)) {
+                sweeping = true
+            }
         }
     }
 }

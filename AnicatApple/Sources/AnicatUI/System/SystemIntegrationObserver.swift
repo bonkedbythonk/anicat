@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// A zero-sized view whose only job is to watch three model properties and
 /// drive the system integrations off them.
@@ -49,6 +52,7 @@ public struct SystemIntegrationObserver: View {
                 if phase == .active, let node = BonjourDiscovery.shared.discoveredMacNode {
                     RemoteClient.shared.ensureConnected(to: node)
                 }
+                if phase == .active { model.refreshListsOnForeground() }
                 guard phase == .background else { return }
                 RemoteClient.shared.disconnect()
                 // Not while a download is in flight: the purge evicts every
@@ -80,6 +84,11 @@ public struct SystemIntegrationObserver: View {
                 RemoteClient.shared.syncQuietly(with: node)
             }
             #endif
+            #if os(macOS)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                model.refreshListsOnForeground()
+            }
+            #endif
             .task {
                 reachability.start {
                     // Quietly: this fires while the viewer is looking at
@@ -90,9 +99,6 @@ public struct SystemIntegrationObserver: View {
             }
             .onChange(of: model.systemIntegrationSignature, initial: true) { _, _ in
                 model.refreshSystemIntegrations()
-            }
-            .onChange(of: model.downloadSignature, initial: true) { _, _ in
-                model.handleDownloadsChanged()
             }
             .onChange(of: model.currentNavSection) { _, _ in
                 model.updateDockBadge()

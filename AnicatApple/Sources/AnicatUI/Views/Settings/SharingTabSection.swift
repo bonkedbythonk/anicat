@@ -1,15 +1,9 @@
 import SwiftUI
 
 /// Everything Anicat tells something outside itself.
-///
-/// New-episode alerts sat in General and Discord presence on the end of the
-/// playback list, two tabs apart, though they answer the same question.
 struct SharingTabSection: View {
-    // `SystemNotifications` owns the reader and the default; `@AppStorage`
-    // needs a literal here, so the two spellings and the two defaults must
-    // agree.
-    @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
-    // Same literal-key constraint. `AppModel` owns the reader and default.
+    // `@AppStorage` needs a literal key, so the spelling and the default
+    // must agree with `AppModel`, which owns the reader.
     @AppStorage("anicat_discord_presence") private var discordPresence: Bool = false
     // Same literal-key constraint; `AppModel.isLanSharingEnabled` reads it
     // and its defaults observer starts or stops the Bonjour listener.
@@ -23,15 +17,6 @@ struct SharingTabSection: View {
 
     var body: some View {
     VStack(alignment: .leading, spacing: 28) {
-        SettingsCard(title: "Notifications") {
-            SettingField(
-                label: "New episode alerts",
-                description: "A local notification when an episode of something you are watching airs, and, if you watch dubbed, when its English dub is out. Each episode is announced once, whether or not the app was running when it aired."
-            ) {
-                SumiSwitch(isOn: $notifyNewEpisodes)
-            }
-        }
-
         SettingsCard(title: "Presence") {
             SettingField(
                 label: "Discord presence",

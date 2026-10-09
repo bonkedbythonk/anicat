@@ -421,7 +421,7 @@ struct PhoneDetailView: View {
     /// Sends the episode to a Mac on the same Wi-Fi instead of playing it
     /// here. As an `anicat://` address rather than a play command of its
     /// own, so the Mac reaches the episode through `handleDeepLink` -- the
-    /// same single entry point a notification tap and the URL scheme use.
+    /// same single entry point the URL scheme uses.
     ///
     /// Absent, not disabled, when no Mac is advertising: a menu item that
     /// explains itself only after being pressed is worse than one that is

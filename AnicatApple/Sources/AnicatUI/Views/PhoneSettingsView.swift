@@ -42,8 +42,6 @@ struct PhoneSettingsView: View {
     // `AppModel.isStreamFromMacEnabled` owns the reader and the default.
     @AppStorage("anicat_stream_from_mac") private var streamFromMac: Bool = false
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
-    // `SystemNotifications` owns the reader and the default (on).
-    @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
     // `AppModel.isLnoriEnabled` owns the reader and the default (off).
     @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
     @AppStorage(FeedbackDefaults.hapticsKey) private var haptics: Bool = true
@@ -74,7 +72,6 @@ struct PhoneSettingsView: View {
             appearance
             feedback
             storage
-            notifications
             cinema
             novels
             logs
@@ -301,8 +298,6 @@ struct PhoneSettingsView: View {
         }
     }
 
-    // MARK: Notifications
-
     /// Cinema needs a TMDB credential the anime side does not. A build can
     /// ship a proxy in its Info.plist; this is the other route, and the only
     /// one a sideloaded build can take without being rebuilt.
@@ -403,13 +398,6 @@ struct PhoneSettingsView: View {
         formatter.countStyle = .file
         formatter.allowedUnits = [.useMB, .useGB]
         return formatter.string(fromByteCount: Int64(bytes))
-    }
-
-    @ViewBuilder
-    private var notifications: some View {
-        Section("Notifications") {
-            Toggle("New episodes", isOn: $notifyNewEpisodes)
-        }
     }
 
     /// The haptics switch was Mac-only, which is backwards: the Mac has a

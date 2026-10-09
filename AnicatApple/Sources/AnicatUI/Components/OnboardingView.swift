@@ -9,7 +9,7 @@ import AppKit
 /// with no hint that Settings, then Account, then a browser round trip and
 /// a pasted URL was the way in. That screen then became one page carrying
 /// the whole AniList handshake and nothing else, so every other preference
-/// -- dub or sub, skipping intros, notifications, presence -- was still
+/// -- dub or sub, skipping intros, presence -- was still
 /// something you had to know to go looking for.
 ///
 /// Each step previews what it is asking about, live and from the same
@@ -36,7 +36,6 @@ public struct OnboardingView: View {
     @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_ambient_glow") private var ambientGlow: Bool = true
-    @AppStorage("anicat_notify_new_episodes") private var notifyNewEpisodes: Bool = true
     @AppStorage("anicat_discord_presence") private var discordPresence: Bool = false
 
     public init(model: AppModel) {
@@ -65,12 +64,7 @@ public struct OnboardingView: View {
             case .mode: return "Where to start"
             case .watching: return "How you watch"
             case .picture: return "Picture"
-            case .alerts:
-                #if os(macOS)
-                return "Alerts and presence"
-                #else
-                return "Alerts"
-                #endif
+            case .alerts: return "Presence"
             case .look: return "Look"
             }
         }
@@ -91,12 +85,7 @@ public struct OnboardingView: View {
                 return "Defaults for every episode. Changeable per title later."
             case .picture:
                 return "Both cost GPU time and both can be turned off at any point."
-            case .alerts:
-                #if os(macOS)
-                return "Anicat tells you when something airs, and can show what you are watching."
-                #else
-                return "Anicat tells you when something on your list airs."
-                #endif
+            case .alerts: return "Anicat can show what you are watching."
             case .look:
                 return "Applies immediately. There are more in Settings."
             }
@@ -120,6 +109,14 @@ public struct OnboardingView: View {
             case .picture:
                 // Anime4K never runs on iOS and the glow is Mac-only, so
                 // the step would be two switches that change nothing.
+                #if os(iOS)
+                return false
+                #else
+                return true
+                #endif
+            case .alerts:
+                // Discord presence is the step's only control and the phone
+                // has no Discord socket.
                 #if os(iOS)
                 return false
                 #else
@@ -544,7 +541,6 @@ public struct OnboardingView: View {
     @ViewBuilder
     private var alertsStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            toggleRow("New episode alerts", "A notification when something on your watching list airs. Announced once.", $notifyNewEpisodes)
             // Discord's IPC is a unix socket; the iOS sandbox has no such
             // thing, so the phone neither offers the switch nor draws the
             // mock of what it would show.
@@ -554,22 +550,17 @@ public struct OnboardingView: View {
 
             preview {
                 VStack(spacing: 8) {
-                    if notifyNewEpisodes {
-                        MockNotification()
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
                     if showsPresence {
                         MockPresence()
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
-                    if !notifyNewEpisodes, !showsPresence {
-                        Text("Nothing is announced and nothing is shared.")
+                    if !showsPresence {
+                        Text("Nothing is shared.")
                             .font(.system(size: 11))
                             .foregroundColor(SumiTheme.muted)
                             .frame(maxWidth: .infinity, minHeight: 60)
                     }
                 }
-                .animation(.smooth(duration: 0.25), value: notifyNewEpisodes)
                 .animation(.smooth(duration: 0.25), value: discordPresence)
             }
         }
@@ -825,34 +816,6 @@ private struct MockArt: View {
         .blur(radius: sharp ? 0 : 1.6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
-    }
-}
-
-private struct MockNotification: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(SumiTheme.indigo.opacity(0.35))
-                .frame(width: 34, height: 34)
-                .overlay(Image(systemName: "bell.fill").font(.system(size: 13)).foregroundColor(SumiTheme.indigo))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("An Archdemon's Dilemma")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(SumiTheme.foreground)
-                    .lineLimit(1)
-                Text("Episode 11 is out.")
-                    .font(.system(size: 11))
-                    .foregroundColor(SumiTheme.muted)
-            }
-            Spacer(minLength: 8)
-            Text("now")
-                .sumiTabularMono(size: 10)
-                .foregroundColor(SumiTheme.muted.opacity(0.8))
-        }
-        .padding(10)
-        .background(SumiTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
     }
 }
 

@@ -819,6 +819,7 @@ public final class PlayerController {
     var isPointerOverBottomBar: Bool = false
     var isPointerOverChrome: Bool { isPointerOverTopBar || isPointerOverBottomBar }
     private var autohideTask: Task<Void, Never>?
+    private var menuHoldTask: Task<Void, Never>?
 
     public init(title: String = "", episodeNumber: Int = 1) {
         self.title = title
@@ -1351,6 +1352,23 @@ public final class PlayerController {
         #if os(macOS)
         NSCursor.setHiddenUntilMouseMoves(false)
         #endif
+    }
+
+    /// The phone's overflow `Menu` reports neither opening nor closing, so
+    /// the autohide cannot be held for exactly as long as it is up. Held for
+    /// a fixed window from the tap instead: without it the controls went at
+    /// 5s and took the open menu with them (measured: menu opened 3s after
+    /// the controls appeared, gone with the auto-hide at 5s), before the
+    /// second half of its rows could be scrolled to.
+    public func holdControlsForMenu() {
+        isMenuOpen = true
+        menuHoldTask?.cancel()
+        menuHoldTask = Task {
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard !Task.isCancelled else { return }
+            isMenuOpen = false
+            showControlsBriefly()
+        }
     }
 
     public var progressFraction: Double {

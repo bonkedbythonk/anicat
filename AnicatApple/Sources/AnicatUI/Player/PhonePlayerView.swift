@@ -578,7 +578,23 @@ struct PhonePlayerView: View {
                 .frame(width: 36, height: 36)
                 .background(.black.opacity(0.35), in: Circle())
         }
+        // A tap gesture on a `Menu` never fires (the menu's own recogniser
+        // takes the touch), so the press is read off the button style.
+        .menuStyle(.button)
+        .buttonStyle(MenuPressStyle { controller.holdControlsForMenu() })
+    }
 
+    /// Reports the touch-down on a `Menu`'s label without changing how it
+    /// draws.
+    private struct MenuPressStyle: ButtonStyle {
+        let onPress: () -> Void
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .onChange(of: configuration.isPressed) { _, pressed in
+                    if pressed { onPress() }
+                }
+        }
     }
 
     /// Which release is being streamed. The engine races candidates and
@@ -828,8 +844,8 @@ struct PhonePlayerView: View {
     @ViewBuilder
     private var transport: some View {
         HStack(spacing: 46) {
-            Button { seek(by: -10) } label: {
-                Image(systemName: "gobackward.10")
+            Button { seek(by: -5) } label: {
+                Image(systemName: "gobackward.5")
                     .font(.system(size: 30, weight: .regular))
             }
             Button {
@@ -840,56 +856,69 @@ struct PhonePlayerView: View {
                     .font(.system(size: 40, weight: .regular))
                     .frame(width: 54, height: 54)
             }
-            Button { seek(by: 10) } label: {
-                Image(systemName: "goforward.10")
+            Button { seek(by: 5) } label: {
+                Image(systemName: "goforward.5")
                     .font(.system(size: 30, weight: .regular))
             }
         }
         .foregroundStyle(.white)
     }
 
-    @ViewBuilder
     private var bottomBar: some View {
-        HStack(spacing: 12) {
-            Text(Self.timestamp(scrubTarget ?? controller.currentTime))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
-                .frame(width: 46, alignment: .leading)
+        PhoneBottomBar(controller: controller, scrubTarget: $scrubTarget)
+    }
 
-            if controller.playbackRate != 1.0 {
-                Text(Self.speedLabel(controller.playbackRate))
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(.white.opacity(0.22), in: Capsule())
-            }
+    /// Its own view so the playhead's 4 Hz tick re-evaluates this bar and
+    /// not `PhonePlayerView.body`. Read there, every tick rebuilt the
+    /// overflow `Menu` too (measured: `tracksMenu` built 4 times a second
+    /// while the controls were up), and a menu rebuilt under the thumb
+    /// glitches while it is scrolled.
+    private struct PhoneBottomBar: View {
+        @Bindable var controller: PlayerController
+        @Binding var scrubTarget: Double?
 
-            Scrubber(
-                value: scrubTarget ?? controller.currentTime,
-                duration: max(controller.duration, 0.001),
-                buffered: controller.bufferedRanges,
-                marks: controller.chapters.map(\.time),
-                onScrub: { value in
-                    scrubTarget = value
-                    controller.isScrubbing = true
-                    controller.cancelAutohide()
-                },
-                onCommit: { value in
-                    controller.seek(to: value)
-                    scrubTarget = nil
-                    controller.isScrubbing = false
-                    controller.showControlsBriefly()
+        var body: some View {
+            HStack(spacing: 12) {
+                Text(PhonePlayerView.timestamp(scrubTarget ?? controller.currentTime))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 46, alignment: .leading)
+
+                if controller.playbackRate != 1.0 {
+                    Text(PhonePlayerView.speedLabel(controller.playbackRate))
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.white.opacity(0.22), in: Capsule())
                 }
-            )
-            .frame(height: 28)
 
-            // Remaining, not total: the system player shows what is left and
-            // that is the number people are actually reading.
-            Text("-" + Self.timestamp(max(0, controller.duration - (scrubTarget ?? controller.currentTime))))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
-                .frame(width: 50, alignment: .trailing)
+                Scrubber(
+                    value: scrubTarget ?? controller.currentTime,
+                    duration: max(controller.duration, 0.001),
+                    buffered: controller.bufferedRanges,
+                    marks: controller.chapters.map(\.time),
+                    onScrub: { value in
+                        scrubTarget = value
+                        controller.isScrubbing = true
+                        controller.cancelAutohide()
+                    },
+                    onCommit: { value in
+                        controller.seek(to: value)
+                        scrubTarget = nil
+                        controller.isScrubbing = false
+                        controller.showControlsBriefly()
+                    }
+                )
+                .frame(height: 28)
+
+                // Remaining, not total: the system player shows what is left and
+                // that is the number people are actually reading.
+                Text("-" + PhonePlayerView.timestamp(max(0, controller.duration - (scrubTarget ?? controller.currentTime))))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 50, alignment: .trailing)
+            }
         }
     }
 
@@ -1062,11 +1091,11 @@ struct PhonePlayerView: View {
                                 if !controller.areControlsVisible {
                                     withAnimation(.easeOut(duration: 0.2)) {
                                         switch transportButton(at: drag.location, in: geo.size) {
-                                        case .rewind?: seek(by: -10)
+                                        case .rewind?: seek(by: -5)
                                         case .playPause?:
                                             controller.togglePlayPause()
                                             controller.showControlsBriefly()
-                                        case .forward?: seek(by: 10)
+                                        case .forward?: seek(by: 5)
                                         case nil: toggleControls()
                                         }
                                     }
@@ -1113,9 +1142,9 @@ struct PhonePlayerView: View {
     /// and the chrome's scrim (controls up).
     private func skipTap(trailing: Bool) {
         tapTask?.cancel()
-        seek(by: trailing ? 10 : -10)
+        seek(by: trailing ? 5 : -5)
         withAnimation(.easeOut(duration: 0.12)) {
-            flash = (trailing ? "goforward.10" : "gobackward.10", trailing)
+            flash = (trailing ? "goforward.5" : "gobackward.5", trailing)
         }
         Task {
             try? await Task.sleep(for: .milliseconds(450))

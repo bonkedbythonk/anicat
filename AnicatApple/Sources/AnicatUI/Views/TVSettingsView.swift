@@ -13,8 +13,7 @@ import SwiftUI
 /// Every other row is a key something on the TV actually reads. Absent on
 /// purpose: GPU upscaling (the shader chain never runs off a Mac), the
 /// keyboard dimmer, Discord presence, the cellular warning, streaming from
-/// a Mac (a phone feature), and notifications (a TV notification is a
-/// badge and nothing else).
+/// a Mac (a phone feature).
 struct TVSettingsView: View {
     @Bindable var model: AppModel
 

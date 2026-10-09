@@ -201,9 +201,7 @@ extension AppModel {
         persistHomeCache()
         // After the shelves, and detached: it is a handful of requests to the
         // manga sources and nothing on screen waits for it.
-        Task { await checkForNewChapters() }
         Task { await predownloadReadingChapters() }
-        scheduleDubChecks()
     }
 
     /// Re-reads the viewer's lists after a list mutation (status, score,
@@ -221,6 +219,21 @@ extension AppModel {
             await self.loadReadingShelves()
             self.persistHomeCache()
         }
+    }
+
+    /// Re-reads the lists when the app comes back to the front, so an
+    /// episode finished on another device shows up. Nothing else brought it
+    /// in: the engine holds a list for 15 minutes across relaunches, and a
+    /// running Mac never asked again (Up Next still on the episode the phone
+    /// had already finished). Throttled, because every switch to the app
+    /// would otherwise cost a round of AniList requests.
+    @MainActor
+    func refreshListsOnForeground() {
+        guard isSignedIn, let engine,
+              Date().timeIntervalSince(lastForegroundListRefresh) > 120 else { return }
+        lastForegroundListRefresh = Date()
+        engine.invalidateUserLists()
+        refreshListsAfterEdit()
     }
 
     /// AniList's own season/year pair for "now" — the convention the

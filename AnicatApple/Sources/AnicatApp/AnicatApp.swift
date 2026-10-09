@@ -255,11 +255,8 @@ struct AnicatApp: App {
         _ = ResponsiveScrollingPatch.applyOnce
         // Built here rather than as a property initializer so the instance
         // can be published before any scene exists: an App Intent is
-        // constructed by the Shortcuts runtime and the notification delegate
-        // by the system, and neither has a view to be handed the model
-        // through. `registerAsShared` also installs the notification
-        // delegate, which has to be in place before the first notification
-        // is *delivered*, not before the first one is scheduled.
+        // constructed by the Shortcuts runtime, which has no view to be
+        // handed the model through.
         let model = AppModel()
         _model = State(initialValue: model)
         model.registerAsShared()
@@ -286,9 +283,9 @@ struct AnicatApp: App {
                 .environment(\.studioPageActions, model.studioPageActions)
                 .task {
                     await model.initialize()
-                    // A notification tap that launched the app got here
-                    // before there was an engine to route it with; this is
-                    // where it finally runs.
+                    // A link that launched the app got here before there
+                    // was an engine to route it with; this is where it
+                    // finally runs.
                     model.drainPendingDeepLink()
                     if let path = DebugHooks.env("ANICAT_DEBUG_PLAY_FILE") {
                         model.debugPlayLocalFile(path)
@@ -476,10 +473,10 @@ struct AnicatApp: App {
                         model.debugPlayLocalFile(path)
                     }
                 }
-                // The URL scheme and notifications are not macOS features:
-                // both have iOS counterparts, and a scene that only wired
-                // them up on one platform would compile on the other and
-                // silently do nothing.
+                // The URL scheme is not a macOS feature: it has an iOS
+                // counterpart, and a scene that only wired it up on one
+                // platform would compile on the other and silently do
+                // nothing.
                 .onOpenURL { url in
                     model.handleOpenURL(url)
                 }

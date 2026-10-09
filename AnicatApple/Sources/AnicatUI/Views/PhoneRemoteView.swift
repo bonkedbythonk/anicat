@@ -140,12 +140,12 @@ struct PhoneRemoteView: View {
                 transportButton("backward.end.fill", size: 22, enabled: state.hasPrevious) {
                     client.send(.previousEpisode)
                 }
-                transportButton("gobackward.10", size: 26) { client.send(.seekBy(-10)) }
+                transportButton("gobackward.5", size: 26) { client.send(.seekBy(-5)) }
                 transportButton(
                     state.isBuffering ? "hourglass" : (state.isPlaying ? "pause.fill" : "play.fill"),
                     size: 40
                 ) { client.send(.playPause) }
-                transportButton("goforward.10", size: 26) { client.send(.seekBy(10)) }
+                transportButton("goforward.5", size: 26) { client.send(.seekBy(5)) }
                 transportButton("forward.end.fill", size: 22, enabled: state.hasNext) {
                     client.send(.nextEpisode)
                 }

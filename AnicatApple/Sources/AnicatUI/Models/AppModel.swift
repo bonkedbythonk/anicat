@@ -1310,8 +1310,7 @@ public final class AppModel {
     public struct LibraryDownload: Identifiable, Sendable {
         /// The catalog is part of the identity, not decoration beside it.
         /// Without it a film and an anime episode sharing a number collapsed
-        /// into one row, and `handleDownloadsChanged` — which dedupes
-        /// announcements on this string — swallowed the second completion.
+        /// into one row.
         public var id: String { "\(catalog.rawValue)_\(catalogId)_\(episode)" }
         public let catalogId: Int64
         public let episode: Int
@@ -1336,7 +1335,7 @@ public final class AppModel {
     // MARK: - System
     //
     // State for the macOS integration surfaces — URL scheme, App Intents,
-    // notifications, dock badge. The behaviour lives in
+    // dock badge. The behaviour lives in
     // `AppModel+System.swift`; only the storage is here.
 
     /// The running model, for callers that arrive from outside the view tree
@@ -1349,30 +1348,13 @@ public final class AppModel {
 
     /// A destination that arrived before `initialize()` had finished. Every
     /// route into the app (`openDetail`, `playFromShelf`) bails on a nil
-    /// engine, so a notification tap that launches the app
-    /// cold used to open the app and then do nothing at all. Drained once the
-    /// engine is up.
+    /// engine, so a link that launches the app cold used to open the app and
+    /// then do nothing at all. Drained once the engine is up.
     public var pendingDeepLink: DeepLink?
 
-    /// The `<id>:<episode>` keys that had a new episode the last time
-    /// `refreshSystemIntegrations` looked. `nil` means "never looked": the
-    /// first observation of a session seeds this without notifying, because
-    /// every backlogged show on the watching list would otherwise fire a
-    /// notification at launch.
-    var lastKnownNewEpisodeKeys: Set<String>?
-
-    /// Same seed-then-compare shape as `lastKnownNewEpisodeKeys`, for
-    /// downloads that have reached `.done`.
-    var lastKnownCompletedDownloadIds: Set<String>?
-
-    /// The hourly dub pass (`AppModel+DubAlerts.swift`), started once.
-    @ObservationIgnored var dubCheckLoopTask: Task<Void, Never>?
-    /// One pass at a time: `refreshAll` fires at launch, on reachability and
-    /// on every airing rollover, and the loop on its own clock besides.
-    @ObservationIgnored var isCheckingDubs = false
-    /// When each `<catalogId>:<episode>` was last searched for a dub, so a
-    /// burst of refreshes does not search the same episode again.
-    @ObservationIgnored var dubLastChecked: [String: Date] = [:]
+    /// When `refreshListsOnForeground` last ran. Starts at launch, which
+    /// already loaded the lists.
+    @ObservationIgnored var lastForegroundListRefresh = Date()
 
     // MARK: - Syosetu novel reading
     //

@@ -16,8 +16,8 @@ extension AppModel {
     public static let spotlightActivityType = CSSearchableItemActionType
 
     /// One `CSSearchableItem` per known title, id in the unique identifier
-    /// as the same `anicat://title/<id>` URL a notification tap carries,
-    /// so the tap goes through `handleOpenURL` unchanged.
+    /// as the same `anicat://title/<id>` URL the scheme carries, so the tap
+    /// goes through `handleOpenURL` unchanged.
     @MainActor
     func refreshSpotlightIndex() {
         guard CSSearchableIndex.isIndexingAvailable() else { return }

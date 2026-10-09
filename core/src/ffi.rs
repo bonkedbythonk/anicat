@@ -2570,6 +2570,16 @@ impl AnicatEngine {
         self.torrents.download_status(torrent_id, file_id).await.into()
     }
 
+    /// Forgets every cached AniList list, so the next read asks AniList.
+    ///
+    /// An edit made on another device (the phone finishing an episode) does
+    /// not reach this device's cache, which holds a list for 15 minutes and
+    /// keeps it across relaunches: a Mac brought to the front still showed
+    /// the old episode in Up Next.
+    pub fn invalidate_user_lists(&self) {
+        self.catalogs.cache.invalidate("get_user_list");
+    }
+
     /// One status bucket of the user's AniList list.
     ///
     /// `status` is an AniList `MediaListStatus` (`CURRENT`, `COMPLETED`,

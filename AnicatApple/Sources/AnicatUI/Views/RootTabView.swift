@@ -230,9 +230,9 @@ public struct RootTabView: View {
         .animation(.sumi(.page), value: model.personPageStack.count)
         .animation(.sumi(.page), value: model.openCinemaPersonId)
         .tint(SumiTheme.indigo)
-        // A deep link (`anicat://title/<id>`) and a notification tap both go
-        // straight to `openDetail` on the model, with no row tapped to have
-        // claimed an owner. Handled here rather than in `DetailPush`, which
+        // A deep link (`anicat://title/<id>`) goes straight to `openDetail`
+        // on the model, with no row tapped to have claimed an owner.
+        // Handled here rather than in `DetailPush`, which
         // is installed three times and would have all three tabs claim the
         // same page. `detailOwner == nil` so it does not steal a page a tap
         // has already opened elsewhere.

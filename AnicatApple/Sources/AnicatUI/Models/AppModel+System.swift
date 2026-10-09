@@ -8,18 +8,17 @@ import AppKit
 #endif
 
 /// The macOS/iOS integration surfaces, joined to the model: the `anicat://`
-/// scheme, App Intents, notifications and the dock badge.
+/// scheme, App Intents and the dock badge.
 ///
 /// Every one of them arrives from outside the view tree, and every one of
 /// them ends in a `DeepLink` handled by `handleDeepLink` — so there is one
 /// place that knows how to reach a screen, rather than five.
 extension AppModel {
     /// Publishes this instance for the callers that cannot be handed it: an
-    /// App Intent is built by the Shortcuts runtime, and the notification
-    /// delegate by the system. Called from `AnicatApp.init`.
+    /// App Intent is built by the Shortcuts runtime. Called from
+    /// `AnicatApp.init`.
     public func registerAsShared() {
         AppModel.shared = self
-        SystemNotifications.shared.activate()
     }
 
     /// Keeps the engine's caches out of iCloud and Time Machine.
@@ -95,7 +94,7 @@ extension AppModel {
 
     @MainActor
     public func handleDeepLink(_ link: DeepLink) {
-        // A notification tap can launch the app, and it arrives long before
+        // A deep link can launch the app, and it arrives long before
         // `initialize()` has an engine. `openDetail` and
         // `playFromShelf` both bail on a nil engine without saying so, so
         // without this the app opened and then sat on the home screen.
@@ -170,119 +169,28 @@ extension AppModel {
     /// because this is recomputed on every change to any observed property
     /// and building a few hundred ids into a string each time is the kind of
     /// per-frame work the FPS HUD was added to catch. The Up Next entries are
-    /// spelled out in full because the notification edge is defined on
-    /// exactly those fields.
+    /// spelled out in full because the Spotlight subtitles carry their
+    /// episode numbers.
     public var systemIntegrationSignature: String {
         let queue = upNextItems
-            .map { "\($0.id):\($0.nextEpisodeOrChapter):\($0.hasNewEpisode ? 1 : 0)" }
+            .map { "\($0.id):\($0.nextEpisodeOrChapter)" }
             .joined(separator: ",")
         return "\(libraryItems.count)/\(libraryStatus)/\(libraryType)/\(watchingItems.count)"
             + "/\(mangaReading.count)/\(novelReading.count)/\(knownTitles.count)|\(queue)"
     }
 
-    /// `LibraryDownload` is not `Equatable`, so the download edge is watched
-    /// through this projection instead of the array itself.
+    /// `LibraryDownload` is not `Equatable`, so changes are watched through
+    /// this projection instead of the array itself.
     public var downloadSignature: String {
         libraryDownloads.map { "\($0.id):\($0.state)" }.joined(separator: ",")
     }
 
-    /// Checks for episodes to announce and restamps the dock badge. Called
-    /// after the library lists change; safe to call as often as they do.
+    /// Restamps the dock badge and the Spotlight index. Called after the
+    /// library lists change; safe to call as often as they do.
     @MainActor
     public func refreshSystemIntegrations() {
         updateDockBadge()
-        notifyAboutNewEpisodes()
         refreshSpotlightIndex()
-    }
-
-    // MARK: - Notifications
-
-    /// Announces titles whose "new episode" -- or new chapter -- flag has
-    /// just turned on.
-    @MainActor
-    func notifyAboutNewEpisodes() {
-        // An empty queue is "nothing loaded yet", not "nothing airing": the
-        // observer fires once at launch before either the cache or AniList
-        // has filled the list, and seeding from that empty state would make
-        // every backlogged show on the watching list look newly aired the
-        // moment the real list arrived.
-        guard !upNextItems.isEmpty else { return }
-        // Chapters included: they were filtered out here while the queue
-        // has carried them all along, so a manga that updated said nothing.
-        // The key carries the unit for the same reason the notification does
-        // -- chapter 5 and episode 5 of one title are different news.
-        let current = Set(
-            upNextItems
-                .filter(\.hasNewEpisode)
-                .map { "\($0.unit):\($0.id):\($0.nextEpisodeOrChapter)" }
-        )
-        // The first look of a session only records. Everything already
-        // backlogged on the watching list has a new episode by this
-        // definition, and announcing all of it at launch is a notification
-        // storm, not news.
-        guard let previous = lastKnownNewEpisodeKeys else {
-            lastKnownNewEpisodeKeys = current
-            return
-        }
-        lastKnownNewEpisodeKeys = current
-        let appeared = current.subtracting(previous)
-        guard !appeared.isEmpty else { return }
-
-        for entry in upNextItems
-        where appeared.contains("\(entry.unit):\(entry.id):\(entry.nextEpisodeOrChapter)") {
-            let id = entry.id
-            let episode = entry.nextEpisodeOrChapter
-            let title = entry.title
-            let cover = knownCovers[id] ?? entry.thumbnailURL
-            let unit: SystemNotifications.ReleaseUnit = entry.unit == "CH" ? .chapter : .episode
-            Task.detached(priority: .utility) {
-                await SystemNotifications.shared.notifyNewEpisode(
-                    catalogId: id,
-                    title: title,
-                    episode: episode,
-                    coverURL: cover,
-                    unit: unit
-                )
-            }
-        }
-    }
-
-    /// Announces downloads that have just reached `.done`. Driven from the
-    /// app's own `.onChange` on `libraryDownloads`, because that property is
-    /// written by the download path and cannot carry a `didSet` of ours.
-    @MainActor
-    public func handleDownloadsChanged() {
-        var completed = Set<String>()
-        for download in libraryDownloads {
-            if case .done = download.state { completed.insert(download.id) }
-        }
-        // Same seed-without-announcing rule as the episode check: the
-        // downloads list is rebuilt at launch with everything already
-        // finished still in it.
-        guard let previous = lastKnownCompletedDownloadIds else {
-            lastKnownCompletedDownloadIds = completed
-            return
-        }
-        lastKnownCompletedDownloadIds = completed
-        let finished = completed.subtracting(previous)
-        guard !finished.isEmpty else { return }
-
-        for download in libraryDownloads where finished.contains(download.id) {
-            let id = download.catalogId
-            let episode = download.episode
-            let title = download.title
-            let catalog = download.catalog
-            let cover = download.coverURL ?? registryCover(catalog: catalog.ffi, id: id)
-            Task.detached(priority: .utility) {
-                await SystemNotifications.shared.notifyDownloadFinished(
-                    catalog: catalog,
-                    catalogId: id,
-                    title: title,
-                    episode: episode,
-                    coverURL: cover
-                )
-            }
-        }
     }
 
     // MARK: - Dock badge

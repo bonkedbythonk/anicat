@@ -144,8 +144,11 @@ fi
 # against GitHub; it is the check that the bytes about to be unpacked, have
 # their quarantine flag stripped and be launched are the bytes the release
 # was cut with, on a mirror, a proxy, a truncated download or a tampered
-# asset. A release with no SHA256SUMS at all (1.0.1 and earlier) is warned
-# about and installed; one whose file exists and does not match is refused.
+# asset. A missing SHA256SUMS is refused like a mismatch: with the file
+# optional, anyone able to withhold one request (a proxy, a captive portal)
+# turned the whole check into a warning. Every release this script can
+# install carries one; 1.0.1 and earlier did not, and are never what it
+# fetches, because it only ever asks for the latest stable or the nightly.
 SUMS_URL="${DOWNLOAD_URL%/*}/SHA256SUMS"
 ZIP_NAME="${DOWNLOAD_URL##*/}"
 # A release cut before the checksums existed (1.0.1) has no SHA256SUMS on
@@ -173,7 +176,9 @@ if fetch_sums; then
     fi
     echo "Checksum verified."
 else
-    echo "This release publishes no SHA256SUMS, so the download could not be verified."
+    echo "Could not fetch SHA256SUMS for $ZIP_NAME, so the download cannot be verified. Nothing was installed." >&2
+    echo "Try again in a few minutes; a release is still being published, or the network is interfering." >&2
+    exit 1
 fi
 
 echo "Step 3: Installing..."

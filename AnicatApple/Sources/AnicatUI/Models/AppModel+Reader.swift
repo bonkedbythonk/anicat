@@ -426,7 +426,7 @@ extension AppModel {
             (selectedMediaDetails?.id == id ? selectedMediaDetails?.coverURL : nil) ?? knownCovers[id]
         }
         let link = anilistId.map { ("View on AniList", "https://anilist.co/manga/\($0)") } ?? fallbackLink
-        engine.discordUpdate(presence: DiscordPresence(
+        let presence = DiscordPresence(
             source: .reading,
             medium: medium,
             title: title,
@@ -438,12 +438,40 @@ extension AppModel {
             positionSecs: Int64(Date().timeIntervalSince(startedAt)),
             durationSecs: 0,
             paused: false
-        ))
+        )
+        lastReadingPresence = presence
+        engine.discordUpdate(presence: presence)
     }
 
     func endReadingPresence() {
+        readingIdleTask?.cancel()
+        readingIdleTask = nil
+        lastReadingPresence = nil
         readingPresenceStartedAt = nil
         engine?.discordClearPresence(source: .reading)
+    }
+
+    /// A manga page turn or a chapter open. Nothing else tells the profile
+    /// the reader is still there: left open, "Reading" and its climbing clock
+    /// stayed on the profile for as long as the app ran. Ten minutes without
+    /// a turn withdraws it; the next turn puts it back with the clock at zero,
+    /// since the gap was not reading time. Novels have no page turn to hook,
+    /// so they never arm this.
+    func noteReadingActivity() {
+        guard var presence = lastReadingPresence else { return }
+        if readingPresenceStartedAt == nil {
+            readingPresenceStartedAt = Date()
+            presence.positionSecs = 0
+            lastReadingPresence = presence
+            engine?.discordUpdate(presence: presence)
+        }
+        readingIdleTask?.cancel()
+        readingIdleTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(600))
+            guard !Task.isCancelled, let self else { return }
+            readingPresenceStartedAt = nil
+            engine?.discordClearPresence(source: .reading)
+        }
     }
 
     public func nextChapter() async {
@@ -564,6 +592,7 @@ extension AppModel {
                 anilistId: anilistId,
                 hover: allChapters.isEmpty ? nil : "\(title) · Chapter \(chapter.number)"
             )
+            noteReadingActivity()
         } catch {
             errorMessage = "Could not load chapter pages: \(error.localizedDescription)"
             print("Manga pages load failed: \(error)")
@@ -809,6 +838,7 @@ extension AppModel {
     /// Local only, like an episode's stop position: AniList tracks whole
     /// chapters and knows nothing about a page inside one.
     public func recordReadingPage(chapterId: String, page: Int, pageCount: Int) {
+        noteReadingActivity()
         guard let engine, let session = activeReadingSession,
               let anilistId = session.anilistId else { return }
         let number = session.chapters.first { $0.id == chapterId }?.number ?? ""

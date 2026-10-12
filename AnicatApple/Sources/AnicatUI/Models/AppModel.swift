@@ -463,6 +463,11 @@ public final class AppModel {
     /// time. Per session rather than per chapter, so turning to the next
     /// chapter does not reset the clock.
     @ObservationIgnored var readingPresenceStartedAt: Date?
+    /// The last reading presence handed to the engine, kept so a page turn
+    /// after an idle timeout can put it back. `readingPresenceStartedAt` nil
+    /// while this is set means the timeout withdrew it.
+    @ObservationIgnored var lastReadingPresence: DiscordPresence?
+    @ObservationIgnored var readingIdleTask: Task<Void, Never>?
     // Guards the AniList auto-advance below to one attempt per episode
     // rather than once a second for the rest of the episode once past 85%.
     var hasAdvancedAniListForCurrentEpisode = false

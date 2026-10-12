@@ -35,6 +35,38 @@ pub struct ExportedRelease {
     pub resolved_at: String,
 }
 
+/// Hosts a `.torrent` file can come from: the ones `torrent/search.rs` and
+/// `seadex.rs` build a link on.
+const TORRENT_HOSTS: [&str; 3] = ["nyaa.si", "animetosho.org", "subsplease.org"];
+
+/// Whether a release that arrived from another device may be stored.
+///
+/// A resolve fetches `torrent_url` with the app's own HTTP client and hands
+/// `magnet` to the torrent session, so a row written by a peer decides which
+/// URL this machine requests and whose media it plays. Paired devices are
+/// authenticated, but the table is still an input from a second machine's
+/// disk, and a link to `http://127.0.0.1:...` or a LAN address has no
+/// business in it. Only the providers' own hosts over https, and magnets.
+///
+/// This narrows what a paired device can make this machine request; it does
+/// not close it. librqbit reads `tr=` out of a magnet and announces to those
+/// trackers over HTTP or UDP, so a peer's magnet can still name a tracker on
+/// the LAN. Pairing authentication is what keeps a stranger from writing
+/// the row at all; this is the second layer behind it.
+fn is_trusted_import(row: &ExportedRelease) -> bool {
+    let magnet_ok = row.magnet.as_deref().is_none_or(|m| m.starts_with("magnet:?"));
+    let url_ok = row.torrent_url.as_deref().is_none_or(|u| {
+        let Ok(url) = reqwest::Url::parse(u) else { return false };
+        url.scheme() == "https"
+            && url.host_str().is_some_and(|host| {
+                TORRENT_HOSTS
+                    .iter()
+                    .any(|h| host == *h || host.ends_with(&format!(".{h}")))
+            })
+    });
+    magnet_ok && url_ok
+}
+
 /// `datetime('now')` writes `YYYY-MM-DD HH:MM:SS` with no zone marker, and it
 /// is always UTC. Parsed here, at the one boundary that knows that, so the
 /// aggregation upstream deals in real instants.
@@ -1048,7 +1080,7 @@ impl Registry {
             // stored: the column is the source of truth for which id space
             // `catalog_id` is in, and an unknown one would sit in the table
             // matching nothing forever.
-            if Catalog::parse(&row.catalog).is_none() {
+            if Catalog::parse(&row.catalog).is_none() || !is_trusted_import(row) {
                 continue;
             }
             changed += tx
@@ -1224,6 +1256,41 @@ mod tests {
         // the column is what says which id space `catalog_id` belongs to.
         assert_eq!(db.import_resolved_releases(&[row]).unwrap(), 0);
         assert!(db.export_resolved_releases().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_imported_release_may_only_point_at_the_providers() {
+        let db = Registry::open_in_memory().unwrap();
+        let mut ok = exported("nyaa", "2026-09-08 12:00:00");
+        ok.torrent_url = Some("https://nyaa.si/download/1.torrent".into());
+        assert_eq!(db.import_resolved_releases(&[ok]).unwrap(), 1);
+
+        for (n, url) in [
+            "http://127.0.0.1:47111/api/stop",
+            "https://192.168.1.1/admin",
+            "https://nyaa.si.evil.example/download/1.torrent",
+            "https://evilnyaa.si/download/1.torrent",
+            "http://nyaa.si/download/1.torrent",
+            "file:///etc/passwd",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut row = exported("bad", "2026-09-09 12:00:00");
+            row.episode_number = 10 + n as i64;
+            row.torrent_url = Some(url.into());
+            assert_eq!(db.import_resolved_releases(&[row]).unwrap(), 0, "{url}");
+        }
+
+        let mut sub = exported("sub", "2026-09-09 12:00:00");
+        sub.episode_number = 99;
+        sub.torrent_url = Some("https://storage.animetosho.org/torrent/abc.torrent".into());
+        assert_eq!(db.import_resolved_releases(&[sub]).unwrap(), 1);
+
+        let mut not_a_magnet = exported("scheme", "2026-09-09 12:00:00");
+        not_a_magnet.episode_number = 50;
+        not_a_magnet.magnet = Some("http://127.0.0.1/".into());
+        assert_eq!(db.import_resolved_releases(&[not_a_magnet]).unwrap(), 0);
     }
 
     #[test]

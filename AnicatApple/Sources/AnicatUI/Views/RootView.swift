@@ -1407,11 +1407,9 @@ public struct RootView: View {
 /// It also means `resolveAndPlay` finds the title's episodes in
 /// `selectedEpisodes` and skips the detail fetch `ensurePlaybackEpisodes`
 /// would otherwise make for a play with no page open.
-/// Shared with the menu bar's Resume: every shelf-style play goes through
-/// the show's page first, so the two entry points cannot drift apart.
+/// Every shelf-style play goes through the show's page first.
 /// `morphThumbnailURL` is the shelf row's still, when the caller has one on
-/// screen — the menu bar's Resume does not, and leaves it nil for a plain
-/// fade.
+/// screen; nil gives a plain fade.
 @MainActor
 public func playFromShelf(
     model: AppModel,

@@ -388,7 +388,7 @@ public final class AppModel {
         }
     }
 
-    /// What the menu bar shows next to the timer once it is armed.
+    /// What the phone's sleep timer row shows next to it once it is armed.
     public var sleepTimerCaption: String? {
         switch sleepTimer {
         case .off: return nil

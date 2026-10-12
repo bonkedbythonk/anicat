@@ -666,9 +666,8 @@ struct PhonePlayerView: View {
         }
     }
 
-    /// The Mac's sleep timer lives in the menu bar; the phone has no such
-    /// thing, so it lives here. Same `AppModel.sleepTimer`, same "stop, do
-    /// not pause" semantics at the end.
+    /// The phone's sleep timer; the Mac has no control for it. Same
+    /// `AppModel.sleepTimer`, same "stop, do not pause" semantics at the end.
     @ViewBuilder
     private var sleepTimerMenu: some View {
         if let model = AppModel.shared {

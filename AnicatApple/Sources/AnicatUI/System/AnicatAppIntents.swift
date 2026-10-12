@@ -63,8 +63,8 @@ public struct WatchingTitleQuery: EntityStringQuery {
     }
 }
 
-/// "Continue watching in Anicat" — the same thing the menu bar's Resume card
-/// does, reached from Shortcuts, Siri and Spotlight's action row.
+/// "Continue watching in Anicat", reached from Shortcuts, Siri and
+/// Spotlight's action row.
 public struct ContinueWatchingIntent: AppIntent {
     public static let title: LocalizedStringResource = "Continue Watching"
     public static let description = IntentDescription("Plays the next episode of whatever you watched last.")

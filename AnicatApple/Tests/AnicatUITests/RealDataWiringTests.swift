@@ -21,20 +21,13 @@ struct RealDataWiringTests {
         return (engine, tempDir)
     }
 
-    @Test("MenuBarView and PlayerController have zero mock data defaults")
+    @Test("PlayerController has zero mock data defaults")
     @MainActor
     func testZeroMockDefaults() {
-        let menu = MenuBarView()
-        #expect(menu.lastWatchedTitle == nil)
-        #expect(menu.lastWatchedEpisode == nil)
-        #expect(menu.airingItems.isEmpty)
-
         let player = PlayerController()
         #expect(player.introStartTime == nil)
         #expect(player.introEndTime == nil)
         #expect(player.duration == 0.0)
-
-        #expect(BrandAssets.menuBarIcon != nil)
     }
 
     @Test("AppModel.openDetail fetches real AniList data and populates detail/episodes")

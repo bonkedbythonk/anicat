@@ -285,6 +285,17 @@ public struct SearchView: View {
         searchType == "ANIME" && !hasActiveFilters && AskSearch.looksLikeRequest(searchText) && AskSearch.isAvailable
     }
 
+    /// A few words that found no title. "a cozy romance with magic" does not
+    /// open with a request word, so it is searched like a title and the page said
+    /// "No titles found" with the model one Return away and nothing saying so.
+    private var asksInstead: Bool { canAsk && !isLoading && results.isEmpty }
+
+    /// Enough words to be a description, with the model there to read it.
+    private var canAsk: Bool {
+        searchType == "ANIME" && !hasActiveFilters
+            && searchText.split(whereSeparator: \.isWhitespace).count >= 3 && AskSearch.isAvailable
+    }
+
     private func commitSearch() {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         // A blank query with a filter set is a legitimate browse ("show me
@@ -341,7 +352,7 @@ public struct SearchView: View {
                             .onSubmit {
                                 if let index = keyboardIndex, keyboardItems.indices.contains(index) {
                                     openKeyboardItem(at: index)
-                                } else if isRequest {
+                                } else if isRequest || asksInstead {
                                     onAsk(searchText.trimmingCharacters(in: .whitespacesAndNewlines))
                                 } else {
                                     commitSearch()
@@ -576,6 +587,14 @@ public struct SearchView: View {
                                 .sumiTabularMono(size: 11.5)
                                 .foregroundColor(SumiTheme.muted)
                             Spacer()
+                            // Loose matches for a description are still matches, so
+                            // the page showed them and never said the model could
+                            // read the sentence instead.
+                            if canAsk {
+                                SumiOutlineButton("Ask Anicat instead") {
+                                    onAsk(searchText.trimmingCharacters(in: .whitespacesAndNewlines))
+                                }
+                            }
                         }
                         .padding(.horizontal, 40)
 
@@ -633,6 +652,10 @@ public struct SearchView: View {
                         // asks it. Preloading the model here hides its first-call
                         // load while the viewer is still typing.
                         SumiEmptyState(headline: "Press Return to ask", detail: "Anicat will pick from AniList and from what you have watched.")
+                            .padding(.horizontal, 40)
+                            .task { AskSearch.prewarm() }
+                    } else if asksInstead {
+                        SumiEmptyState(headline: "No title matches that", detail: "Press Return to ask Anicat to find it instead.")
                             .padding(.horizontal, 40)
                             .task { AskSearch.prewarm() }
                     } else if !searchText.isEmpty || hasActiveFilters {

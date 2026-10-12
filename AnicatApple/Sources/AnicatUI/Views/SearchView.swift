@@ -119,7 +119,9 @@ public struct SearchView: View {
         switch searchType {
         case "MANGA": return "Search manga, authors, genres…"
         case "NOVEL": return "Search light novels, authors, genres…"
-        default: return "Search anime, studios, genres…"
+        // Where Ask works the field itself says so: nothing else tells a viewer
+        // that a sentence is welcome here.
+        default: return AskSearch.isAvailable ? "Search anime, or describe what you want…" : "Search anime, studios, genres…"
         }
     }
 

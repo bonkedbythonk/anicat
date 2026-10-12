@@ -304,11 +304,21 @@ private final class RemoteStreamPump {
                 case .ready:
                     self.connectDeadline?.cancel()
                     self.connectDeadline = nil
+                    guard let secret = RemoteClient.secret(for: self.node.id) else {
+                        print("[RemoteStream] no pairing secret for \(self.node.id)")
+                        self.tearDown()
+                        return
+                    }
                     host.sendFrame(.helloData(
                         deviceId: RemoteClient.deviceId,
                         token: self.token,
                         start: self.start,
-                        end: self.end
+                        end: self.end,
+                        proof: RemoteAuth.proof(
+                            .dataRequest,
+                            secret: secret,
+                            [self.token, "\(self.start)", "\(self.end)"]
+                        )
                     ))
                 case .failed(let error):
                     print("[RemoteStream] host connection failed: \(error)")
@@ -368,13 +378,29 @@ private final class RemoteStreamPump {
         // is already video and must bypass the framer.
         guard let newline = data.firstIndex(of: UInt8(ascii: "\n")) else {
             _ = framer.ingest(data)
+            // A header that never ends is not a Mac; and one split across two
+            // reads still needs the second.
+            if framer.overflowed { tearDown() } else { receiveFromHost() }
             return
         }
         let line = data[..<data.index(after: newline)]
         let rest = data[data.index(after: newline)...]
         for frame in framer.ingest(Data(line)) {
             switch frame {
-            case .dataHeader(let length, let type):
+            case .dataHeader(let length, let type, let proof):
+                // Before a byte of video goes to the player: whatever answered
+                // on the Mac's address has to prove it is the Mac.
+                guard let secret = RemoteClient.secret(for: node.id),
+                      RemoteAuth.verify(
+                          proof,
+                          role: .dataReply,
+                          secret: secret,
+                          [token, "\(start)", "\(end)", "\(length)"]
+                      ) else {
+                    print("[RemoteStream] host could not vouch for the range; dropping it")
+                    tearDown()
+                    return
+                }
                 isRaw = true
                 sendPlayerHeader(length: length, contentType: type)
             case .dataError(let message):

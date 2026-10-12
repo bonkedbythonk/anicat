@@ -18,8 +18,24 @@ public enum RemoteFrame: Codable, Sendable {
     /// First frame a controller sends. Nothing else is honoured until the
     /// Mac has answered it, and a connection that never sends one is a
     /// discovery probe rather than a remote (see `RemoteHost.accept`).
-    case hello(deviceId: String, deviceName: String)
-    case helloAck(accepted: Bool, hostName: String)
+    ///
+    /// `nonce` is this connection's challenge to the Mac, sent when the
+    /// phone already holds a secret for it; `authKey` is the phone's public
+    /// half of a key exchange, sent so the Mac can pair it if it does not
+    /// know this phone. Both are optional: a build that predates them decodes
+    /// the frame without them, and an old phone's hello is read as having
+    /// neither, which the Mac refuses (see `RemoteAuth`).
+    case hello(deviceId: String, deviceName: String, nonce: String?, authKey: String?)
+    /// `authKey` is the Mac's public half, present only on the frame that
+    /// completes a first pairing.
+    case helloAck(accepted: Bool, hostName: String, authKey: String?)
+    /// A paired Mac's answer to a `hello` carrying a nonce: its own nonce,
+    /// and proof it holds the pairing secret, made over both. The phone
+    /// verifies it before trusting anything else this Mac says.
+    case challenge(nonce: String, proof: String)
+    /// The phone's proof in return, made over the same two nonces. Nothing
+    /// but `hello` and this is honoured until it checks out.
+    case proof(String)
     case command(RemoteCommand)
     case state(RemoteState)
     /// What this Mac can actually do, sent straight after `helloAck`.
@@ -62,12 +78,19 @@ public enum RemoteFrame: Codable, Sendable {
     /// Its own frame rather than an ordinary `hello`: that path answers with
     /// a `helloAck` and a state snapshot and starts the 1 Hz push, none of
     /// which a connection that exists to carry video wants.
-    case helloData(deviceId: String, token: String, start: Int64, end: Int64)
+    ///
+    /// `proof` covers the token and the range, so a data connection needs the
+    /// pairing secret and not just a `deviceId` that was sent in clear.
+    case helloData(deviceId: String, token: String, start: Int64, end: Int64, proof: String?)
     /// The Mac's answer on a data connection. **Everything after this
     /// frame's newline is raw video**, so both ends stop feeding the framer
     /// at this point -- an MKV is full of `0x0A`, and a framer left running
     /// would quietly eat the file looking for JSON.
-    case dataHeader(length: Int64, contentType: String)
+    ///
+    /// `proof` is the Mac vouching for these bytes: the phone dials whatever
+    /// Bonjour currently calls the Mac, which is not necessarily the machine
+    /// that issued the grant.
+    case dataHeader(length: Int64, contentType: String, proof: String?)
     case dataError(String)
 }
 
@@ -353,7 +376,24 @@ public struct RemoteState: Codable, Sendable {
 public struct RemoteFramer: Sendable {
     private var buffer = Data()
 
-    public init() {}
+    /// What a peer may leave unterminated before it is cut off.
+    ///
+    /// Until a connection has authenticated, the only frames it can send are
+    /// a hello and a proof, a few hundred bytes; with no ceiling, anything on
+    /// the network could grow this buffer without limit by never sending a
+    /// newline. The authenticated ceiling has to hold a `syncOffer`, which is
+    /// the whole `resolved_releases` table: 191 rows came to 115 KB, so 16 MB
+    /// is two orders of magnitude of room.
+    public static let unauthenticatedLimit = 16 * 1024
+    public static let authenticatedLimit = 16 * 1024 * 1024
+    public var limit: Int
+    /// Set when the unterminated bytes outgrew `limit`; the buffer is dropped
+    /// and the caller is expected to hang up.
+    public private(set) var overflowed = false
+
+    public init(limit: Int = RemoteFramer.unauthenticatedLimit) {
+        self.limit = limit
+    }
 
     private static let delimiter = UInt8(ascii: "\n")
 
@@ -372,6 +412,12 @@ public struct RemoteFramer: Sendable {
             if let frame = try? JSONDecoder().decode(RemoteFrame.self, from: Data(line)) {
                 frames.append(frame)
             }
+        }
+        // After the loop, so a read that carries a whole frame is never
+        // measured as if it were the tail of one.
+        if buffer.count > limit {
+            buffer.removeAll()
+            overflowed = true
         }
         return frames
     }

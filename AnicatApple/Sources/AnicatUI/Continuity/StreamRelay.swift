@@ -16,6 +16,9 @@ final class StreamRelay: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private var session: URLSession!
     private var task: URLSessionDataTask?
     private var sentHeader = false
+    /// Signs the header for the length the range server reported, so the
+    /// phone can tell this Mac from something else listening where it dialled.
+    private var sign: @Sendable (Int64) -> String? = { _ in nil }
 
     init(connection: NWConnection, onFinish: @escaping @Sendable () -> Void) {
         self.connection = connection
@@ -31,7 +34,8 @@ final class StreamRelay: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
 
-    func start(url: URL, start: Int64, end: Int64) {
+    func start(url: URL, start: Int64, end: Int64, sign: @escaping @Sendable (Int64) -> String?) {
+        self.sign = sign
         var request = URLRequest(url: url)
         request.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
         let task = session.dataTask(with: request)
@@ -58,7 +62,7 @@ final class StreamRelay: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         }
         let length = http.expectedContentLength
         let type = http.value(forHTTPHeaderField: "Content-Type") ?? "video/x-matroska"
-        connection.sendFrame(.dataHeader(length: length, contentType: type))
+        connection.sendFrame(.dataHeader(length: length, contentType: type, proof: sign(length)))
         sentHeader = true
         completionHandler(.allow)
     }

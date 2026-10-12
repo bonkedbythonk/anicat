@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 import Observation
@@ -44,6 +45,17 @@ public final class RemoteClient {
 
     private var connection: NWConnection?
     private var framer = RemoteFramer()
+    /// The key pair offered for this connection's first pairing, and the
+    /// challenge it set the Mac if a secret for it is already held. Both new
+    /// on every connection, so nothing a sniffer sees can be replayed.
+    private var pairKey: Curve25519.KeyAgreement.PrivateKey?
+    private var myNonce: String?
+    private var hostNodeId: String?
+    /// True once the Mac has proved it holds the pairing secret, or this
+    /// connection has just made one with it. Until then nothing it sends is
+    /// believed: a Mac that only copied a Bonjour name could otherwise hand
+    /// this phone grants and rows to merge.
+    private var isAuthenticated = false
     /// Commands sent before the Mac approved this phone. "Play this on the
     /// Mac" from a detail page is one tap that has to survive an approval
     /// alert someone has to walk over and answer; dropping it would make the
@@ -51,11 +63,6 @@ public final class RemoteClient {
     private var queued: [RemoteCommand] = []
 
     static let deviceIdKey = "anicat_remote_device_id"
-    /// Macs that have already approved this phone, by service name. Only
-    /// these are dialled without a tap: a `hello` from an unknown device is
-    /// what raises the approval alert over there, and a phone that dialled
-    /// every Mac it saw would throw that alert at whoever is sitting at one.
-    static let knownHostsKey = "anicat_remote_known_hosts"
 
     /// True while this connection exists only to exchange remembered
     /// releases, so it hangs up as soon as the reply lands instead of
@@ -66,6 +73,20 @@ public final class RemoteClient {
     private var pendingResolves: [String: CheckedContinuation<StreamGrant, Error>] = [:]
 
     private init() {}
+
+    static let hostSecretsKey = "anicat_remote_host_secrets"
+
+    /// The pairing secret for a Mac, by the name Bonjour knows it under.
+    /// Never sent anywhere: both ends derive it during pairing.
+    static func secret(for nodeId: String) -> String? {
+        (UserDefaults.standard.dictionary(forKey: hostSecretsKey) as? [String: String])?[nodeId]
+    }
+
+    private static func store(secret: String, for nodeId: String) {
+        var secrets = UserDefaults.standard.dictionary(forKey: hostSecretsKey) as? [String: String] ?? [:]
+        secrets[nodeId] = secret
+        UserDefaults.standard.set(secrets, forKey: hostSecretsKey)
+    }
 
     /// This phone's stable identity to the Mac's paired list. A UUID and not
     /// the device name: two phones can carry the same name, and approving
@@ -83,9 +104,15 @@ public final class RemoteClient {
         connection?.cancel()
         connection = nil
         framer = RemoteFramer()
+        isAuthenticated = false
+        let pairKey = Curve25519.KeyAgreement.PrivateKey()
+        self.pairKey = pairKey
+        hostNodeId = node.id
+        // A challenge only when there is a secret to answer it with; a phone
+        // with none is asking to be paired and sends just its public key.
+        myNonce = Self.secret(for: node.id) == nil ? nil : RemoteAuth.nonce()
+        let nonce = myNonce
         state = RemoteState()
-        #if os(iOS)
-        #endif
         hostVersion = 0
         hostFeatures = []
         audioTracks = []
@@ -107,7 +134,9 @@ public final class RemoteClient {
                 case .ready:
                     connection.sendFrame(.hello(
                         deviceId: Self.deviceId,
-                        deviceName: Platform.deviceName
+                        deviceName: Platform.deviceName,
+                        nonce: nonce,
+                        authKey: RemoteAuth.publicKey(of: pairKey)
                     ))
                     // Not `.connected` yet: the Mac may still be showing the
                     // approval alert, and a remote that says it is connected
@@ -163,15 +192,16 @@ public final class RemoteClient {
         }
     }
 
+    /// Macs this phone holds a pairing secret for, by service name. Only
+    /// these are dialled without a tap: a `hello` from an unknown device is
+    /// what raises the approval alert over there, and a phone that dialled
+    /// every Mac it saw would throw that alert at whoever is sitting at one.
+    /// Read from the secrets themselves, not from a list kept beside them: a
+    /// phone paired before secrets existed would still be on that list, dial
+    /// the Mac on every launch and raise an alert nobody asked for.
     static func knownHosts() -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: knownHostsKey) ?? [])
-    }
-
-    private func rememberHost() {
-        guard let name = hostName else { return }
-        var hosts = Self.knownHosts()
-        guard hosts.insert(name).inserted else { return }
-        UserDefaults.standard.set(Array(hosts), forKey: Self.knownHostsKey)
+        let secrets = UserDefaults.standard.dictionary(forKey: hostSecretsKey) as? [String: String] ?? [:]
+        return Set(secrets.keys)
     }
 
     public func disconnect() {
@@ -185,6 +215,9 @@ public final class RemoteClient {
         connection?.cancel()
         connection = nil
         framer = RemoteFramer()
+        isAuthenticated = false
+        pairKey = nil
+        myNonce = nil
         state = RemoteState()
         queued.removeAll()
         if status != .denied { status = .idle }
@@ -226,6 +259,10 @@ public final class RemoteClient {
                 guard self.connection === connection else { return }
                 if let data, !data.isEmpty {
                     for frame in self.framer.ingest(data) { self.handle(frame) }
+                    if self.framer.overflowed {
+                        self.disconnect()
+                        return
+                    }
                 }
                 if isComplete || error != nil {
                     self.disconnect()
@@ -318,13 +355,49 @@ public final class RemoteClient {
         pendingResolves.removeValue(forKey: id)?.resume(throwing: error)
     }
 
+    private func markAuthenticated() {
+        isAuthenticated = true
+        framer.limit = RemoteFramer.authenticatedLimit
+    }
+
     private func handle(_ frame: RemoteFrame) {
         switch frame {
-        case .helloAck(let accepted, let name):
+        case .challenge, .helloAck: break
+        default: guard isAuthenticated else { return }
+        }
+        switch frame {
+        case .challenge(let hostNonce, let hostProof):
+            guard let myNonce, let hostNodeId, let secret = Self.secret(for: hostNodeId),
+                  RemoteAuth.verify(hostProof, role: .mac, secret: secret, [myNonce, hostNonce]),
+                  let answer = RemoteAuth.proof(.phone, secret: secret, [hostNonce, myNonce]) else {
+                disconnect()
+                status = .failed("This Mac could not prove it is the one you paired with")
+                return
+            }
+            markAuthenticated()
+            connection?.sendFrame(.proof(answer))
+        case .helloAck(let accepted, let name, let hostKey):
+            guard accepted else {
+                hostName = name
+                status = .denied
+                queued.removeAll()
+                return
+            }
+            // First pairing: the Mac's public half arrives here, and the same
+            // secret falls out of it on both sides.
+            if let hostKey, let pairKey, let hostNodeId,
+               let secret = RemoteAuth.secret(mine: pairKey, theirs: hostKey) {
+                Self.store(secret: secret, for: hostNodeId)
+                markAuthenticated()
+            }
+            guard isAuthenticated else {
+                disconnect()
+                status = .failed("This Mac could not prove it is the one you paired with")
+                return
+            }
             hostName = name
-            status = accepted ? .connected : .denied
-            if accepted, let connection {
-                rememberHost()
+            status = .connected
+            if let connection {
                 for command in queued { connection.sendFrame(.command(command)) }
                 // Every connection syncs, not just the quiet ones: opening
                 // the remote at all means both apps are up and on the same
@@ -354,7 +427,7 @@ public final class RemoteClient {
             } else {
                 continuation.resume(throwing: RemoteStreamError.refused(error ?? "the Mac refused"))
             }
-        case .hello, .command, .syncOffer, .streamResolve, .streamRelease,
+        case .hello, .proof, .command, .syncOffer, .streamResolve, .streamRelease,
              .helloData, .dataHeader, .dataError:
             break
         }

@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 #endif
+import CryptoKit
 import Foundation
 import Network
 import Observation
@@ -50,7 +51,12 @@ public final class RemoteHost {
     private var pendingSeek: Double?
     private var relays: [ObjectIdentifier: StreamRelay] = [:]
 
-    static let pairedDevicesKey = "anicat_remote_paired_devices"
+    /// Pairing secrets by `deviceId`. A new key, deliberately: the old
+    /// `anicat_remote_paired_devices` held bare ids, which any phone's hello
+    /// repeats in clear, so honouring them would keep every old pairing open
+    /// to anyone who ever overheard one. Each phone pairs again, once.
+    static let pairingsKey = "anicat_remote_pairings"
+    private static let legacyPairedDevicesKey = "anicat_remote_paired_devices"
 
     /// The optional verbs this build serves, announced in `hostInfo`. A verb
     /// goes in here in the same commit that teaches `apply` to honour it, so
@@ -64,7 +70,9 @@ public final class RemoteHost {
         RemoteFeature.upscale,
     ]
 
-    private init() {}
+    private init() {
+        UserDefaults.standard.removeObject(forKey: Self.legacyPairedDevicesKey)
+    }
 
     // MARK: - Accepting controllers
 
@@ -106,6 +114,10 @@ public final class RemoteHost {
                 if let data, !data.isEmpty {
                     let frames = session.framer.ingest(data)
                     for frame in frames { self.handle(frame, from: session, key: key) }
+                    if session.framer.overflowed {
+                        self.drop(key)
+                        return
+                    }
                 }
                 if isComplete || error != nil {
                     self.drop(key)
@@ -118,14 +130,43 @@ public final class RemoteHost {
 
     private func handle(_ frame: RemoteFrame, from session: Session, key: ObjectIdentifier) {
         switch frame {
-        case .hello(let deviceId, let deviceName):
+        case .hello(let deviceId, let deviceName, let nonce, let authKey):
             session.deviceId = deviceId
             session.deviceName = deviceName
-            if Self.pairedDevices().contains(deviceId) {
-                approve(session)
-            } else {
+            session.phoneKey = authKey
+            if let nonce, let secret = Self.pairings()[deviceId] {
+                // A phone this Mac has paired. It is let in only when it
+                // proves it holds the secret, and the Mac proves the same
+                // first, so the phone knows it reached the machine it paired
+                // with and not one wearing its Bonjour name.
+                let macNonce = RemoteAuth.nonce()
+                guard let proof = RemoteAuth.proof(.mac, secret: secret, [nonce, macNonce]) else {
+                    refuse(session)
+                    return
+                }
+                session.challenge = (secret, nonce, macNonce)
+                session.connection.sendFrame(.challenge(nonce: macNonce, proof: proof))
+            } else if authKey != nil {
+                // Unknown, or a phone that lost its secret: ask the person at
+                // this Mac. Nothing it sends is acted on before they answer.
                 pendingPairing = PairingRequest(id: deviceId, deviceName: deviceName)
+            } else {
+                // No key to pair with: a build from before this handshake.
+                refuse(session)
             }
+        case .proof(let proof):
+            guard let challenge = session.challenge else { return }
+            session.challenge = nil
+            guard RemoteAuth.verify(
+                proof,
+                role: .phone,
+                secret: challenge.secret,
+                [challenge.macNonce, challenge.phoneNonce]
+            ) else {
+                refuse(session)
+                return
+            }
+            approve(session)
         case .command(let command):
             // An unapproved controller is answered by silence, not by an
             // error: telling an unpaired device that it reached a real
@@ -153,13 +194,16 @@ public final class RemoteHost {
         case .streamRelease(let token):
             guard session.isApproved else { return }
             streamGrants.removeValue(forKey: token)
-        case .helloData(let deviceId, let token, let start, let end):
-            // Authenticated the same way a controller is -- the paired set,
-            // not a secret of its own -- plus a token that names one file.
+        case .helloData(let deviceId, let token, let start, let end, let proof):
+            // Authenticated the same way a controller is -- by proof of the
+            // pairing secret, here over the token and the range -- plus a
+            // token that names one file.
             // Deliberately not routed through `approve`: that answers with a
             // state snapshot and starts the 1 Hz push, and this connection
             // carries video and then closes.
-            guard Self.pairedDevices().contains(deviceId), let url = streamGrants[token] else {
+            guard let secret = Self.pairings()[deviceId],
+                  RemoteAuth.verify(proof, role: .dataRequest, secret: secret, [token, "\(start)", "\(end)"]),
+                  let url = streamGrants[token] else {
                 session.connection.sendFrame(.dataError("not granted"))
                 session.connection.cancel()
                 return
@@ -169,7 +213,9 @@ public final class RemoteHost {
                 Task { @MainActor in self?.relays.removeValue(forKey: key) }
             }
             relays[key] = relay
-            relay.start(url: url, start: start, end: end)
+            relay.start(url: url, start: start, end: end) { length in
+                RemoteAuth.proof(.dataReply, secret: secret, [token, "\(start)", "\(end)", "\(length)"])
+            }
         case .syncOffer(let rows):
             guard session.isApproved else { return }
             // Merge first, then answer with everything this Mac knows --
@@ -178,7 +224,8 @@ public final class RemoteHost {
             // leaves both sides holding the same set.
             RemoteSync.merge(rows)
             session.connection.sendFrame(.syncReply(RemoteSync.export()))
-        case .helloAck, .hostInfo, .tracks, .state, .syncReply, .streamResolved, .dataHeader, .dataError:
+        case .helloAck, .challenge, .hostInfo, .tracks, .state, .syncReply, .streamResolved,
+             .dataHeader, .dataError:
             // Host-to-controller frames. A peer sending them is confused;
             // ignoring is cheaper than disconnecting over it.
             break
@@ -278,21 +325,33 @@ public final class RemoteHost {
         guard let request = pendingPairing else { return }
         pendingPairing = nil
         guard let session = sessions.values.first(where: { $0.deviceId == request.id }) else { return }
-        if approved {
-            var devices = Self.pairedDevices()
-            devices.insert(request.id)
-            UserDefaults.standard.set(Array(devices), forKey: Self.pairedDevicesKey)
-            approve(session)
-        } else {
-            session.connection.sendFrame(.helloAck(accepted: false, hostName: Platform.deviceName))
-            session.connection.cancel()
+        guard approved, let phoneKey = session.phoneKey else {
+            refuse(session)
+            return
         }
+        // The secret is made here, once, from a key that exists only for this
+        // exchange, and is never sent: the phone derives the same bytes from
+        // the public half in the reply.
+        let key = Curve25519.KeyAgreement.PrivateKey()
+        guard let secret = RemoteAuth.secret(mine: key, theirs: phoneKey) else {
+            refuse(session)
+            return
+        }
+        var pairings = Self.pairings()
+        pairings[request.id] = secret
+        UserDefaults.standard.set(pairings, forKey: Self.pairingsKey)
+        approve(session, authKey: RemoteAuth.publicKey(of: key))
+    }
+
+    private func refuse(_ session: Session) {
+        session.connection.sendFrame(.helloAck(accepted: false, hostName: Platform.deviceName, authKey: nil))
+        session.connection.cancel()
     }
 
     /// Forgets every paired phone. Their next command is ignored and their
     /// next hello prompts again.
     public func unpairAll() {
-        UserDefaults.standard.removeObject(forKey: Self.pairedDevicesKey)
+        UserDefaults.standard.removeObject(forKey: Self.pairingsKey)
         for session in sessions.values where session.isApproved {
             session.isApproved = false
             session.connection.cancel()
@@ -302,12 +361,18 @@ public final class RemoteHost {
     }
 
     public static func pairedDevices() -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: pairedDevicesKey) ?? [])
+        Set(pairings().keys)
     }
 
-    private func approve(_ session: Session) {
+    private static func pairings() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: pairingsKey) as? [String: String] ?? [:]
+    }
+
+    private func approve(_ session: Session, authKey: String? = nil) {
         session.isApproved = true
-        session.connection.sendFrame(.helloAck(accepted: true, hostName: Platform.deviceName))
+        // A frame as large as the sync table is now acceptable.
+        session.framer.limit = RemoteFramer.authenticatedLimit
+        session.connection.sendFrame(.helloAck(accepted: true, hostName: Platform.deviceName, authKey: authKey))
         session.connection.sendFrame(.hostInfo(
             version: RemoteFrame.currentVersion,
             features: Array(Self.features)
@@ -551,6 +616,12 @@ public final class RemoteHost {
         var deviceId: String?
         var deviceName: String?
         var isApproved = false
+        /// The phone's public key from its hello, kept for the pairing that
+        /// the person at the Mac may or may not allow.
+        var phoneKey: String?
+        /// Between the challenge going out and the proof coming back: the
+        /// secret it must be made with, and the two nonces it covers.
+        var challenge: (secret: String, phoneNonce: String, macNonce: String)?
 
         init(connection: NWConnection) {
             self.connection = connection

@@ -80,6 +80,7 @@ public final class iCloudSyncService: @unchecked Sendable {
     /// (which `saveAniListToken` always writes) skips the Keychain at startup and
     /// the prompt with it; the Keychain stays as a last-resort fallback only.
     public func getAniListToken() -> String? {
+        restrictTokenFiles()
         // 1. Config file first
         if let token = loadTokenFromConfigFile(), !token.isEmpty {
             return token.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -152,13 +153,36 @@ public final class iCloudSyncService: @unchecked Sendable {
 
         if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
             try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: fileURL, options: .atomic)
-            // The token is a bearer credential for the owner's AniList
-            // account and the file was created world-readable (0644, the
-            // umask default): any process running as the user, or a backup
-            // that keeps modes, could read it. `.atomic` renames a fresh temp
-            // file into place, so the mode is set on the final path, after.
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            writePrivate(data, to: fileURL)
+        }
+    }
+
+    /// Writes `data` over `url` so the file is never readable by anyone but
+    /// the owner, not even for an instant.
+    ///
+    /// The token is a bearer credential for the owner's AniList account.
+    /// `Data.write(options: .atomic)` renames a fresh temp file into place at
+    /// the umask default (0644), and every rewrite of `config.toml` did
+    /// exactly that: a measured install had a live token in a world-readable
+    /// file. The temp file is created 0600 and renamed, so the final path
+    /// never has another mode.
+    private func writePrivate(_ data: Data, to url: URL) {
+        let tmp = url.appendingPathExtension("tmp")
+        try? FileManager.default.removeItem(at: tmp)
+        guard FileManager.default.createFile(
+            atPath: tmp.path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
+        ) else { return }
+        if rename(tmp.path, url.path) != 0 { try? FileManager.default.removeItem(at: tmp) }
+    }
+
+    /// Tightens files an older build wrote at 0644. Runs on every read of the
+    /// token, because a file that already exists is not rewritten until the
+    /// next sign-in, which may never come.
+    private func restrictTokenFiles() {
+        for url in [configJSONURL, configTOMLURL] where FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         }
     }
 
@@ -199,7 +223,7 @@ public final class iCloudSyncService: @unchecked Sendable {
             json["api"] = apiDict
         }
         if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: fileURL, options: .atomic)
+            writePrivate(data, to: fileURL)
         }
     }
 
@@ -233,7 +257,7 @@ public final class iCloudSyncService: @unchecked Sendable {
         let range = NSRange(location: 0, length: (contents as NSString).length)
         if regex.firstMatch(in: contents, options: [], range: range) != nil {
             let updated = regex.stringByReplacingMatches(in: contents, options: [], range: range, withTemplate: "anilist_token = \"\(token)\"")
-            try? updated.write(to: fileURL, atomically: true, encoding: .utf8)
+            writePrivate(Data(updated.utf8), to: fileURL)
         }
     }
 
@@ -247,6 +271,6 @@ public final class iCloudSyncService: @unchecked Sendable {
         }
         let range = NSRange(location: 0, length: (contents as NSString).length)
         let updated = regex.stringByReplacingMatches(in: contents, options: [], range: range, withTemplate: "anilist_token = \"\"")
-        try? updated.write(to: fileURL, atomically: true, encoding: .utf8)
+        writePrivate(Data(updated.utf8), to: fileURL)
     }
 }

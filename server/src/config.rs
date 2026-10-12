@@ -103,6 +103,49 @@ pub fn save_token(data_dir: &Path, token: Option<&str>) -> std::io::Result<()> {
     // Write-then-rename: a crash mid-write otherwise leaves a truncated file
     // that parses as nothing, and the viewer is silently signed out.
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(&json).unwrap_or_default())?;
+    write_private(&tmp, &serde_json::to_vec_pretty(&json).unwrap_or_default())?;
     std::fs::rename(tmp, path)
+}
+
+/// Creates the file readable by its owner only. The token is a bearer
+/// credential for the viewer's AniList account, and `fs::write` leaves a new
+/// file at the umask default (0644 on a Unix host). Windows needs nothing:
+/// a file under `%APPDATA%` inherits that user's ACL.
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    // Removed first: the mode applies only when the file is created, and a
+    // leftover temp file from a crashed save would keep its old one.
+    let _ = std::fs::remove_file(path);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(bytes)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn the_token_file_is_never_readable_by_others() {
+        let dir = std::env::temp_dir().join(format!("anicat-config-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A temp file left at 0644 by an older build must not set the mode.
+        std::fs::create_dir_all(&dir).unwrap();
+        let stale = config_path(&dir).with_extension("json.tmp");
+        std::fs::write(&stale, b"{}").unwrap();
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        save_token(&dir, Some("secret")).unwrap();
+
+        let mode = std::fs::metadata(config_path(&dir)).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(load_token(&dir).as_deref(), Some("secret"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

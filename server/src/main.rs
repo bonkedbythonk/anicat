@@ -9,6 +9,7 @@
 
 mod config;
 mod error;
+mod guard;
 mod logging;
 mod player;
 mod routes;
@@ -201,7 +202,12 @@ async fn serve(state: AppState, listener: tokio::net::TcpListener, stop: impl Fu
     let player = state.player.clone();
     let stopped = Arc::new(tokio::sync::Notify::new());
     let stopped_signal = stopped.clone();
-    let app = routes::router(state.clone()).merge(player::routes::router().with_state(state));
+    // The layer goes on after the merge: a route added by either router is
+    // behind it without having to remember to be.
+    let port = state.port;
+    let app = routes::router(state.clone())
+        .merge(player::routes::router().with_state(state))
+        .layer(axum::middleware::from_fn_with_state(port, guard::guard));
     let shutdown = async move {
         stop.await;
         log::info!("shutting down");

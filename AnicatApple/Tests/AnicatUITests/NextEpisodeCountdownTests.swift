@@ -152,7 +152,20 @@ struct CountdownArmingTests {
         controller.autoPlayNextEnabled = true
         controller.autoSkipEnabled = false
         controller.hasNextEpisode = nextEpisode
+        // An episode that has actually played; the card never arms before
+        // that (see `neverPlayedDoesNotArm`).
+        controller.notePlayedPosition(0)
+        controller.notePlayedPosition(60)
         return controller
+    }
+
+    @Test("A load that lands on the end with nothing played does not arm or expire")
+    func neverPlayedDoesNotArm() {
+        let controller = makeController(nextEpisode: true)
+        controller.resetPlayedSpan()
+        controller.currentTime = 1440
+        controller.checkIntroStatus()
+        #expect(controller.nextEpisodeCountdown.phase == .idle)
     }
 
     @Test("It arms one countdown's length before the end of the file")

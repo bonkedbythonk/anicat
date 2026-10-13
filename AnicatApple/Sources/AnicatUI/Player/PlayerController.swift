@@ -1221,7 +1221,13 @@ public final class PlayerController {
               hasNextEpisode,
               !isMiniPlayerActive,
               !awaitingNewFile,
-              duration > 0 else { return }
+              duration > 0,
+              // A stream whose tail the source cannot serve (the Mac relay
+              // answered 502 for the last bytes) makes mpv's load land on the
+              // duration with nothing played. That read as "1431s of 1431s",
+              // the card expired in the same pass, and Next chained through
+              // three episodes in twelve seconds, none of them shown.
+              secondsActuallyPlayed >= AppModel.minimumPlaybackBeforeCompletionSeconds else { return }
         // The card arms exactly `NextEpisodeCountdown.seconds` before the end
         // of the file, because that is where the countdown expires:
         // `advance` fires at `armedAt + seconds`, so wherever this arms is

@@ -1304,13 +1304,6 @@ extension AppModel {
         cancelOpeningWatchdog()
         stalledReleaseNames = []
         openingSwitchCount = 0
-        #if os(iOS)
-        // Hands the grant back before anything else: the Mac keeps the file
-        // pinned out of its own cache eviction for as long as the token is
-        // live, and a phone that closed the player should not be holding
-        // that.
-        releaseRemoteStream()
-        #endif
         // Inline and ahead of the queue: it returns at once, and a play
         // started right after this close must not have its presence wiped by
         // a clear that ran later.
@@ -1694,23 +1687,7 @@ extension AppModel {
                 await inFlight.task.value
                 guard !Task.isCancelled else { throw CancellationError() }
             }
-            #if os(iOS)
-            // A Mac on the same Wi-Fi resolves and serves this instead,
-            // when there is one and it has approved this phone. The phone
-            // then joins no swarm, uploads nothing, and writes nothing to
-            // its own cache -- which is the whole point on a device with
-            // 128 GB and a battery. `remoteStreamURL` returns nil for every
-            // failure, so the local engine below stays the answer whenever
-            // the Mac is not there or says no.
-            if let remote = await remoteStreamURL(for: req) {
-                handleURL = remote.absoluteString
-            } else {
-                releaseRemoteStream()
-                handleURL = try await Self.resolveWithTimeout(engine: engine, req: req, timeoutSeconds: 120)
-            }
-            #else
             handleURL = try await Self.resolveWithTimeout(engine: engine, req: req, timeoutSeconds: 120)
-            #endif
             // The Cancel button (`cancelResolve`) only cancels *waiting* on
             // this Task, not the FFI call itself mid-flight — check here so
             // a resolve that finishes after the viewer already gave up

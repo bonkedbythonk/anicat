@@ -47,8 +47,8 @@ struct RemoteAuthTests {
     @Test("Moving a boundary between parts changes the proof")
     func partsAreLengthPrefixed() throws {
         let secret = Data(repeating: 7, count: 32).base64EncodedString()
-        let one = try #require(RemoteAuth.proof(.dataRequest, secret: secret, ["ab", "c"]))
-        let two = try #require(RemoteAuth.proof(.dataRequest, secret: secret, ["a", "bc"]))
+        let one = try #require(RemoteAuth.proof(.phone, secret: secret, ["ab", "c"]))
+        let two = try #require(RemoteAuth.proof(.phone, secret: secret, ["a", "bc"]))
         #expect(one != two)
     }
 

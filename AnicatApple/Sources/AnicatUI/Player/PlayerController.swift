@@ -595,7 +595,7 @@ public final class PlayerController {
     public var onPlaybackStopped: (@MainActor () -> Void)?
     /// mpv gave up on the file: a load error, or an end-of-file far short
     /// of the duration, which is what a stream whose source died mid-episode
-    /// looks like from here (the range server or a Mac relay stops
+    /// looks like from here (the range server stops
     /// answering, the demuxer reads EOF, mpv reports a normal end). Before
     /// this the dead stream was recorded as a finished episode: the position
     /// jumped to the duration, AniList was marked, auto-next armed.
@@ -1222,8 +1222,8 @@ public final class PlayerController {
               !isMiniPlayerActive,
               !awaitingNewFile,
               duration > 0,
-              // A stream whose tail the source cannot serve (the Mac relay
-              // answered 502 for the last bytes) makes mpv's load land on the
+              // A stream whose tail the source cannot serve (pieces not yet
+              // downloaded) makes mpv's load land on the
               // duration with nothing played. That read as "1431s of 1431s",
               // the card expired in the same pass, and Next chained through
               // three episodes in twelve seconds, none of them shown.

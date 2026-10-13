@@ -40,7 +40,6 @@ struct PhoneSettingsView: View {
     @AppStorage(AppModel.deleteWatchedDownloadsKey) private var deleteWatchedDownloads: Bool = true
     @AppStorage(AppModel.backgroundDownloadsKey) private var backgroundDownloads: Bool = true
     // `AppModel.isStreamFromMacEnabled` owns the reader and the default.
-    @AppStorage("anicat_stream_from_mac") private var streamFromMac: Bool = false
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     // `AppModel.isLnoriEnabled` owns the reader and the default (off).
     @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
@@ -242,10 +241,6 @@ struct PhoneSettingsView: View {
             Text("Asked before each episode you start off Wi-Fi. Personal hotspots count.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(SumiTheme.muted)
-            Toggle("Stream from Mac when available", isOn: $streamFromMac)
-            Text("Plays through a Mac running Anicat on this Wi-Fi, so the phone joins no swarm and stores nothing. Falls back to streaming here when no Mac answers.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(SumiTheme.muted)
         }
     }
 
@@ -425,7 +420,6 @@ struct PhoneSettingsView: View {
                 Platform: \(Platform.osName) \(ProcessInfo.processInfo.operatingSystemVersionString)
                 Signed In: \(model.isSignedIn)
                 AniList Viewer: \(model.viewer?.name ?? "None")
-                Stream from Mac: \(streamFromMac ? "Enabled" : "Disabled")
                 Timestamp: \(Date())
                 """
                 Platform.copyToPasteboard(report)

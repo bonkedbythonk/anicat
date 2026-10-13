@@ -151,23 +151,6 @@ struct RemoteHandshakeTests {
         #expect(RemoteHost.shared.pendingPairing == nil)
     }
 
-    @Test("A data connection without the secret's proof is refused")
-    func dataConnectionNeedsTheProof() async throws {
-        let harness = try await Harness()
-        defer { harness.tearDown() }
-        #expect(await pair(harness))
-        RemoteClient.shared.disconnect()
-
-        let peer = RawPeer(port: harness.node.controlPort, send: .frames([
-            .helloData(deviceId: RemoteClient.deviceId, token: "any", start: 0, end: 10, proof: nil),
-        ]))
-        // Hung up on, with no header: the Mac cancels straight after the
-        // `dataError`, so the frame itself may never reach the peer.
-        #expect(await waitUntil { peer.closed })
-        #expect(!peer.frames.contains { if case .dataHeader = $0 { return true } else { return false } })
-        peer.cancel()
-    }
-
     @Test("An unauthenticated peer that never ends a line is cut off")
     func floodIsCutOff() async throws {
         let harness = try await Harness()

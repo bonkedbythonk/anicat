@@ -367,18 +367,6 @@ struct PhonePlayerView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Where the bytes come from, when that is another machine.
-            if AppModel.shared?.activeRemoteStreamToken != nil,
-               let node = BonjourDiscovery.shared.discoveredMacNode {
-                Label("via \(node.name)", systemImage: "macbook")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(.black.opacity(0.35), in: Capsule())
-                    .lineLimit(1)
-            }
-
             // Out of the menu and onto the bar: choosing another episode is
             // the thing a streaming app's player is most often opened for,
             // and Next/Previous in the overflow menu only reached neighbours.
@@ -1251,10 +1239,9 @@ struct PhonePlayerView: View {
                     .sumiTabularMono(size: 11)
                     .foregroundStyle(.white.opacity(0.8))
             }
-            // Not while the Mac serves the stream: the phone's engine may
-            // still hold a preload or its last local torrent, whose peers
-            // say nothing about this one.
-            if controller.resolveStatus == nil, AppModel.shared?.activeRemoteStreamToken == nil {
+            // Not during a resolve: the engine may still hold the torrent
+            // being left, whose peers say nothing about the one coming.
+            if controller.resolveStatus == nil {
                 SwarmLine(controller: controller)
             }
             // A spinner that has sat for a quarter of a minute with mpv's

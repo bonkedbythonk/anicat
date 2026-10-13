@@ -27,7 +27,7 @@ verifiable in the source: the hosts are literals in `core/src/` and
 | Setting | To | What they see |
 |---|---|---|
 | Settings > Sharing > Discord Rich Presence | Discord, over its local socket on this machine | In "Title" mode: the title, episode or chapter, cover art and an AniList or TMDB link, shown to everyone who can see your Discord profile. In "Private" mode: only "Watching anime" or "Reading manga" and the time |
-| Settings > Sharing > Allow Other Devices | Everything on your local network, via Bonjour | This Mac's device name and that Anicat is running. A paired iPhone can then control playback and stream through the Mac |
+| Settings > Sharing > Allow Other Devices | Everything on your local network, via Bonjour | This Mac's device name and that Anicat is running. A paired iPhone can then control playback on this Mac |
 | Handoff (macOS, between your own devices signed into the same Apple ID) | Apple's Handoff relay | The title, episode and position, so another of your Macs can offer to continue it |
 
 ## What stays on your machine

@@ -38,18 +38,11 @@ public final class RemoteHost {
 
     private var sessions: [ObjectIdentifier: Session] = [:]
     private var pushTask: Task<Void, Never>?
-    /// Tokens a phone may read a resolved file with, and the loopback URL
-    /// each one stands for. Minted per resolve, dropped when the phone says
-    /// it stopped or when its control connection goes -- otherwise a phone
-    /// that watched one episode would hold a handle to that file for the
-    /// life of the process.
-    private var streamGrants: [String: URL] = [:]
     /// Where a flung episode should land, held until the file is actually
     /// open. Seeking straight after `handleDeepLink` seeks the *outgoing*
     /// file -- the link only starts a resolve, and mpv is still on whatever
     /// was playing (or on nothing) for as long as that takes.
     private var pendingSeek: Double?
-    private var relays: [ObjectIdentifier: StreamRelay] = [:]
 
     /// Pairing secrets by `deviceId`. A new key, deliberately: the old
     /// `anicat_remote_paired_devices` held bare ids, which any phone's hello
@@ -188,34 +181,6 @@ public final class RemoteHost {
             default:
                 apply(command)
             }
-        case .streamResolve(let id, let ask):
-            guard session.isApproved else { return }
-            Task { await self.grantStream(id: id, ask: ask, to: session) }
-        case .streamRelease(let token):
-            guard session.isApproved else { return }
-            streamGrants.removeValue(forKey: token)
-        case .helloData(let deviceId, let token, let start, let end, let proof):
-            // Authenticated the same way a controller is -- by proof of the
-            // pairing secret, here over the token and the range -- plus a
-            // token that names one file.
-            // Deliberately not routed through `approve`: that answers with a
-            // state snapshot and starts the 1 Hz push, and this connection
-            // carries video and then closes.
-            guard let secret = Self.pairings()[deviceId],
-                  RemoteAuth.verify(proof, role: .dataRequest, secret: secret, [token, "\(start)", "\(end)"]),
-                  let url = streamGrants[token] else {
-                session.connection.sendFrame(.dataError("not granted"))
-                session.connection.cancel()
-                return
-            }
-            sessions.removeValue(forKey: key)
-            let relay = StreamRelay(connection: session.connection) { [weak self] in
-                Task { @MainActor in self?.relays.removeValue(forKey: key) }
-            }
-            relays[key] = relay
-            relay.start(url: url, start: start, end: end) { length in
-                RemoteAuth.proof(.dataReply, secret: secret, [token, "\(start)", "\(end)", "\(length)"])
-            }
         case .syncOffer(let rows):
             guard session.isApproved else { return }
             // Merge first, then answer with everything this Mac knows --
@@ -224,8 +189,7 @@ public final class RemoteHost {
             // leaves both sides holding the same set.
             RemoteSync.merge(rows)
             session.connection.sendFrame(.syncReply(RemoteSync.export()))
-        case .helloAck, .challenge, .hostInfo, .tracks, .state, .syncReply, .streamResolved,
-             .dataHeader, .dataError:
+        case .helloAck, .challenge, .hostInfo, .tracks, .state, .syncReply:
             // Host-to-controller frames. A peer sending them is confused;
             // ignoring is cheaper than disconnecting over it.
             break
@@ -233,90 +197,10 @@ public final class RemoteHost {
     }
 
     private func drop(_ key: ObjectIdentifier) {
-        if let relay = relays.removeValue(forKey: key) { relay.cancel() }
         guard let session = sessions.removeValue(forKey: key) else { return }
         session.connection.cancel()
         if pendingPairing?.id == session.deviceId { pendingPairing = nil }
-        // A controller going away takes its grants with it. Data connections
-        // are short-lived and already closed by the time this runs; what
-        // this stops is a phone that quit mid-episode leaving a live handle
-        // to a file behind it.
-        if session.isApproved, !sessions.values.contains(where: { $0.isApproved }) {
-            streamGrants.removeAll()
-        }
         refreshAttachment()
-    }
-
-    /// Resolves an episode on this Mac and answers with a token the phone
-    /// can read it through.
-    ///
-    /// `preload: false` on purpose: the phone is about to play this, so the
-    /// file has to take `TorrentManager::playing_file` or `retain_recent`
-    /// can evict it from under the reader. That pin is all `set_playing`
-    /// does -- Discord presence and progress recording are Swift-side and
-    /// are not touched here, so the Mac does not publish itself as watching
-    /// something a phone is streaming.
-    private func grantStream(id: String, ask: StreamAsk, to session: Session) async {
-        guard let engine = AppModel.shared?.engine else {
-            session.connection.sendFrame(.streamResolved(id: id, grant: nil, error: "engine not ready"))
-            return
-        }
-        let request = StreamRequest(
-            catalog: Self.catalog(named: ask.catalog) ?? .anilist,
-            catalogId: ask.catalogId,
-            episode: ask.episode,
-            title: ask.title,
-            preferDub: ask.preferDub,
-            chosenName: ask.chosenName,
-            resumeFraction: ask.resumeFraction,
-            preload: false
-        )
-        do {
-            let handle = try await engine.resolveStream(req: request)
-            guard let url = URL(string: handle.url) else {
-                session.connection.sendFrame(.streamResolved(id: id, grant: nil, error: "bad stream url"))
-                return
-            }
-            // One byte, purely to read `Content-Range: bytes 0-0/TOTAL` back.
-            // The route is registered for GET only, so a HEAD is a 405 and
-            // there is no other way to learn the length from here.
-            let (total, type) = try await Self.probe(url)
-            let token = UUID().uuidString
-            streamGrants[token] = url
-            session.connection.sendFrame(.streamResolved(
-                id: id,
-                grant: StreamGrant(token: token, totalLength: total, contentType: type),
-                error: nil
-            ))
-        } catch {
-            session.connection.sendFrame(.streamResolved(id: id, grant: nil, error: error.localizedDescription))
-        }
-    }
-
-    private static func probe(_ url: URL) async throws -> (Int64, String) {
-        var request = URLRequest(url: url)
-        request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              let range = http.value(forHTTPHeaderField: "Content-Range"),
-              let total = range.split(separator: "/").last.flatMap({ Int64($0) }) else {
-            throw NSError(
-                domain: "Anicat",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "range server did not report a length"]
-            )
-        }
-        return (total, http.value(forHTTPHeaderField: "Content-Type") ?? "video/x-matroska")
-    }
-
-    private static func catalog(named name: String) -> FfiCatalog? {
-        switch name {
-        case "anilist": return .anilist
-        case "tmdb_movie": return .tmdbMovie
-        case "tmdb_tv": return .tmdbTv
-        case "mangadex": return .mangaDex
-        default: return nil
-        }
     }
 
     // MARK: - Pairing

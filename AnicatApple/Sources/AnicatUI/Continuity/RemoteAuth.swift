@@ -52,8 +52,6 @@ enum RemoteAuth {
     enum Role: String {
         case mac = "anicat-mac"
         case phone = "anicat-phone"
-        case dataRequest = "anicat-data-request"
-        case dataReply = "anicat-data-reply"
     }
 
     static func proof(_ role: Role, secret: String, _ parts: [String]) -> String? {

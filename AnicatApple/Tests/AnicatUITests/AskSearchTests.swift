@@ -75,4 +75,14 @@ struct AskSearchTests {
         #expect(AskSearch.smallTalk("hi, something like Frieren") == nil)
         #expect(AskSearch.smallTalk("something lighter") == nil)
     }
+
+    @Test("a show is found in the wording when the model cannot read it", arguments: [
+        ("something like Frieren but darker", ["Frieren"]),
+        ("i watched More than a married couple but not lovers and loved it, what next?", ["More than a married couple"]),
+        ("anime like One Piece and Fairy Tail", ["One Piece"]),
+        ("a cozy romance with magic", []),
+    ])
+    func guessedShows(text: String, expected: [String]) {
+        #expect(AskSearch.guessShows(text) == expected)
+    }
 }

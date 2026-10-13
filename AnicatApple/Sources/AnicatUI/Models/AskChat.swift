@@ -110,6 +110,36 @@ enum AskSearch {
         ) != nil
     }
 
+    /// Hands out the one answer a time-limited call gets.
+    @MainActor private final class Gate {
+        private var used = false
+        func open() -> Bool {
+            if used { return false }
+            used = true
+            return true
+        }
+    }
+
+    /// The result of `work`, or `fallback` once `seconds` have passed. One turn
+    /// makes several AniList calls and the engine sleeps a rate-limit cooldown
+    /// out inside each, up to a minute apiece; the model's first call has also
+    /// taken ~18 s. Without a limit a bad minute was a spinner that never ended.
+    /// The slow work is not cancelled (it sits in calls that do not observe
+    /// cancellation); its late result is dropped.
+    @MainActor static func within<T: Sendable>(seconds: UInt64, fallback: T, _ work: @escaping @MainActor () async -> T) async -> T {
+        let gate = Gate()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
+            Task { @MainActor in
+                let result = await work()
+                if gate.open() { continuation.resume(returning: result) }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                if gate.open() { continuation.resume(returning: fallback) }
+            }
+        }
+    }
+
     /// A greeting or a thank-you, which is a chat turn and not a request.
     static func smallTalk(_ text: String) -> String? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -121,6 +151,18 @@ enum AskSearch {
             return "Hi. Tell me a show you liked, or what you are in the mood for."
         }
         return nil
+    }
+
+    /// A show named after "like", "watched" and the like, for when the model
+    /// cannot read the message. "something like Frieren but darker" gives
+    /// "Frieren"; a title that runs past "but" or "and" is cut there.
+    static func guessShows(_ text: String) -> [String] {
+        let pattern = #"(?:like|similar to|watched|loved|liked|enjoyed)\s+(.+?)(?=\s+(?:but|and|with|because)\b|[,.?!]|$)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range(at: 1), in: text) else { return [] }
+        let name = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty || name.split(separator: " ").count > 6 ? [] : [name]
     }
 
     /// "surprise me": no show and no genre, the viewer's own taste is the brief.
@@ -225,36 +267,11 @@ final class AskChat {
         isOpen = false
     }
 
-    /// Hands out the one answer a turn gets: the reply, or the time-out.
-    @MainActor private final class Gate {
-        private var used = false
-        func open() -> Bool {
-            if used { return false }
-            used = true
-            return true
-        }
-    }
-
-    /// A reply, or a plain message once `seconds` have passed. One turn makes
-    /// several AniList calls and the engine sleeps a rate-limit cooldown out
-    /// inside each, up to a minute apiece; the model's first call has also taken
-    /// ~18 s. Without a limit a bad minute was a spinner that never ended. The
-    /// slow work is not cancelled (it sits in calls that do not observe
-    /// cancellation); its late answer is dropped.
     private func answerWithin(seconds: UInt64, _ text: String, model: AppModel) async -> Message {
-        let gate = Gate()
-        return await withCheckedContinuation { (continuation: CheckedContinuation<Message, Never>) in
-            Task { @MainActor in
-                let reply = await self.answer(text, model: model)
-                if gate.open() { continuation.resume(returning: reply) }
-            }
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-                if gate.open() {
-                    continuation.resume(returning: Message(role: .assistant, text: "That is taking too long. Try asking again in a moment."))
-                }
-            }
-        }
+        await AskSearch.within(
+            seconds: seconds,
+            fallback: Message(role: .assistant, text: "That is taking too long. Try asking again in a moment.")
+        ) { await self.answer(text, model: model) }
     }
 
     private func answer(_ text: String, model: AppModel) async -> Message {
@@ -325,8 +342,11 @@ final class AskChat {
             return Message(role: .assistant, text: "AniList is rate limiting right now. Try again in about \(cooldown) seconds.")
         }
         status = "Reading your message"
+        // The system model can fail outright while still reporting itself
+        // available (its sensitive-content model not loading, `error 15`, failed
+        // every call including "hello"), so show names fall back on the wording.
         let intent = (try? await LanguageModelSession(instructions: "Read an anime viewer's message.")
-            .respond(to: text, generating: Intent.self).content) ?? Intent(shows: [])
+            .respond(to: text, generating: Intent.self).content) ?? Intent(shows: AskSearch.guessShows(text))
         // The model volunteers things the viewer never typed: "Naruto" for
         // "something a bit more dramatic", "Action" for "fewer ecchi, and
         // shorter", and no Ecchi at all for "what about an ecchi". So it is
@@ -436,7 +456,16 @@ final class AskChat {
                 brain = nil
             }
         }
-        return Message(role: .assistant, text: "I could not come up with an answer just now. Try asking again.")
+        // Both attempts failed: the candidates are already filtered to what was
+        // asked, so show the first of them and say why there is no sentence.
+        let plain = Array(pool.prefix(4))
+        shown.formUnion(plain.map { $0.facts.media.catalogId })
+        return Message(
+            role: .assistant,
+            text: "Apple Intelligence is not answering right now, so these are plain matches for what you asked.",
+            cards: plain.map(Self.card),
+            suggestions: ["Shorter", "Something I've seen already", "Surprise me"]
+        )
     }
 
     /// The viewer's own list, best rated first, for "something i've seen

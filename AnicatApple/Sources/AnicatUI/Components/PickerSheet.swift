@@ -7,7 +7,7 @@ public enum PickerMood: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
 }
 
-public struct PickerCandidate: Identifiable, Equatable {
+public struct PickerCandidate: Identifiable, Equatable, Sendable {
     public let item: MediaCard.Item
     public let score: Double
     public let reasons: [String]
@@ -31,6 +31,14 @@ public struct PickerSheet: View {
     @State private var filterComfy = false
     @State private var filterIntense = false
     @State private var cursor = 0
+    // A mood typed in: the model's order of the same lists, its reason for the
+    // first pick, and a line to show when it could not answer.
+    @State private var moodText = ""
+    @State private var aiOrder: [PickerCandidate]?
+    @State private var aiReason: String?
+    @State private var askNote: String?
+    @State private var isAsking = false
+    @FocusState private var moodFocused: Bool
 
     public init(
         model: AppModel,
@@ -57,8 +65,79 @@ public struct PickerSheet: View {
     }
 
     private var currentPick: PickerCandidate? {
-        guard !candidates.isEmpty else { return nil }
-        return candidates[cursor % candidates.count]
+        let active = aiOrder ?? candidates
+        guard !active.isEmpty else { return nil }
+        let pick = active[cursor % active.count]
+        // The model's sentence is about the first pick it chose, so it leads that
+        // one only; "Show another" goes back to each title's own reasons.
+        if aiOrder != nil, cursor % active.count == 0, let aiReason {
+            return PickerCandidate(item: pick.item, score: pick.score, reasons: [aiReason])
+        }
+        return pick
+    }
+
+    /// What reorders or empties the model's pick: a different mode or filter
+    /// no longer describes the list it ranked.
+    private var filterKey: String { "\(mood.rawValue)|\(filterShort)|\(filterComfy)|\(filterIntense)" }
+
+    private func resetAsk() {
+        aiOrder = nil
+        aiReason = nil
+        askNote = nil
+    }
+
+    private func askMood() {
+        let text = moodText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isAsking, let engine = model.engine else { return }
+        isAsking = true
+        askNote = nil
+        let base = candidates
+        Task {
+            let outcome = await AskSearch.within(
+                seconds: 40,
+                fallback: MoodPick.Outcome.note("That is taking too long. Try again in a moment.")
+            ) { await MoodPick.rank(text, from: base, engine: engine) }
+            isAsking = false
+            // The field kept the caret and drew the typed words as selected once
+            // the answer arrived; letting go of it leaves them plain.
+            moodFocused = false
+            switch outcome {
+            case .picks(let order, let reason):
+                withAnimation(.smooth) {
+                    aiOrder = order
+                    aiReason = reason
+                    cursor = 0
+                }
+            case .note(let note):
+                askNote = note
+            }
+        }
+    }
+
+    private var moodField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                TextField("I'm in the mood for…", text: $moodText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13.5))
+                    .foregroundColor(SumiTheme.foreground)
+                    .focused($moodFocused)
+                    .onSubmit(askMood)
+                if isAsking {
+                    ProgressView().scaleEffect(0.7).tint(SumiTheme.indigo)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
+            if let askNote {
+                Text(askNote)
+                    .font(.system(size: 12))
+                    .foregroundColor(SumiTheme.muted)
+            }
+        }
+        .padding(.top, 16)
     }
 
     public var body: some View {
@@ -113,7 +192,8 @@ public struct PickerSheet: View {
                                 Text(firstReason)
                                     .font(.system(size: 12))
                                     .foregroundColor(SumiTheme.indigo)
-                                    .lineLimit(1)
+                                    .lineLimit(aiOrder == nil ? 1 : 3)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         .padding(.top, 6)
@@ -164,6 +244,10 @@ public struct PickerSheet: View {
                 .frame(maxWidth: .infinity, minHeight: 210)
             }
 
+            if AskSearch.isAvailable {
+                moodField
+            }
+
             // Secondary, not primary: "Watch this" is the sheet's one
             // indigo button, and two read as two equal choices.
             HStack {
@@ -177,6 +261,10 @@ public struct PickerSheet: View {
         .padding(20)
         .frame(width: 540)
         .background(SumiTheme.background)
+        .onChange(of: filterKey) { _, _ in resetAsk() }
+        .onChange(of: moodText) { _, text in
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { resetAsk() }
+        }
     }
 
     private var filterRow: some View {

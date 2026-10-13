@@ -138,6 +138,7 @@ struct PhonePlayerView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.25), value: controller.areControlsVisible)
         // Always hidden, not just while the controls are up: the system
         // player hides it for the whole session, and leaving it on put the
         // clock in the same strip as the title.
@@ -208,7 +209,7 @@ struct PhonePlayerView: View {
                     .foregroundStyle(SumiTheme.foreground)
                     .lineLimit(1)
                 Text("Ep \(controller.episodeNumber) \u{00B7} -\(Self.timestamp(max(0, controller.duration - controller.currentTime)))")
-                    .font(.system(size: 10.5, design: .monospaced))
+                    .sumiTabularMono(size: 10.5)
                     .foregroundStyle(SumiTheme.muted)
                     .lineLimit(1)
             }
@@ -310,25 +311,21 @@ struct PhonePlayerView: View {
                     })
             }
 
-            // Scrims rather than a flat dim: white glyphs over a bright frame
-            // are unreadable without one, and dimming the whole picture to
-            // fix that is what the system player pointedly does not do.
-            VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(0.55), .clear],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(height: 120)
-                Spacer()
-                LinearGradient(colors: [.clear, .black.opacity(0.65)],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(height: 160)
-            }
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
+            // The system player dims the whole picture while its controls
+            // are up, not the two ends: glyphs sit over any frame, and the
+            // dim is what makes bare white transport buttons (no circle
+            // behind them) readable. Gone with the controls.
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
+            // Centred on the screen, not between the bars: `transportButton`
+            // maps taps on the bare picture to these buttons by distance
+            // from the centre.
+            transport
 
             VStack {
                 topBar
-                Spacer()
-                transport
                 Spacer()
                 bottomBar
             }
@@ -337,7 +334,7 @@ struct PhonePlayerView: View {
             // the home indicator on a real phone — in landscape the notch
             // inset lands on a *side*, which no horizontal constant can know
             // about. `safeAreaPadding` is the only thing that does.
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 20)
             .padding(.vertical, 10)
         }
     }
@@ -350,20 +347,20 @@ struct PhonePlayerView: View {
             // mini bar.
             Button(action: onMinimize) {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 44, height: 44)
                     .playerGlass(in: Circle())
             }
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(controller.title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                 if !controller.episodeTitle.isEmpty {
                     Text("Episode \(controller.episodeNumber) · \(controller.episodeTitle)")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.7))
                         .lineLimit(1)
                 }
@@ -385,20 +382,24 @@ struct PhonePlayerView: View {
             // Out of the menu and onto the bar: choosing another episode is
             // the thing a streaming app's player is most often opened for,
             // and Next/Previous in the overflow menu only reached neighbours.
-            if !controller.episodeList.isEmpty {
-                Button {
-                    showEpisodes = true
-                } label: {
-                    Image(systemName: "rectangle.stack")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .playerGlass(in: Circle())
+            // One glass capsule for the pair, as the system player groups
+            // its trailing buttons.
+            HStack(spacing: 0) {
+                if !controller.episodeList.isEmpty {
+                    Button {
+                        showEpisodes = true
+                    } label: {
+                        Image(systemName: "rectangle.stack")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Episodes")
                 }
-                .accessibilityLabel("Episodes")
-            }
 
-            tracksMenu
+                tracksMenu
+            }
+            .playerGlass(in: Capsule())
         }
     }
 
@@ -573,10 +574,9 @@ struct PhonePlayerView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(.black.opacity(0.35), in: Circle())
+                .frame(width: 44, height: 44)
         }
         // A tap gesture on a `Menu` never fires (the menu's own recogniser
         // takes the touch), so the press is read off the button style.
@@ -628,7 +628,7 @@ struct PhonePlayerView: View {
                                         .font(.system(size: 13))
                                         .lineLimit(2)
                                     Text(Self.releaseDetail(release))
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .sumiTabularMono(size: 11)
                                         .foregroundStyle(.secondary)
                                     // The engine tries this one first on
                                     // every play and never said so; a
@@ -636,7 +636,7 @@ struct PhonePlayerView: View {
                                     // know which one already worked.
                                     if release.name == controller.rememberedReleaseName {
                                         Text("Played last time")
-                                            .font(.system(size: 10, design: .monospaced))
+                                            .sumiTabularMono(size: 10)
                                             .foregroundStyle(.secondary)
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 1)
@@ -729,13 +729,13 @@ struct PhonePlayerView: View {
                                 .stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                                 .rotationEffect(.degrees(-90))
                             Text("\(max(1, Int(controller.nextEpisodeCountdown.remaining(at: controller.currentTime).rounded(.up))))")
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .sumiTabularMono(size: 12, weight: .semibold)
                                 .foregroundStyle(.white)
                         }
                         .frame(width: 34, height: 34)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Up next")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .sumiTabularMono(size: 10, weight: .semibold)
                                 .foregroundStyle(.white.opacity(0.7))
                             Text(next.map { "Episode \($0.number)\($0.title.isEmpty ? "" : " \u{00B7} \($0.title)")" } ?? "Next episode")
                                 .font(.system(size: 13, weight: .semibold))
@@ -783,7 +783,7 @@ struct PhonePlayerView: View {
             Image(systemName: hud.symbol)
                 .font(.system(size: 26, weight: .regular))
             Text(hud.text)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .sumiTabularMono(size: 12, weight: .semibold)
             if let fraction = hud.fraction {
                 Capsule()
                     .fill(.white.opacity(0.3))
@@ -841,33 +841,46 @@ struct PhonePlayerView: View {
         }
     }
 
+    /// Bare white glyphs over the dim, large, and play/pause morphing rather
+    /// than swapping, as the system player draws them.
     @ViewBuilder
     private var transport: some View {
-        HStack(spacing: 46) {
+        HStack(spacing: Self.transportGap) {
             Button { seek(by: -5) } label: {
                 Image(systemName: "gobackward.5")
-                    .font(.system(size: 30, weight: .regular))
+                    .font(.system(size: 36, weight: .regular))
+                    .frame(width: Self.skipCell, height: Self.skipCell)
             }
             Button {
                 controller.togglePlayPause()
                 controller.showControlsBriefly()
             } label: {
                 Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 40, weight: .regular))
-                    .frame(width: 54, height: 54)
+                    .font(.system(size: 50, weight: .regular))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: Self.playCell, height: Self.playCell)
             }
             Button { seek(by: 5) } label: {
                 Image(systemName: "goforward.5")
-                    .font(.system(size: 30, weight: .regular))
+                    .font(.system(size: 36, weight: .regular))
+                    .frame(width: Self.skipCell, height: Self.skipCell)
             }
         }
+        .buttonStyle(TransportPressStyle())
         .foregroundStyle(.white)
     }
+
+    static let playCell: CGFloat = 76
+    static let skipCell: CGFloat = 52
+    static let transportGap: CGFloat = 44
 
     private var bottomBar: some View {
         PhoneBottomBar(controller: controller, scrubTarget: $scrubTarget)
     }
 
+    /// Times under the scrubber, small and quiet; what is left, not the total,
+    /// because that is the number people read.
+    ///
     /// Its own view so the playhead's 4 Hz tick re-evaluates this bar and
     /// not `PhonePlayerView.body`. Read there, every tick rebuilt the
     /// overflow `Menu` too (measured: `tracksMenu` built 4 times a second
@@ -878,23 +891,10 @@ struct PhonePlayerView: View {
         @Binding var scrubTarget: Double?
 
         var body: some View {
-            HStack(spacing: 12) {
-                Text(PhonePlayerView.timestamp(scrubTarget ?? controller.currentTime))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .frame(width: 46, alignment: .leading)
-
-                if controller.playbackRate != 1.0 {
-                    Text(PhonePlayerView.speedLabel(controller.playbackRate))
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(.white.opacity(0.22), in: Capsule())
-                }
-
+            let position = scrubTarget ?? controller.currentTime
+            VStack(spacing: 2) {
                 Scrubber(
-                    value: scrubTarget ?? controller.currentTime,
+                    value: position,
                     duration: max(controller.duration, 0.001),
                     buffered: controller.bufferedRanges,
                     marks: controller.chapters.map(\.time),
@@ -912,12 +912,18 @@ struct PhonePlayerView: View {
                 )
                 .frame(height: 28)
 
-                // Remaining, not total: the system player shows what is left and
-                // that is the number people are actually reading.
-                Text("-" + PhonePlayerView.timestamp(max(0, controller.duration - (scrubTarget ?? controller.currentTime))))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .frame(width: 50, alignment: .trailing)
+                HStack {
+                    Text(PhonePlayerView.timestamp(position))
+                    Spacer()
+                    if controller.playbackRate != 1.0 {
+                        Text(PhonePlayerView.speedLabel(controller.playbackRate))
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                    Text("-" + PhonePlayerView.timestamp(max(0, controller.duration - position)))
+                }
+                .sumiTabularMono(size: 12, weight: .semibold)
+                .foregroundStyle(.white.opacity(0.7))
             }
         }
     }
@@ -1121,19 +1127,19 @@ struct PhonePlayerView: View {
 
     private enum TransportButton { case rewind, playPause, forward }
 
-    /// The transport row sits at the centre of the screen: play/pause 54pt
-    /// wide, a 46pt gap, and a rewind or forward glyph about 32pt wide on
-    /// each side, so the neighbours are centred roughly 89pt out. The zones
-    /// are the buttons' cells plus the gap, a little taller than the glyphs
-    /// so a thumb that lands near one still counts.
+    /// The transport row sits at the centre of the screen: play/pause in a
+    /// `playCell` square, `transportGap` either side, then a `skipCell`
+    /// square. The zones are those cells plus the gaps, a little taller than
+    /// the glyphs so a thumb that lands near one still counts.
     private func transportButton(at point: CGPoint, in size: CGSize) -> TransportButton? {
         let dx = point.x - size.width / 2
         let dy = point.y - size.height / 2
-        guard abs(dy) <= 44 else { return nil }
-        switch dx {
-        case -45...45: return .playPause
-        case -135 ..< -45: return .rewind
-        case 45 ..< 135: return .forward
+        guard abs(dy) <= Self.playCell / 2 else { return nil }
+        let inner = Self.playCell / 2
+        let outer = inner + Self.transportGap + Self.skipCell
+        switch abs(dx) {
+        case 0 ..< inner: return .playPause
+        case inner ..< outer: return dx < 0 ? .rewind : .forward
         default: return nil
         }
     }
@@ -1223,7 +1229,7 @@ struct PhonePlayerView: View {
             // longer than that reads as frozen.
             if let status = controller.resolveStatus {
                 Text(PlayerController.withElapsed(status, controller.resolveElapsedSeconds))
-                    .font(.system(size: 11, design: .monospaced))
+                    .sumiTabularMono(size: 11)
                     .foregroundStyle(.white.opacity(0.8))
                 Button {
                     AppModel.shared?.cancelResolve()
@@ -1238,11 +1244,11 @@ struct PhonePlayerView: View {
                 .buttonStyle(.plain)
             } else if let percent = controller.bufferingPercent {
                 Text("\(percent)%")
-                    .font(.system(size: 11, design: .monospaced))
+                    .sumiTabularMono(size: 11)
                     .foregroundStyle(.white.opacity(0.8))
             } else if let seconds = controller.resolveElapsedSeconds {
                 Text(PlayerController.withElapsed("Searching indexers", seconds))
-                    .font(.system(size: 11, design: .monospaced))
+                    .sumiTabularMono(size: 11)
                     .foregroundStyle(.white.opacity(0.8))
             }
             // Not while the Mac serves the stream: the phone's engine may
@@ -1262,7 +1268,7 @@ struct PhonePlayerView: View {
                     if stalled >= Self.stallNudgeSeconds {
                         VStack(spacing: 8) {
                             Text("Stalled for \(stalled)s")
-                                .font(.system(size: 11, design: .monospaced))
+                                .sumiTabularMono(size: 11)
                                 .foregroundStyle(.white.opacity(0.8))
                             Button {
                                 showReleases = true
@@ -1310,7 +1316,7 @@ private struct SwarmLine: View {
         // Always a `Text`, never an empty branch: the `task` below needs a
         // view to hang on from the first frame.
         Text(line ?? " ")
-            .font(.system(size: 11, design: .monospaced))
+            .sumiTabularMono(size: 11)
             .foregroundStyle(.white.opacity(0.65))
             .task {
                 while !Task.isCancelled {
@@ -1361,7 +1367,7 @@ private struct PlayerEpisodeRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(isCurrent ? "EPISODE \(episode.number) \u{00B7} NOW PLAYING" : "EPISODE \(episode.number)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .sumiTabularMono(size: 10, weight: .semibold)
                     .foregroundStyle(isCurrent ? SumiTheme.indigo : SumiTheme.muted)
                 if !episode.title.isEmpty {
                     Text(episode.title)
@@ -1462,6 +1468,16 @@ private struct Scrubber: View {
                     }
             )
         }
+    }
+}
+
+/// The system player's transport buttons dip and dim under the finger.
+private struct TransportPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .scaleEffect(configuration.isPressed ? 0.88 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

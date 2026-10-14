@@ -36,6 +36,9 @@ pub struct VersionInfo {
     pub page_url: Option<String>,
     pub update_available: bool,
     pub checked_at: u64,
+    /// Whether `/api/update` can run the installer here. The page shows its
+    /// Update now button only then; the same crate serves Android.
+    pub can_install: bool,
 }
 
 #[derive(Deserialize)]
@@ -87,8 +90,34 @@ pub async fn check(http: &reqwest::Client, data_dir: &Path) -> VersionInfo {
         page_url: cached.page_url,
         update_available,
         checked_at: cached.checked_at,
+        can_install: cfg!(windows),
     }
 }
+
+/// Runs the installer script the page's copy-paste command runs, detached
+/// from this process. The installer stops anicat.exe to replace it, so it
+/// must outlive its parent, and it reopens Anicat when it is done.
+#[cfg(windows)]
+pub fn start_install() -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // The window is hidden, so a failure would leave no trace; the installer's
+    // output goes to a file the owner can open.
+    let script = format!(
+        "irm {INSTALLER_URL} | iex *> (Join-Path $env:TEMP 'anicat-update.log')"
+    );
+    std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
+        .creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW)
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(windows)]
+const INSTALLER_URL: &str =
+    "https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_windows.ps1";
 
 async fn fetch(http: &reqwest::Client) -> Result<GithubRelease, String> {
     http.get(ENDPOINT)

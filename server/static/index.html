@@ -2467,11 +2467,13 @@ async function viewSettings(host) {
   wrap.append(support);
 
   const versionText = el("span", {}, "Checking...");
-  wrap.append(setRow("Version", versionText, el("span")));
+  const versionAction = el("span");
+  wrap.append(setRow("Version", versionText, versionAction));
   api("GET", "/api/version").then((v) => {
     versionText.textContent = v.update_available && v.latest
       ? `Anicat ${v.current}. Version ${v.latest} is available.`
       : `Anicat ${v.current}. Up to date.`;
+    if (v.update_available && v.can_install) versionAction.append(updateNowButton());
   }, (e) => { versionText.textContent = errorText(e); });
 
   wrap.append(el("h2", {}, "Keyboard"));
@@ -2606,6 +2608,24 @@ document.addEventListener("keydown", (e) => {
 
 // ---- version banner ---------------------------------------------------------
 
+// The installer stops this server to replace it and opens the new one, so
+// the page loses its connection on success; only a refusal is shown.
+function updateNowButton() {
+  const btn = el("button", { type: "button", class: "btn", text: "Update now", onclick: async () => {
+    btn.disabled = true;
+    btn.textContent = "Updating...";
+    try {
+      await api("POST", "/api/update");
+      toast("Updating. Anicat restarts in a moment; reload this page after.");
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "Update now";
+      toast(errorText(e), true);
+    }
+  } });
+  return btn;
+}
+
 async function checkVersion() {
   let v;
   try { v = await api("GET", "/api/version"); } catch { return; }
@@ -2616,9 +2636,11 @@ async function checkVersion() {
   const banner = document.getElementById("update-banner");
   const copyHost = el("div", { style: "flex-basis:100%" });
   banner.replaceChildren(...[
-    el("span", {}, `Anicat ${v.latest} is out. Run the install command again to update.`),
-    el("code", {}, INSTALL_COMMAND),
-    el("button", { type: "button", class: "btn", text: "Copy", onclick: async () => {
+    el("span", {}, v.can_install
+      ? `Anicat ${v.latest} is out.`
+      : `Anicat ${v.latest} is out. Run the install command again to update.`),
+    v.can_install ? updateNowButton() : el("code", {}, INSTALL_COMMAND),
+    el("button", { type: "button", class: "btn", text: "Copy install command", onclick: async () => {
       if (await copyText(INSTALL_COMMAND, copyHost)) toast("Install command copied.");
     } }),
     v.page_url ? el("a", { class: "link", href: v.page_url, target: "_blank", rel: "noopener noreferrer" }, "Release notes") : null,

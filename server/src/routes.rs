@@ -44,6 +44,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/viewer", get(viewer))
         .route("/api/health", get(health))
         .route("/api/version", get(version))
+        .route("/api/update", post(update))
         .route("/api/debug-report", get(debug_report))
         .route("/api/franchise/{id}", get(franchise))
         .route("/api/characters/{id}", get(characters))
@@ -487,6 +488,18 @@ async fn health() -> Json<Value> {
 
 async fn version(State(s): State<AppState>) -> Json<Value> {
     Json(json!(crate::version::check(&s.http, &s.data_dir).await))
+}
+
+/// Update now. 202 once the installer is running; it quits this process
+/// itself, so a reply is all the page gets before the connection drops.
+async fn update() -> ApiResult<StatusCode> {
+    #[cfg(windows)]
+    {
+        crate::version::start_install().map_err(|e| ApiError::internal(format!("could not start the installer: {e}")))?;
+        Ok(StatusCode::ACCEPTED)
+    }
+    #[cfg(not(windows))]
+    Err(ApiError::bad_request("updating from the page is only available on Windows"))
 }
 
 async fn debug_report(State(s): State<AppState>) -> impl IntoResponse {

@@ -1508,7 +1508,7 @@ public struct PlayerView: View {
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
-                        .textSelection(.enabled)
+                        .sumiTextSelectable()
                 }
             }
 

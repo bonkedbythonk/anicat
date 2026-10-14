@@ -2619,8 +2619,13 @@ impl AnicatEngine {
     /// not reach this device's cache, which holds a list for 15 minutes and
     /// keeps it across relaunches: a Mac brought to the front still showed
     /// the old episode in Up Next.
+    ///
+    /// Title pages go too: they carry the viewer's own progress and are held
+    /// for an hour, so the open page kept "Episode 4" after the phone had
+    /// finished 5 even once the shelves behind it were fresh.
     pub fn invalidate_user_lists(&self) {
         self.catalogs.cache.invalidate("get_user_list");
+        self.catalogs.cache.invalidate("media_detail");
     }
 
     /// One status bucket of the user's AniList list.

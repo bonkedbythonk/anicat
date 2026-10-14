@@ -234,6 +234,11 @@ extension AppModel {
         lastForegroundListRefresh = Date()
         engine.invalidateUserLists()
         refreshListsAfterEdit()
+        // The open page holds its own copy of the entry: the shelves updating
+        // behind it left "Episode 4" on screen while the phone had finished 5.
+        if let open = selectedMediaDetails, !isDetailLoading {
+            Task { await loadDetail(id: open.id, isManga: currentDetailIsManga(), forceRefresh: true) }
+        }
     }
 
     /// AniList's own season/year pair for "now" — the convention the

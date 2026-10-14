@@ -76,6 +76,17 @@ struct GeneralTabSection: View {
             }
         }
 
+        // Ask only appears where Apple Intelligence runs, so this card is the one
+        // place that says whether it is on and, if not, what to do about it.
+        SettingsCard(title: "Ask") {
+            let ask = AskAvailability.summary
+            SettingField(label: "Ask Anicat", description: ask.text) {
+                Text(ask.isOn ? "On" : "Unavailable")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(ask.isOn ? SumiTheme.indigo : SumiTheme.muted)
+            }
+        }
+
         // Moved off the player tab: the shortcuts are the whole app's, not
         // playback's, and they were the only reference card sitting in a
         // list of switches.

@@ -153,6 +153,8 @@ public struct SettingsView: View {
         .init(label: "Appearance", card: "Appearance", tab: .general),
         .init(label: "Poster accent", card: "Appearance", tab: .general),
         .init(label: "Time format", card: "Appearance", tab: .general),
+        .init(label: "Ask Anicat", card: "Ask", tab: .general),
+        .init(label: "Apple Intelligence", card: "Ask", tab: .general),
         .init(label: "Keyboard shortcuts cheat sheet", card: "Keyboard shortcuts", tab: .general),
 
         .init(label: "Sub/Dub", card: "What plays", tab: .playback),

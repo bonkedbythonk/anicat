@@ -94,6 +94,17 @@ impl RememberedRelease {
     }
 }
 
+/// Whether the race may start `next` while `dubs_in_flight` dub releases are
+/// still being tried. A dub was asked for, so a sub must not run beside one:
+/// the sub release already in the session answers in ~40ms and takes the race
+/// from a dub that needs its metadata and pre-buffer first, and the viewer
+/// who picked Dubbed hears Japanese (seen 2026-10-14: AnoZu Dual-Audio ranked
+/// first, Erai-raws played). A failing dub starts the next candidate at once,
+/// as every failure does.
+fn may_start(prefer_dub: bool, dubs_in_flight: usize, next_is_dub: bool) -> bool {
+    !prefer_dub || next_is_dub || dubs_in_flight == 0
+}
+
 /// What to find a torrent stream for. Grouped (rather than passed as five
 /// separate `resolve()` params) since they're all "what episode, searched
 /// how" — one cohesive unit distinct from the infra params (`client`,
@@ -868,9 +879,17 @@ impl TorrentManager {
         &self,
         media: crate::media::MediaKey,
         episode: i64,
-        r: Resolved,
+        mut r: Resolved,
         cand: &search::Candidate,
     ) {
+        // A release without an English track is filed under the sub
+        // preference even when a dub was asked for. Filed under the dub
+        // preference it was replayed, unsearched, by every later Dub play: a
+        // dub that failed once, or lost a race to the sub already in the
+        // session, left the episode on Japanese audio until the entry was
+        // forgotten. A show with no dub at all pays one cached-pool search per
+        // Dub play for this.
+        r.prefer_dub = r.prefer_dub && search::is_dub_release(&search::normalize(&cand.name));
         self.resolved.lock().await.insert((media, episode), r);
         self.winners
             .lock()
@@ -1184,6 +1203,12 @@ impl TorrentManager {
         // A cinema search matches on TMDB titles and a series episode names
         // its show in its own way, so the foreign-lead check is anime only.
         let plain_anime = movie.is_none() && series_criteria.is_none();
+        // A row written before `commit_resolution` stopped filing a sub under
+        // the dub preference still says "dub" over a sub release, and replayed
+        // it on every Dub play without a search. Dropped here so those rows
+        // heal on their next play instead of needing a migration.
+        let remembered = remembered
+            .filter(|rem| !prefer_dub || search::is_dub_release(&search::normalize(&rem.name)));
         let remembered = remembered.filter(|rem| !rejected.contains(&rem.name)).filter(|rem| {
             let disowned = search::names_a_sibling(&search::normalize(&rem.name), titles, sibling_titles);
             if disowned {
@@ -1422,14 +1447,21 @@ impl TorrentManager {
                 let session = &session;
                 async move { (index, self.try_candidate(client, session, cand, ctx, slot).await) }
             };
+            let is_dub: Vec<bool> = shortlist
+                .iter()
+                .map(|c| prefer_dub && search::is_dub_release(&search::normalize(&c.name)))
+                .collect();
+            let mut dubs_in_flight = 0usize;
             let mut in_flight = futures_util::stream::FuturesUnordered::new();
             let mut next = 0;
-            while next < shortlist.len() && in_flight.len() < in_flight_cap {
+            while next < shortlist.len() && in_flight.len() < in_flight_cap && may_start(prefer_dub, dubs_in_flight, is_dub[next]) {
+                dubs_in_flight += is_dub[next] as usize;
                 in_flight.push(launch(next));
                 next += 1;
             }
             let mut won: Option<(Resolved, usize)> = None;
             while let Some((index, result)) = in_flight.next().await {
+                dubs_in_flight -= is_dub[index] as usize;
                 match result {
                     Ok(r) => {
                         won = Some((r, index));
@@ -1438,7 +1470,8 @@ impl TorrentManager {
                     Err(e) => {
                         log::warn!("torrent: candidate '{}' failed: {}", shortlist[index].name, e);
                         last_err = e;
-                        if next < shortlist.len() {
+                        if next < shortlist.len() && may_start(prefer_dub, dubs_in_flight, is_dub[next]) {
+                            dubs_in_flight += is_dub[next] as usize;
                             in_flight.push(launch(next));
                             next += 1;
                         }
@@ -3283,6 +3316,66 @@ mod tests {
             1,
             "an expired entry must be dropped on insert, or the map grows for the whole session"
         );
+    }
+
+    #[test]
+    fn a_sub_does_not_race_a_dub_that_was_asked_for() {
+        // Dub asked for, one dub in flight: a sub waits for it.
+        assert!(!may_start(true, 1, false));
+        // Another dub may run beside it, and a sub may start once no dub is left.
+        assert!(may_start(true, 1, true));
+        assert!(may_start(true, 0, false));
+        // Subs asked for: the race is the old one.
+        assert!(may_start(false, 1, false));
+        assert!(may_start(false, 0, false));
+    }
+
+    fn resolved(prefer_dub: bool) -> Resolved {
+        Resolved { torrent_id: 3, file_id: 0, browser_playable: true, prefer_dub }
+    }
+
+    fn candidate(name: &str) -> search::Candidate {
+        search::Candidate {
+            anidb_aid: None,
+            name: name.to_string(),
+            magnet: None,
+            torrent_url: None,
+            seeders: 10,
+            seeders_known: true,
+            size_bytes: None,
+            score: 0,
+            assume_batch: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sub_that_won_a_dub_request_is_not_remembered_as_the_dub() {
+        let manager = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-dub-memory-test"));
+        let media = MediaKey::anilist(210031);
+        let sub = candidate("[Erai-raws] Seihantai na Kimi to Boku 2nd Season - 07 [1080p CR WEB-DL AVC AAC][MultiSub]");
+        manager.commit_resolution(media, 7, resolved(true), &sub).await;
+        let kept = manager.winning_release(media, 7).await.expect("winner recorded");
+        assert!(!kept.prefer_dub, "a sub release must not be replayed for the next Dub play");
+        assert!(!manager.resolved.lock().await[&(media, 7)].prefer_dub);
+    }
+
+    #[tokio::test]
+    async fn a_dub_that_won_a_dub_request_is_remembered_as_the_dub() {
+        let manager = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-dub-memory-test"));
+        let media = MediaKey::anilist(210031);
+        let dub = candidate("[AnoZu] You and I Are Polar Opposites 2026 S02E07 1080p CR WEB-DL Dual-Audio DDP 2.0 H.264");
+        manager.commit_resolution(media, 7, resolved(true), &dub).await;
+        assert!(manager.winning_release(media, 7).await.expect("winner recorded").prefer_dub);
+        assert!(manager.resolved.lock().await[&(media, 7)].prefer_dub);
+    }
+
+    #[tokio::test]
+    async fn a_sub_request_keeps_its_own_preference() {
+        let manager = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-dub-memory-test"));
+        let media = MediaKey::anilist(210031);
+        let sub = candidate("[Erai-raws] Seihantai na Kimi to Boku 2nd Season - 07 [1080p CR WEB-DL AVC AAC][MultiSub]");
+        manager.commit_resolution(media, 7, resolved(false), &sub).await;
+        assert!(!manager.winning_release(media, 7).await.expect("winner recorded").prefer_dub);
     }
 
     /// The two safety rails on tearing down a losing racer. Both exist because

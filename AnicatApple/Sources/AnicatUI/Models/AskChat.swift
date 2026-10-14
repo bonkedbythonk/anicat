@@ -223,10 +223,12 @@ final class AskChat {
     private var shown = Set<Int64>()
     private var details: [Int64: MediaDetail] = [:]
     private var finished: [MediaCard.Item]?
+    /// Titles shown in this launch's chats, kept through "New chat": three
+    /// different prompts in three fresh chats came back with the same few.
+    private var recentlyShown: [Int64] = []
     /// The genres of the viewer's previous message, so "and something i've seen"
     /// after a romance still leans romance.
     private var lastGenres: [String] = []
-    private var brain: Any?
     private var running: Task<Void, Never>?
 
     func open(_ text: String, model: AppModel) {
@@ -261,7 +263,6 @@ final class AskChat {
         details = [:]
         finished = nil
         lastGenres = []
-        brain = nil
         isThinking = false
         status = ""
         isOpen = false
@@ -309,14 +310,19 @@ final class AskChat {
     }
 
     @available(macOS 26.0, iOS 26.0, *)
+    /// A new session every turn. One kept for the whole chat carried every
+    /// turn's numbered candidate list in its memory: after a dozen turns the
+    /// 8k-token window was mostly old lists, and the model answered with the
+    /// numbers and titles of an earlier one. What a turn needs of the chat (the
+    /// named shows, what was shown, the genres) is held in code and what the
+    /// viewer asked lately is in the prompt.
     private func session(loved: [String]) -> LanguageModelSession {
-        if let existing = brain as? LanguageModelSession { return existing }
         var instructions = """
             You are the recommendation chat inside an anime app, talking with one viewer. \
             Each message from the app lists numbered candidates taken from AniList. \
             Choose only from those numbers and never invent a title. \
             Earlier candidates are the better matches, so prefer them, and pick four to six. \
-            Write a new sentence every time and never repeat an earlier reply. \
+            When your last reply is quoted, say it differently. \
             Write one friendly sentence of under 22 words that says how the picks answer the \
             request, and begin it differently each time, never with "These". Name only genres \
             from the list, never state episode counts or any number, and never claim anything \
@@ -325,9 +331,7 @@ final class AskChat {
         if !loved.isEmpty {
             instructions += " For taste only, the viewer rates these highest: \(loved.joined(separator: ", "))."
         }
-        let made = LanguageModelSession(instructions: instructions)
-        brain = made
-        return made
+        return LanguageModelSession(instructions: instructions)
     }
 
     @available(macOS 26.0, iOS 26.0, *)
@@ -338,9 +342,11 @@ final class AskChat {
         // Every call below would sleep a rate-limit cooldown out one after the
         // other, so say so now instead of after minutes.
         let cooldown = Int(engine.anilistCooldownSeconds())
-        if cooldown > 0 {
+        if cooldown > 10 {
             return Message(role: .assistant, text: "AniList is rate limiting right now. Try again in about \(cooldown) seconds.")
         }
+        // A few seconds is shorter than being told to try again.
+        if cooldown > 0 { try? await Task.sleep(nanoseconds: UInt64(cooldown) * 1_000_000_000 + 300_000_000) }
         status = "Reading your message"
         // The system model can fail outright while still reporting itself
         // available (its sensitive-content model not loading, `error 15`, failed
@@ -374,7 +380,10 @@ final class AskChat {
         // what the viewer rated highest, which is what knowing their list is for.
         var fromTaste = false
         if (anchors.isEmpty && genres.isEmpty || AskSearch.wantsSurprise(text)) && !AskSearch.wantsSeen(text) {
-            anchors = own.filter { !$0.isManga }.sorted { ($0.score ?? 0) > ($1.score ?? 0) }.prefix(3).map { ($0.id, $0.title) }
+            // Three of the eight rated highest, not always the top three: every
+            // prompt that named nothing got the same brief and the same answer.
+            anchors = own.filter { !$0.isManga }.sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+                .prefix(8).shuffled().prefix(3).map { ($0.id, $0.title) }
             fromTaste = true
         }
         status = "Finding candidates"
@@ -394,6 +403,11 @@ final class AskChat {
             c.facts.genres.allSatisfy { !ruledOut.genres.contains($0) }
                 && (!ruledOut.shortOnly || (c.facts.media.episodes ?? 99) <= 13)
         }
+        // Behind the ones not yet shown in any chat, when enough of those remain;
+        // and with no brief to rank by, in no particular order.
+        let unseenBefore = pool.filter { !recentlyShown.contains($0.facts.media.catalogId) }
+        if unseenBefore.count >= 8 { pool = unseenBefore }
+        if fromTaste { pool.shuffle() }
         // Candidates in rating order put the most voted-for show first, which for
         // a fake-marriage romcom was One Piece. Ranked instead by how many of
         // the wanted genres they share: the ones asked for, the named shows' own
@@ -428,6 +442,14 @@ final class AskChat {
         if !genres.isEmpty { listing += "Genres they asked for: \(genres.joined(separator: ", ")).\n" }
         if !ruledOut.genres.isEmpty { listing += "Genres they ruled out: \(ruledOut.genres.sorted().joined(separator: ", ")).\n" }
         if ruledOut.shortOnly { listing += "They want short series.\n" }
+        // What the chat so far adds, in words and not as a transcript: the
+        // viewer's last few messages (the current one is already above) and the
+        // sentence it is not to repeat.
+        let earlier = messages.dropLast().filter { $0.role == .viewer }.suffix(3).map(\.text)
+        if !earlier.isEmpty { listing += "Earlier they asked: \(earlier.map { "\"\($0)\"" }.joined(separator: ", ")).\n" }
+        if let last = messages.last(where: { $0.role == .assistant && !$0.cards.isEmpty }) {
+            listing += "Your last reply was: \"\(last.text)\"\n"
+        }
         listing += "Candidates:\n"
         for (index, c) in pool.enumerated() {
             let m = c.facts.media
@@ -446,20 +468,19 @@ final class AskChat {
                 // next ones are safe to add.
                 for (index, c) in pool.enumerated() where chosen.count < 4 && !picked.contains(index + 1) { chosen.append(c) }
                 shown.formUnion(chosen.map { $0.facts.media.catalogId })
+                remember(chosen)
                 var next = ["Shorter", "Something I've seen already", "Surprise me"]
                 if let first = chosen.first { next.insert("More like \(first.facts.media.title)", at: 0) }
                 return Message(role: .assistant, text: reply.message, cards: chosen.map(Self.card), suggestions: next)
             } catch {
-                // A long chat fills the context window with candidate lists.
-                // The thread on screen is kept; the model starts over.
                 AppLog.write("[asksearch] reply failed (attempt \(attempt + 1)): \(error)")
-                brain = nil
             }
         }
         // Both attempts failed: the candidates are already filtered to what was
         // asked, so show the first of them and say why there is no sentence.
         let plain = Array(pool.prefix(4))
         shown.formUnion(plain.map { $0.facts.media.catalogId })
+        remember(plain)
         return Message(
             role: .assistant,
             text: "Apple Intelligence is not answering right now, so these are plain matches for what you asked.",
@@ -478,6 +499,10 @@ final class AskChat {
             .prefix(30)
         guard let facts = try? await engine.mediaFacts(catalogIds: pick.map(\.id)) else { return ([], true) }
         return (facts.map { Candidate(facts: $0, because: "On your list") }, false)
+    }
+
+    private func remember(_ picks: [Candidate]) {
+        recentlyShown = Array((recentlyShown + picks.map { $0.facts.media.catalogId }).suffix(80))
     }
 
     private func finishedTitles(engine: AnicatEngine) async -> [MediaCard.Item] {

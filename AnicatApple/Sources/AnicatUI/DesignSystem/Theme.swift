@@ -81,6 +81,8 @@ public enum SumiTheme {
 
     public static var indigoLight: Color { ThemeStore.shared.palette.indigoLight }
 
+    public static var isNeon: Bool { ThemeStore.shared.palette.isNeon }
+
     // Status colours. Palette-scoped rather than shared: the `#F87171` that
     // reads as an error on Ink's near-black ground is a pale wash on Paper.
     public static var danger: Color { ThemeStore.shared.palette.danger }
@@ -375,6 +377,11 @@ private struct SumiButtonBody: View {
                 : (isHovered ? SumiTheme.foregroundWash : SumiTheme.card))
             .clipShape(shape)
             .overlay(shape.stroke(isPrimary ? Color.clear : SumiTheme.border, lineWidth: 1))
+            .shadow(
+                color: isPrimary && SumiTheme.isNeon && !ThemeStore.shared.palette.isLight
+                    ? SumiTheme.indigo.opacity(isHovered ? 0.45 : 0.30) : .clear,
+                radius: 10
+            )
             .contentShape(shape)
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.5)
             .animation(.snappy, value: isHovered)

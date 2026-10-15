@@ -116,7 +116,7 @@ struct ThemePaletteTests {
         // check would catch.
         #expect(SumiPalette.sakura.usesSerifHeadings)
         #expect(SumiPalette.sakuraLight.usesSerifHeadings)
-        for palette in [SumiPalette.ink, .paper, .oled] {
+        for palette in [SumiPalette.ink, .paper, .oled, .royal, .royalLight] {
             #expect(palette.usesSerifHeadings == false, "\(palette.id) grew serif headings")
         }
     }
@@ -168,6 +168,8 @@ struct ThemePaletteTests {
         #expect(SumiSkin.ink.palette(isLight: true).id == "paper")
         #expect(SumiSkin.sakura.palette(isLight: false).id == "sakura")
         #expect(SumiSkin.sakura.palette(isLight: true).id == "sakura-light")
+        #expect(SumiSkin.royal.palette(isLight: false).id == "royal")
+        #expect(SumiSkin.royal.palette(isLight: true).id == "royal-light")
 
         // OLED is a statement about the panel, and there is no light ground
         // that switches pixels off. Asking for Light has to land back on its
@@ -184,6 +186,7 @@ struct ThemePaletteTests {
         // every existing user to the default.
         #expect(SumiSkin(rawValue: "ink") == .ink)
         #expect(SumiSkin(rawValue: "sakura") == .sakura)
+        #expect(SumiSkin(rawValue: "royal") == .royal)
         #expect(SumiSkin(rawValue: "oled") == .oled)
         #expect(AnicatAppearance(rawValue: "system") == .system)
         #expect(ThemeStore.skinKey == "anicat_skin")

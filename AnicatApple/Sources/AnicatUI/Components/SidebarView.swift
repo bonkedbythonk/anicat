@@ -306,7 +306,9 @@ public struct SidebarView: View {
                 .background {
                     if isActive || isHovered {
                         RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
-                            .fill(SumiTheme.foreground.opacity(isActive ? 0.08 : 0.04))
+                            .fill(SumiTheme.isNeon && isActive
+                                ? SumiTheme.indigo.opacity(0.14)
+                                : SumiTheme.foreground.opacity(isActive ? 0.08 : 0.04))
                     }
                 }
                 .padding(.horizontal, 8)

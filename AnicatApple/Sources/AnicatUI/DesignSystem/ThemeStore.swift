@@ -41,6 +41,12 @@ public struct SumiPalette: Sendable {
     /// a recolour rather than the skin. Read through `Font.sumiHeading`.
     public let usesSerifHeadings: Bool
 
+    /// Royal Neon's two quiet touches: a soft halo under the one primary
+    /// button on a screen, and an accent wash on the active sidebar row in
+    /// place of the foreground wash. Nothing else glows; a skin that wants a
+    /// third place has to say where.
+    public let isNeon: Bool
+
     public let background: Color
     public let card: Color
     public let foreground: Color
@@ -76,6 +82,7 @@ public struct SumiPalette: Sendable {
         mutedAlpha: Double,
         borderAlpha: Double,
         usesSerifHeadings: Bool = false,
+        isNeon: Bool = false,
         dangerHex: String,
         dangerLightHex: String,
         successHex: String,
@@ -94,6 +101,7 @@ public struct SumiPalette: Sendable {
         self.mutedAlpha = mutedAlpha
         self.borderAlpha = borderAlpha
         self.usesSerifHeadings = usesSerifHeadings
+        self.isNeon = isNeon
 
         self.background = Color(hex: backgroundHex)
         self.card = Color(hex: cardHex)
@@ -269,6 +277,53 @@ public extension SumiPalette {
         warningLightHex: SumiPalette.lightStatus.warningLight
     )
 
+    /// "Royal Neon", dark half: a violet-black ground under one electric
+    /// violet accent. The accent is `#A66BFF` at 5.83:1 on the ground, and the
+    /// primary button draws the ground colour on it at the same 5.83:1. The
+    /// glow a neon skin implies is not a palette field and is not drawn;
+    /// this is the colours only.
+    static let royal = SumiPalette(
+        id: "royal",
+        name: "Royal Neon",
+        isLight: false,
+        backgroundHex: "#0E0618",
+        cardHex: "#170B26",
+        foregroundHex: "#F1EAFF",
+        indigoHex: "#A66BFF",
+        indigoLightHex: "#C79BFF",
+        mutedAlpha: 0.58,
+        borderAlpha: 0.16,
+        isNeon: true,
+        dangerHex: SumiPalette.darkStatus.danger,
+        dangerLightHex: SumiPalette.darkStatus.dangerLight,
+        successHex: SumiPalette.darkStatus.success,
+        successLightHex: SumiPalette.darkStatus.successLight,
+        warningHex: SumiPalette.darkStatus.warning,
+        warningLightHex: SumiPalette.darkStatus.warningLight
+    )
+
+    /// Royal Neon's light half: lavender paper under deep violet ink. Neon
+    /// does not survive a light ground (`#A66BFF` measures 3.05:1 on it), so the accent drops to royal `#5B1FD1`, 7.34:1.
+    static let royalLight = SumiPalette(
+        id: "royal-light",
+        name: "Royal Light",
+        isLight: true,
+        backgroundHex: "#F5F0FF",
+        cardHex: "#FFFFFF",
+        foregroundHex: "#1E1033",
+        indigoHex: "#5B1FD1",
+        indigoLightHex: "#7C3AED",
+        mutedAlpha: 0.65,
+        borderAlpha: 0.14,
+        isNeon: true,
+        dangerHex: SumiPalette.lightStatus.danger,
+        dangerLightHex: SumiPalette.lightStatus.dangerLight,
+        successHex: SumiPalette.lightStatus.success,
+        successLightHex: SumiPalette.lightStatus.successLight,
+        warningHex: SumiPalette.lightStatus.warning,
+        warningLightHex: SumiPalette.lightStatus.warningLight
+    )
+
     /// Every palette that ships, derived from the skins rather than listed by
     /// hand. A hand-kept list is how a skin's light half reaches users with no
     /// contrast checking at all: the suite loops over this, so a palette
@@ -337,6 +392,7 @@ public extension SumiPalette {
 public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
     case ink
     case sakura
+    case royal
     case oled
 
     public var id: String { rawValue }
@@ -345,6 +401,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .ink: return "Ink & Index"
         case .sakura: return "Sakura Zen"
+        case .royal: return "Royal Neon"
         case .oled: return "OLED"
         }
     }
@@ -353,6 +410,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .ink: return "Warm sumi ink, washi paper by day"
         case .sakura: return "Cherry dark, sakura paper by day"
+        case .royal: return "Electric violet, lavender paper by day"
         case .oled: return "True black. Dark only"
         }
     }
@@ -361,6 +419,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .ink: return .ink
         case .sakura: return .sakura
+        case .royal: return .royal
         case .oled: return .oled
         }
     }
@@ -373,6 +432,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .ink: return .paper
         case .sakura: return .sakuraLight
+        case .royal: return .royalLight
         case .oled: return nil
         }
     }

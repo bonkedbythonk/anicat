@@ -525,6 +525,31 @@
   .signin .row { display: flex; gap: .6rem; flex-wrap: wrap; }
 
 
+  /* Night City (SumiRect and sumiBrackets): the top-right and bottom-left
+     corners are cut on the diagonal by the amount the radius would have
+     rounded them, accent brackets sit on the two square corners of posters
+     and cards, and the hovered poster and the active row glow. corner-shape is
+     Chromium's; a browser without it keeps the two corners rounded and the
+     other two square, which is the same silhouette at a glance. The cut has to
+     be corner-shape and not clip-path: clip-path also takes the inset
+     hairline off the diagonals. */
+  [data-skin=cyber] nav.nav a { border-radius: 0 var(--r-sm) 0 var(--r-sm); corner-shape: bevel; }
+  [data-skin=cyber] :is(.btn, input.field, textarea.field, .menu-btn, .frame, .toast, .rel, .slot, .skin i) { border-radius: 0 var(--r-md) 0 var(--r-md); corner-shape: bevel; }
+  [data-skin=cyber] :is(.popover, .days button, .person.va) { border-radius: 0 var(--r-lg) 0 var(--r-lg); corner-shape: bevel; }
+  [data-skin=cyber] :is(.panel, .tile, .person, .searchbar, .tp .cover) { border-radius: 0 var(--r-xl) 0 var(--r-xl); corner-shape: bevel; }
+  [data-skin=cyber] .modal { border-radius: 0 16px 0 16px; corner-shape: bevel; }
+  [data-skin=cyber] { --brackets:
+    linear-gradient(var(--accent), var(--accent)) top left / 12px 1.5px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) top left / 1.5px 12px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) bottom right / 12px 1.5px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) bottom right / 1.5px 12px no-repeat; }
+  [data-skin=cyber] :is(.panel, .tile, .person) { position: relative; }
+  [data-skin=cyber] :is(.panel, .tile, .person)::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; corner-shape: inherit; }
+  [data-skin=cyber] :is(.panel, .tile, .person, .frame)::after { background: var(--brackets); }
+  [data-skin=cyber] .pc:hover .frame { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent); }
+  [data-skin=cyber] .pc:hover .frame::after { box-shadow: inset 0 0 0 1px var(--accent); }
+  [data-skin=cyber] nav.nav a[aria-current=page] { box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 25%, transparent); }
+
   @media (max-width: 1100px) {
     .two { grid-template-columns: minmax(0, 1fr); }
   }

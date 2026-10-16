@@ -356,7 +356,7 @@ public struct CalendarView: View {
                     Rectangle().fill(SumiTheme.foregroundWash)
                 }
                 .frame(width: 36, height: 50)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(slot.title)

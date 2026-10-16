@@ -290,9 +290,9 @@ public struct SyosetuReaderView: View {
             rendered
                 .resizable()
                 .scaledToFit()
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
         } placeholder: {
-            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+            SumiRect(cornerRadius: SumiTheme.radiusSm)
                 .fill(typography.theme.foreground.opacity(0.06))
                 .frame(height: 260)
                 .overlay(ProgressView().controlSize(.small))

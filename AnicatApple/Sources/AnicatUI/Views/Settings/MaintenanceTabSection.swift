@@ -232,7 +232,7 @@ struct MaintenanceTabSection: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                SumiRect(cornerRadius: SumiTheme.radiusSm)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
         }

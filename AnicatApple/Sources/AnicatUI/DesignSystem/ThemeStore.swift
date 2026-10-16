@@ -47,6 +47,12 @@ public struct SumiPalette: Sendable {
     /// third place has to say where.
     public let isNeon: Bool
 
+    /// Night City's second axis: every `SumiRect` is cut on two corners instead
+    /// of rounded, and posters and cards carry corner brackets. Like `isNeon`
+    /// it is a flag on the palette and not a mode, so a skin that wants a
+    /// third cyberpunk device has to name where it goes.
+    public let isCyber: Bool
+
     public let background: Color
     public let card: Color
     public let foreground: Color
@@ -83,6 +89,7 @@ public struct SumiPalette: Sendable {
         borderAlpha: Double,
         usesSerifHeadings: Bool = false,
         isNeon: Bool = false,
+        isCyber: Bool = false,
         dangerHex: String,
         dangerLightHex: String,
         successHex: String,
@@ -102,6 +109,7 @@ public struct SumiPalette: Sendable {
         self.borderAlpha = borderAlpha
         self.usesSerifHeadings = usesSerifHeadings
         self.isNeon = isNeon
+        self.isCyber = isCyber
 
         self.background = Color(hex: backgroundHex)
         self.card = Color(hex: cardHex)
@@ -369,6 +377,30 @@ public extension SumiPalette {
         warningLightHex: SumiPalette.lightStatus.warningLight
     )
 
+    /// "Night City": black glass under one yellow accent (17.3:1 on the
+    /// ground) and a cyan second tone. Dark only, like OLED: yellow on a light
+    /// ground is 1.2:1, and the skin has no meaning without the dark.
+    static let night = SumiPalette(
+        id: "night",
+        name: "Night City",
+        isLight: false,
+        backgroundHex: "#0A0A0F",
+        cardHex: "#14141C",
+        foregroundHex: "#EDEDE6",
+        indigoHex: "#FCEE0A",
+        indigoLightHex: "#00F0FF",
+        mutedAlpha: 0.62,
+        borderAlpha: 0.16,
+        isNeon: true,
+        isCyber: true,
+        dangerHex: "#FF4D7A",
+        dangerLightHex: "#FF7A9C",
+        successHex: SumiPalette.darkStatus.success,
+        successLightHex: SumiPalette.darkStatus.successLight,
+        warningHex: SumiPalette.darkStatus.warning,
+        warningLightHex: SumiPalette.darkStatus.warningLight
+    )
+
     /// Every palette that ships, derived from the skins rather than listed by
     /// hand. A hand-kept list is how a skin's light half reaches users with no
     /// contrast checking at all: the suite loops over this, so a palette
@@ -439,6 +471,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
     case sakura
     case royal
     case dusk
+    case cyber
     case oled
 
     public var id: String { rawValue }
@@ -449,6 +482,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .sakura: return "Sakura Zen"
         case .royal: return "Royal Neon"
         case .dusk: return "Dusk Sea"
+        case .cyber: return "Night City"
         case .oled: return "OLED"
         }
     }
@@ -459,6 +493,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .sakura: return "Cherry dark, sakura paper by day"
         case .royal: return "Electric violet, lavender paper by day"
         case .dusk: return "Indigo night, red sea, cream sand by day"
+        case .cyber: return "Black glass, yellow and cyan. Dark only"
         case .oled: return "True black. Dark only"
         }
     }
@@ -469,12 +504,15 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .sakura: return .sakura
         case .royal: return .royal
         case .dusk: return .dusk
+        case .cyber: return .night
         case .oled: return .oled
         }
     }
 
     /// `nil` for a skin with no light half. OLED is that skin and always will
     /// be: it exists to switch pixels off, which a light ground cannot do.
+    /// Night City is the other, for the opposite reason: its yellow does not
+    /// survive a light ground.
     /// The appearance control hides itself for a skin that answers `nil` here
     /// rather than offering a Light that silently does nothing.
     public var light: SumiPalette? {
@@ -483,6 +521,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .sakura: return .sakuraLight
         case .royal: return .royalLight
         case .dusk: return .duskLight
+        case .cyber: return nil
         case .oled: return nil
         }
     }

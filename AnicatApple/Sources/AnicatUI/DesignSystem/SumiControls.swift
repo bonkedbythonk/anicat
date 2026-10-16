@@ -234,9 +234,9 @@ public struct SumiFilterDropdown: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(selected.isEmpty ? Color.clear : SumiTheme.indigo.opacity(0.10))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                SumiRect(cornerRadius: SumiTheme.radiusMd)
                     .stroke(selected.isEmpty ? SumiTheme.border : SumiTheme.indigo.opacity(0.4), lineWidth: 1)
             )
         }
@@ -272,7 +272,7 @@ public struct SumiEmptyState: View {
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 190)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
                 .padding(.bottom, 10)
             }
             Text(headline)

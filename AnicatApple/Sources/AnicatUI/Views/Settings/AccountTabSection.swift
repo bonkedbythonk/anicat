@@ -36,9 +36,9 @@ struct AccountTabSection: View {
                         }
                     }
                     .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                        SumiRect(cornerRadius: SumiTheme.radiusMd)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
 
@@ -73,7 +73,7 @@ struct AccountTabSection: View {
                 }
                 .padding(14)
                 .overlay(
-                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                    SumiRect(cornerRadius: SumiTheme.radiusMd)
                         .stroke(SumiTheme.border, lineWidth: 1)
                 )
 
@@ -88,9 +88,9 @@ struct AccountTabSection: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(SumiTheme.background)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
                         .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                            SumiRect(cornerRadius: SumiTheme.radiusSm)
                                 .stroke(SumiTheme.border, lineWidth: 1)
                         )
                 }
@@ -144,9 +144,9 @@ struct AccountTabSection: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(SumiTheme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                        SumiRect(cornerRadius: SumiTheme.radiusSm)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
                     .frame(maxWidth: 340)
@@ -171,9 +171,9 @@ struct AccountTabSection: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(SumiTheme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                        SumiRect(cornerRadius: SumiTheme.radiusSm)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
                     .frame(maxWidth: 340)

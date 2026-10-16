@@ -116,7 +116,7 @@ struct ThemePaletteTests {
         // check would catch.
         #expect(SumiPalette.sakura.usesSerifHeadings)
         #expect(SumiPalette.sakuraLight.usesSerifHeadings)
-        for palette in [SumiPalette.ink, .paper, .oled, .royal, .royalLight, .dusk, .duskLight] {
+        for palette in [SumiPalette.ink, .paper, .oled, .royal, .royalLight, .dusk, .duskLight, .night] {
             #expect(palette.usesSerifHeadings == false, "\(palette.id) grew serif headings")
         }
     }
@@ -172,6 +172,9 @@ struct ThemePaletteTests {
         #expect(SumiSkin.royal.palette(isLight: true).id == "royal-light")
         #expect(SumiSkin.dusk.palette(isLight: false).id == "dusk")
         #expect(SumiSkin.dusk.palette(isLight: true).id == "dusk-light")
+        // Night City is dark only, so Light lands back on its own dark.
+        #expect(SumiSkin.cyber.hasLight == false)
+        #expect(SumiSkin.cyber.palette(isLight: true).id == "night")
 
         // OLED is a statement about the panel, and there is no light ground
         // that switches pixels off. Asking for Light has to land back on its
@@ -190,6 +193,7 @@ struct ThemePaletteTests {
         #expect(SumiSkin(rawValue: "sakura") == .sakura)
         #expect(SumiSkin(rawValue: "royal") == .royal)
         #expect(SumiSkin(rawValue: "dusk") == .dusk)
+        #expect(SumiSkin(rawValue: "cyber") == .cyber)
         #expect(SumiSkin(rawValue: "oled") == .oled)
         #expect(AnicatAppearance(rawValue: "system") == .system)
         #expect(ThemeStore.skinKey == "anicat_skin")
@@ -228,6 +232,18 @@ struct ThemePaletteTests {
         palette.accentOverride = palette.successLight
         #expect(palette.indigoHex == SumiPalette.ink.indigoHex)
         #expect(palette.accentContrast == SumiPalette.ink.accentContrast)
+    }
+}
+
+@Suite("Night City")
+struct NightCityTests {
+    @Test("the cut corners and neon touches belong to Night City alone")
+    func flags() {
+        for palette in SumiPalette.all {
+            #expect(palette.isCyber == (palette.id == "night"), "\(palette.id) isCyber")
+        }
+        #expect(SumiPalette.night.isNeon)
+        #expect(SumiPalette.night.isLight == false)
     }
 }
 

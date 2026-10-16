@@ -671,8 +671,8 @@ public struct MangaReaderView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(SumiTheme.background.opacity(0.92))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
-            .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusSm).stroke(SumiTheme.border, lineWidth: 1))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
+            .overlay(SumiRect(cornerRadius: SumiTheme.radiusSm).stroke(SumiTheme.border, lineWidth: 1))
     }
 
     private func exitReader() {

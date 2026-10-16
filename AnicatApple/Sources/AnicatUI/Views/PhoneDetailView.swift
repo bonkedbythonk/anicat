@@ -249,7 +249,7 @@ struct PhoneDetailView: View {
                     .foregroundStyle(SumiTheme.muted)
             }
             .padding(16)
-            .background(SumiTheme.card, in: RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .background(SumiTheme.card, in: SumiRect(cornerRadius: SumiTheme.radiusMd))
             .padding(.horizontal, 16)
             .padding(.top, 8)
             // Downloaded volumes stay listed under the card: they are read

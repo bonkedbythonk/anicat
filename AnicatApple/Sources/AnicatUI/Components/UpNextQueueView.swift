@@ -270,7 +270,7 @@ public struct UpNextQueueView: View {
             .background(SumiTheme.card)
             // Its own corners since the queue lost its bordered box: the
             // banner otherwise ends in square corners on the page ground.
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
             .animation(.snappy, value: isInfoHovered)
             .animation(.snappy, value: isActionHovered)
             #if os(macOS)

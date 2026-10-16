@@ -7,7 +7,7 @@ public struct MediaCardSkeleton: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+            SumiRect(cornerRadius: SumiTheme.radiusMd)
                 .fill(SumiTheme.foregroundWash)
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
 
@@ -119,10 +119,10 @@ public struct EpisodeRowSkeleton: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(SumiTheme.card.opacity(0.4))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
         } else {
             HStack(alignment: .top, spacing: 14) {
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                SumiRect(cornerRadius: SumiTheme.radiusMd)
                     .fill(SumiTheme.foregroundWash)
                     .frame(width: 135, height: 76)
 
@@ -147,9 +147,9 @@ public struct EpisodeRowSkeleton: View {
             }
             .padding(10)
             .background(SumiTheme.card.opacity(0.4))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+                SumiRect(cornerRadius: SumiTheme.radiusLg)
                     .stroke(SumiTheme.border.opacity(0.4), lineWidth: 1)
             )
         }

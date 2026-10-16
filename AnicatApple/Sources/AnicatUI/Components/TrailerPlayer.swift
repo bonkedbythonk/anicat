@@ -188,8 +188,8 @@ private struct TrailerBlockedView: View {
             }
             .padding(24)
             .background(SumiTheme.background.opacity(0.72))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
-            .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusLg).stroke(SumiTheme.border, lineWidth: 1))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
+            .overlay(SumiRect(cornerRadius: SumiTheme.radiusLg).stroke(SumiTheme.border, lineWidth: 1))
         }
     }
 }

@@ -226,9 +226,9 @@ struct PersonMediaPoster: View {
                         }
                     }
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                        SumiRect(cornerRadius: SumiTheme.radiusSm)
                             .stroke(isHovered ? SumiTheme.indigo.opacity(0.6) : SumiTheme.border, lineWidth: 1)
                     )
 
@@ -300,9 +300,9 @@ struct PersonAvatarChip: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(isHovered ? SumiTheme.card : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                SumiRect(cornerRadius: SumiTheme.radiusMd)
                     .stroke(isHovered ? SumiTheme.border : SumiTheme.border.opacity(0.4), lineWidth: 1)
             )
             .contentShape(Rectangle())
@@ -328,9 +328,9 @@ struct PersonPortrait: View {
                 }
             }
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+                SumiRect(cornerRadius: SumiTheme.radiusLg)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
             // 200pt beside a text column is a Mac layout; on a 402pt phone

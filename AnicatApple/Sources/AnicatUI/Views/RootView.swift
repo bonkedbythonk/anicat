@@ -175,9 +175,9 @@ public struct RootView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
                         .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            SumiRect(cornerRadius: SumiTheme.radiusMd)
                                 .stroke(SumiTheme.warning.opacity(0.5), lineWidth: 1)
                         )
                         .padding(.horizontal, 24)
@@ -564,9 +564,9 @@ public struct RootView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(SumiTheme.card)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                        SumiRect(cornerRadius: SumiTheme.radiusMd)
                             .stroke(SumiTheme.indigo.opacity(0.5), lineWidth: 1)
                     )
                     .shadow(color: Color.black.opacity(0.4), radius: 12, y: 4)

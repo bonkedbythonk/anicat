@@ -236,7 +236,7 @@ private struct ScheduleItemRow: View {
                     Rectangle().fill(SumiTheme.card)
                 }
                 .frame(width: 55, height: 75)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
 
                 // Meta
                 VStack(alignment: .leading, spacing: 4) {

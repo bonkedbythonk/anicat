@@ -53,7 +53,7 @@ struct ResolvingStreamCard: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(SumiTheme.background.opacity(0.9))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.top, 6)
             .padding(.horizontal, 14)

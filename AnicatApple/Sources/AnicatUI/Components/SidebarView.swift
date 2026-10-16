@@ -305,10 +305,11 @@ public struct SidebarView: View {
                 // nav more than a Mac sidebar.
                 .background {
                     if isActive || isHovered {
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                        SumiRect(cornerRadius: SumiTheme.radiusSm)
                             .fill(SumiTheme.isNeon && isActive
                                 ? SumiTheme.indigo.opacity(0.14)
                                 : SumiTheme.foreground.opacity(isActive ? 0.08 : 0.04))
+                            .sumiGlow(radius: isActive ? 8 : 0, opacity: 0.25)
                     }
                 }
                 .padding(.horizontal, 8)

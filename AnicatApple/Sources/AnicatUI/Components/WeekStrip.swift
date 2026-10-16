@@ -160,7 +160,7 @@ public struct WeekStrip: View {
             .buttonStyle(.sumiPressable)
             .help(item.title)
             .background(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                SumiRect(cornerRadius: SumiTheme.radiusSm)
                     .fill(SumiTheme.indigo.opacity(isHovered ? 0.12 : 0))
             )
             .stableHover { isHovered = $0 }

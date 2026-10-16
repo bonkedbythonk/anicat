@@ -19,7 +19,7 @@ struct GeneralTabSection: View {
         SettingsCard(title: "Appearance") {
             SettingField(
                 label: "Theme",
-                description: "Ink & Index is the original warm sumi-ink skin, Sakura Zen a cherry-dark one with serif titles, Royal Neon an electric violet one, Dusk Sea an indigo and red one; all four have a light half. OLED is a true black for panels that switch pixels off, and is dark only.",
+                description: "Ink & Index is the original warm sumi-ink skin, Sakura Zen a cherry-dark one with serif titles, Royal Neon an electric violet one, Dusk Sea an indigo and red one; all four have a light half. Night City is black glass with cut corners and a yellow accent, and OLED is a true black for panels that switch pixels off; both are dark only.",
                 isStacked: true
             ) {
                 ThemePicker()

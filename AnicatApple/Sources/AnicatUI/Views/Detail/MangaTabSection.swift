@@ -75,7 +75,7 @@ struct MangaTabSection: View {
         .padding(.vertical, 40)
         .padding(.horizontal, 24)
         .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+            SumiRect(cornerRadius: SumiTheme.radiusLg)
                 .strokeBorder(SumiTheme.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
         )
     }
@@ -142,9 +142,9 @@ struct MangaTabSection: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .background(SumiTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
         .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+            SumiRect(cornerRadius: SumiTheme.radiusMd)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
     }

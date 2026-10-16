@@ -245,11 +245,20 @@ public struct MediaCard: View, Equatable {
                         .frame(height: 3)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
                 .overlay(
-                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
-                        .stroke(isHovered ? SumiTheme.foreground.opacity(0.25) : SumiTheme.border, lineWidth: 1)
+                    SumiRect(cornerRadius: SumiTheme.radiusMd)
+                        .stroke(
+                            isHovered
+                                ? (ThemeStore.shared.palette.isCyber ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.25))
+                                : SumiTheme.border,
+                            lineWidth: 1
+                        )
                 )
+                .sumiBrackets()
+                // The hovered poster only: a halo on every cell of a grid is a
+                // blur per card per scroll frame.
+                .sumiGlow(radius: isHovered ? 10 : 0, opacity: isHovered ? 0.45 : 0)
                 .ifLet(namespace) { view, namespace in
                     view.matchedGeometryEffect(id: item.id, in: namespace)
                 }

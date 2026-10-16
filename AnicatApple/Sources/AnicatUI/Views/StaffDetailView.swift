@@ -173,9 +173,9 @@ private struct StaffCharacterCreditRow: View {
                     }
                     .frame(width: 52, height: 78)
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                        SumiRect(cornerRadius: SumiTheme.radiusSm)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
 
@@ -229,9 +229,9 @@ private struct StaffCharacterCreditRow: View {
         }
         .padding(10)
         .background(SumiTheme.foreground.opacity(0.02))
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
         .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+            SumiRect(cornerRadius: SumiTheme.radiusMd)
                 .stroke(SumiTheme.border.opacity(0.5), lineWidth: 1)
         )
     }

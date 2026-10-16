@@ -585,8 +585,8 @@ public struct MediaDetailView: View {
                         thumbnail: details.trailerThumbnail.flatMap(URL.init(string:))
                     )
                         .frame(width: width, height: height)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
-                        .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusXl).stroke(SumiTheme.border, lineWidth: 1))
+                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusXl))
+                        .overlay(SumiRect(cornerRadius: SumiTheme.radiusXl).stroke(SumiTheme.border, lineWidth: 1))
                         .shadow(color: .black.opacity(0.6), radius: 40, y: 16)
                     HStack(spacing: 12) {
                         Text(details.title)
@@ -1001,9 +1001,9 @@ public struct MediaDetailView: View {
                 }
             }
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusXl))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusXl)
+                SumiRect(cornerRadius: SumiTheme.radiusXl)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
             .ifLet(namespace) { view, namespace in
@@ -1489,9 +1489,9 @@ public struct MediaDetailView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(SumiTheme.card.opacity(0.8))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                SumiRect(cornerRadius: SumiTheme.radiusMd)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
     }
@@ -2873,9 +2873,9 @@ private struct EpisodeRow: View, Equatable {
             progressTick
         }
         .frame(width: 128, height: 72)
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
         .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+            SumiRect(cornerRadius: SumiTheme.radiusSm)
                 .stroke(SumiTheme.border.opacity(0.4), lineWidth: 1)
         )
         .ifLet(morphSource) { view, source in

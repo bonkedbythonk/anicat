@@ -98,9 +98,9 @@ struct AskChatView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+                .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
                 .overlay(
-                    RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+                    SumiRect(cornerRadius: SumiTheme.radiusLg)
                         .stroke(focused ? SumiTheme.indigo.opacity(0.6) : SumiTheme.border, lineWidth: 1)
                 )
                 .animation(.sumi(.tab), value: focused)
@@ -153,7 +153,7 @@ struct AskChatView: View {
                 .foregroundColor(SumiTheme.foreground)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
+                .overlay(SumiRect(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         case .assistant:
             VStack(alignment: .leading, spacing: 14) {

@@ -86,9 +86,9 @@ public struct CommandPalette: View {
             }
             .frame(maxWidth: 620)
             .background(SumiTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusXl))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusXl)
+                SumiRect(cornerRadius: SumiTheme.radiusXl)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.5), radius: 30, y: 12)

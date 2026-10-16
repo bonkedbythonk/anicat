@@ -450,11 +450,12 @@ public extension View {
     func sumiCardStyle() -> some View {
         self
             .background(SumiTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusXl))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusXl))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusXl)
+                SumiRect(cornerRadius: SumiTheme.radiusXl)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
+            .sumiBrackets()
     }
 }
 

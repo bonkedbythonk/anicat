@@ -320,7 +320,7 @@ private struct DownloadRow: View {
                 SumiTheme.muted.opacity(0.15)
             }
             .frame(width: 40, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)

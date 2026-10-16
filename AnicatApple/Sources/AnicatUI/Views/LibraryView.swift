@@ -253,9 +253,9 @@ private struct LibraryTable: View {
             }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
         .overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+            SumiRect(cornerRadius: SumiTheme.radiusLg)
                 .stroke(SumiTheme.border, lineWidth: 1)
         )
     }

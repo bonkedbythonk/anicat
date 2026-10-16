@@ -275,10 +275,10 @@ public struct AniListMarkdownText: View {
             CachedAsyncImage(url: url, maxPixelSize: 480) { image in
                 image.resizable().aspectRatio(contentMode: .fit)
             } placeholder: {
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd).fill(SumiTheme.card)
+                SumiRect(cornerRadius: SumiTheme.radiusMd).fill(SumiTheme.card)
             }
             .frame(maxWidth: 260, maxHeight: 360, alignment: .leading)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
         case .spoiler(let inner):
             SpoilerBlock(font: font, color: color, lineSpacing: lineSpacing, blocks: inner)
         }
@@ -309,10 +309,10 @@ private struct SpoilerBlock: View {
                         CachedAsyncImage(url: url, maxPixelSize: 480) { image in
                             image.resizable().aspectRatio(contentMode: .fit)
                         } placeholder: {
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd).fill(SumiTheme.card)
+                            SumiRect(cornerRadius: SumiTheme.radiusMd).fill(SumiTheme.card)
                         }
                         .frame(maxWidth: 260, maxHeight: 360, alignment: .leading)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
                     }
                 }
             }
@@ -321,7 +321,7 @@ private struct SpoilerBlock: View {
             .opacity(isRevealed ? 1 : 0.45)
             .padding(10)
             .background(SumiTheme.card.opacity(isRevealed ? 0 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
             .overlay(alignment: .center) {
                 if !isRevealed {
                     Text("Spoiler — click to reveal")
@@ -331,7 +331,7 @@ private struct SpoilerBlock: View {
             }
             .overlay {
                 if !isRevealed {
-                    RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                    SumiRect(cornerRadius: SumiTheme.radiusMd)
                         .stroke(SumiTheme.border, lineWidth: 1)
                 }
             }

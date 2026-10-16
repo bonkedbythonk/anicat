@@ -212,7 +212,7 @@ struct WatchOrderRow: View {
             .padding(.trailing, 10)
             .padding(.vertical, 6)
             .background(isHovered && !entry.isCurrent ? SumiTheme.card : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
             .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)

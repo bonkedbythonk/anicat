@@ -129,8 +129,8 @@ public struct PickerSheet: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-            .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
+            .overlay(SumiRect(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
             if let askNote {
                 Text(askNote)
                     .font(.system(size: 12))
@@ -163,9 +163,9 @@ public struct PickerSheet: View {
                         }
                         .frame(width: 140, height: 210)
                         .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
                         .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                            SumiRect(cornerRadius: SumiTheme.radiusMd)
                                 .stroke(SumiTheme.border, lineWidth: 1)
                         )
                         .contentShape(Rectangle())

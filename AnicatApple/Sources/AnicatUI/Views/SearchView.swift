@@ -390,9 +390,9 @@ public struct SearchView: View {
                     // as a card and pulled more weight than the results.
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
-                    .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
                     .overlay(
-                        RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+                        SumiRect(cornerRadius: SumiTheme.radiusLg)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
 
@@ -416,7 +416,7 @@ public struct SearchView: View {
                         }
                         .padding(.vertical, 4)
                         .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusLg)
+                            SumiRect(cornerRadius: SumiTheme.radiusLg)
                                 .stroke(SumiTheme.border, lineWidth: 1)
                         )
                     }
@@ -709,7 +709,7 @@ private extension View {
     /// card so it never covers the poster.
     func searchKeyboardRing(_ active: Bool) -> some View {
         overlay(
-            RoundedRectangle(cornerRadius: SumiTheme.radiusLg + 3)
+            SumiRect(cornerRadius: SumiTheme.radiusLg + 3)
                 .stroke(SumiTheme.indigo, lineWidth: 2)
                 .padding(-4)
                 .opacity(active ? 1 : 0)

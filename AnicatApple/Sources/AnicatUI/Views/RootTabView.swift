@@ -1766,7 +1766,7 @@ private struct PhoneErrorToast: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(SumiTheme.indigo.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
                     }
                     .buttonStyle(.sumiPressable)
                 }
@@ -1786,9 +1786,9 @@ private struct PhoneErrorToast: View {
             .padding(.trailing, 6)
             .padding(.vertical, 10)
             .background(SumiTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                SumiRect(cornerRadius: SumiTheme.radiusMd)
                     .stroke(SumiTheme.warning.opacity(0.5), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.4), radius: 12, y: 4)

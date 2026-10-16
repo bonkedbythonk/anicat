@@ -264,7 +264,7 @@ public struct SettingsView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                SumiRect(cornerRadius: SumiTheme.radiusMd)
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
 
@@ -308,7 +308,7 @@ public struct SettingsView: View {
                     .padding(.vertical, 8)
                     .background {
                         if isActive {
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm)
+                            SumiRect(cornerRadius: SumiTheme.radiusSm)
                                 .fill(SumiTheme.foreground.opacity(0.06))
                         }
                     }

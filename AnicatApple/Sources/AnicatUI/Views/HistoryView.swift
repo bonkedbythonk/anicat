@@ -223,7 +223,7 @@ public struct HistoryView: View {
                 }
             }
             .frame(width: 56, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(viewer.name)

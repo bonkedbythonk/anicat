@@ -345,9 +345,9 @@ public struct OnboardingView: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(SumiTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
             .overlay(
-                RoundedRectangle(cornerRadius: SumiTheme.radiusMd)
+                SumiRect(cornerRadius: SumiTheme.radiusMd)
                     .stroke(SumiTheme.indigo.opacity(0.35), lineWidth: 1)
             )
         } else {
@@ -413,9 +413,9 @@ public struct OnboardingView: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm + 2))
+                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm + 2))
                         .overlay(
-                            RoundedRectangle(cornerRadius: SumiTheme.radiusSm + 2)
+                            SumiRect(cornerRadius: SumiTheme.radiusSm + 2)
                                 .stroke(failure == nil ? SumiTheme.border : SumiTheme.warning.opacity(0.7), lineWidth: 1)
                         )
 
@@ -853,8 +853,8 @@ private struct MockPresence: View {
         }
         .padding(10)
         .background(SumiTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
-        .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
+        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
+        .overlay(SumiRect(cornerRadius: SumiTheme.radiusMd).stroke(SumiTheme.border, lineWidth: 1))
     }
 }
 

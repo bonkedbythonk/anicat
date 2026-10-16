@@ -289,7 +289,7 @@ public struct StatsView: View {
                     Rectangle().fill(SumiTheme.foregroundWash)
                 }
                 .frame(width: 32, height: 46)
-                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
 
                 // A registry row whose title no catalog view has fetched this
                 // session shows its id: the alternative is a blank row, and

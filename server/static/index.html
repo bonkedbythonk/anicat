@@ -106,7 +106,7 @@
   [hidden] { display: none !important; }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
   body {
-    font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    font: 13px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   .num, .meta, time { font-variant-numeric: tabular-nums; }
@@ -121,23 +121,29 @@
   img { color: transparent; }
 
   /* ---- buttons ---- */
+  /* SumiButtonStyle: 28pt, 12pt semibold, a hairline on the card fill, the
+     foreground wash on hover. Press dims to 85%; nothing on the Mac scales
+     under the pointer. The primary is bold, and glows only on the neon skins'
+     dark side (Royal Neon, Night City). */
   .btn {
-    display: inline-flex; align-items: center; gap: .45rem; cursor: pointer; white-space: nowrap;
-    background: var(--card); border: 0; box-shadow: inset 0 0 0 1px var(--line); border-radius: 10px;
-    padding: .5rem .9rem; font-size: 13px; transition: background .15s, transform .08s;
+    display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-height: 28px; cursor: pointer; white-space: nowrap;
+    background: var(--card); border: 0; box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--r-md);
+    padding: 0 14px; font-size: 12px; font-weight: 600; transition: background .15s, opacity .1s, box-shadow .15s;
   }
-  .btn:hover { background: color-mix(in srgb, var(--card) 80%, var(--fg)); }
-  .btn:active { transform: scale(.97); }
-  .btn:disabled { opacity: .45; cursor: default; transform: none; }
-  .btn.primary {
-    background: var(--accent); color: var(--bg); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 14%, transparent);
-    font-weight: 650; padding: .6rem 1.15rem;
-  }
-  .btn.primary:hover { background: var(--accent-2); }
-  .btn.ghost { background: transparent; box-shadow: none; color: var(--muted); padding: .35rem .5rem; }
+  .btn:hover { background: color-mix(in srgb, var(--fg) 10%, var(--bg)); }
+  .btn:active { opacity: .85; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.primary { background: var(--accent); color: var(--bg); box-shadow: none; font-weight: 700; }
+  .btn.primary:hover { background: color-mix(in srgb, var(--accent) 85%, var(--bg)); }
+  [data-skin=royal][data-theme=dark] .btn.primary, [data-skin=cyber] .btn.primary { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 30%, transparent); }
+  [data-skin=royal][data-theme=dark] .btn.primary:hover, [data-skin=cyber] .btn.primary:hover { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent); }
+  /* The large size, for the one action the spotlight is for. */
+  .hero .btn { min-height: 40px; padding: 0 16px; font-size: 12.5px; }
+  .hero .btn.primary { padding: 0 20px; font-size: 13.5px; border-radius: var(--r-lg); }
+  .btn.ghost { background: transparent; box-shadow: none; color: var(--muted); padding: 0 8px; }
   .btn.ghost:hover { color: var(--fg); background: transparent; }
   .btn.danger { color: var(--danger); }
-  .btn svg { width: 16px; height: 16px; flex: none; }
+  .btn svg { width: 14px; height: 14px; flex: none; }
   .link { color: var(--accent); cursor: pointer; background: none; border: 0; padding: 0; font: inherit; }
   .link:hover { color: var(--accent-2); }
 
@@ -152,13 +158,17 @@
   .slash .sep { color: var(--faint); user-select: none; }
 
   /* Text-menu dropdown. */
+  /* SumiFilterDropdown: a hairline box, label muted, the value in a dim
+     foreground until something is chosen and then in the accent on a 10%
+     accent fill. */
   .menu-btn {
-    display: inline-flex; align-items: center; gap: .3rem; background: none; border: 0; cursor: pointer;
-    padding: .25rem .1rem; font-size: 13px; color: var(--muted);
+    display: inline-flex; align-items: center; gap: .35rem; background: none; border: 0; cursor: pointer; border-radius: var(--r-md);
+    padding: 7px 12px; font-size: 12px; font-weight: 500; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line);
   }
-  .menu-btn:hover { color: var(--fg); }
-  .menu-btn b { color: var(--fg); font-weight: 600; }
-  .menu-btn svg { width: 12px; height: 12px; opacity: .7; }
+  .menu-btn b { color: color-mix(in srgb, var(--fg) 60%, transparent); font-weight: 500; }
+  .menu-btn.set { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .menu-btn.set b { color: var(--accent); }
+  .menu-btn svg { width: 10px; height: 10px; opacity: .7; }
   .popover {
     position: fixed; z-index: 60; min-width: 180px; max-height: min(420px, 70vh); overflow: auto;
     background: var(--card); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line), 0 14px 40px var(--shade);
@@ -183,43 +193,56 @@
   textarea.field { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12px; min-height: 12rem; }
 
   /* ---- shell ---- */
-  .shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+  /* The Mac rail (SidebarView.swift): 200pt, words only, Browse and System
+     captions, a rounded wash inset from the edges where a source list marks
+     its row, the paw as a 10% watermark and a Search anything row at the foot.
+     It had icons and a 3px accent bar, which the Mac dropped as an
+     admin-dashboard nav. */
+  .shell { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 100vh; }
   aside.side {
-    position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 1.1rem;
-    background: var(--card); box-shadow: inset -1px 0 0 var(--line); padding: 1.25rem .9rem 1rem;
+    position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; padding: .75rem 0 1rem;
+    background: var(--card); box-shadow: inset -1px 0 0 var(--line);
   }
-  .brand { display: flex; align-items: center; gap: .55rem; padding: 0 .55rem; font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
-  .brand svg { width: 22px; height: 22px; color: var(--accent); }
-  .side .slash { padding: 0 .35rem; }
-  nav.nav { display: flex; flex-direction: column; gap: .1rem; }
+  nav.nav { display: flex; flex-direction: column; padding-bottom: 8px; }
+  nav.nav .grp { font-size: 11.5px; color: var(--muted); padding: 16px 20px 6px; font-variant-numeric: tabular-nums; }
   nav.nav a {
-    position: relative; display: flex; align-items: center; gap: .7rem; padding: .5rem .6rem; border-radius: 9px;
-    color: var(--muted); font-size: 13.5px; transition: color .15s, background .15s;
+    display: flex; align-items: center; margin: 0 8px; padding: 7px 8px 7px 12px; min-height: 37px; border-radius: var(--r-sm);
+    color: color-mix(in srgb, var(--fg) 70%, transparent); font-size: 13px; transition: color .15s, background .15s;
   }
-  nav.nav a svg { width: 18px; height: 18px; flex: none; }
   nav.nav a:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 4%, transparent); }
-  nav.nav a[aria-current=page] { color: var(--fg); background: color-mix(in srgb, var(--accent) 10%, transparent); }
-  nav.nav a[aria-current=page]::before {
-    content: ""; position: absolute; left: -.9rem; top: 22%; bottom: 22%; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent);
+  nav.nav a[aria-current=page] { color: var(--fg); font-weight: 600; background: color-mix(in srgb, var(--fg) 8%, transparent); }
+  /* Royal Neon and Night City tint the active row with the accent instead. */
+  [data-skin=royal] nav.nav a[aria-current=page], [data-skin=cyber] nav.nav a[aria-current=page] {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
   }
   .side .grow { flex: 1; }
-  .who { display: flex; align-items: center; gap: .6rem; padding: .4rem .55rem; border-radius: 10px; font-size: 13px; }
+  /* The sign-in page's heading. */
+  .brand { display: flex; align-items: center; gap: .55rem; font-weight: 700; letter-spacing: -.01em; }
+  .brand svg { width: 22px; height: 22px; color: var(--accent); }
+  .mark { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0 16px 12px; }
+  .mark svg { width: 80px; height: 80px; color: var(--fg); opacity: .1; }
+  .mark .slash { font-size: 11.5px; }
+  .who { display: flex; align-items: center; gap: .6rem; margin: 0 16px; padding: .3rem 0 .6rem; font-size: 12.5px; }
   .who img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: var(--card-2); }
   .who .muted { font-size: 11.5px; }
-  .side-foot { font-size: 11.5px; color: var(--faint); padding: 0 .55rem; }
+  .sfind { display: flex; justify-content: space-between; align-items: baseline; margin: 0 16px; padding: 10px 4px 2px; box-shadow: inset 0 1px 0 var(--line); font-size: 12.5px; color: var(--muted); }
+  .sfind:hover { color: var(--fg); }
+  .sfind kbd { font: inherit; font-size: 11px; opacity: .7; }
+  .side-foot { font-size: 11.5px; color: var(--faint); padding: .5rem 20px 0; font-variant-numeric: tabular-nums; }
 
   main#view { min-width: 0; padding: 0 0 7rem; }
-  .page { max-width: 1240px; margin: 0 auto; padding: 1.75rem 2.5rem 0; animation: rise .32s cubic-bezier(.2, .8, .2, 1); }
+  .page { max-width: 1240px; margin: 0 auto; padding: 2.5rem 2.5rem 0; animation: rise .32s cubic-bezier(.2, .8, .2, 1); }
   @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
   @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
 
-  h1 { font-size: 26px; font-weight: 680; letter-spacing: -.015em; margin: .2rem 0 1rem; }
-  h2 { font-size: 17px; font-weight: 650; margin: 0; }
+  /* SumiPageHeader and SumiSectionHeader: 19pt and 15pt semibold, tight tracking. */
+  h1 { font-size: 19px; font-weight: 600; letter-spacing: -.3px; margin: .2rem 0 1rem; }
+  h2 { font-size: 15px; font-weight: 600; letter-spacing: -.2px; margin: 0; }
   .muted { color: var(--muted); }
   .faint { color: var(--faint); }
   .error { color: var(--danger); }
   .okc { color: var(--ok); }
-  .meta { font-size: 12px; color: var(--muted); }
+  .meta { font-size: 11.5px; color: var(--muted); }
   .dot::before { content: "\00b7"; margin: 0 .4rem; color: var(--faint); }
 
   .banner {
@@ -269,20 +292,26 @@
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.4rem 1rem; }
 
   .pc { display: flex; flex-direction: column; gap: .45rem; min-width: 0; }
-  .pc .frame {
-    position: relative; display: block; border-radius: 12px; overflow: hidden; aspect-ratio: 2 / 3; background: var(--card);
-    transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s;
-  }
+  /* MediaCard: radius 10, a hairline that lifts to 25% foreground on hover,
+     and no movement; the title rests at 80% and rises to full. The score is
+     bare text in the meta row, not a chip on the art. */
+  .pc .frame, .wc .frame, .ep .frame { position: relative; border-radius: var(--r-md); overflow: hidden; background: var(--card); }
+  .pc .frame { display: block; aspect-ratio: 2 / 3; }
   .pc .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .pc:hover .frame, .wc:hover .frame { transform: translateY(-2px); box-shadow: 0 10px 28px var(--shade); }
-  .pc .tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in srgb, var(--bg) 60%, transparent); }
+  .frame::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; corner-shape: inherit; pointer-events: none;
+    box-shadow: inset 0 0 0 1px var(--line); transition: box-shadow .2s;
+  }
+  .pc:hover .frame::after, .wc:hover .frame::after, .ep .frame:hover::after { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 25%, transparent); }
+  .pc .tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(0, 0, 0, .45); }
   .pc .tick > i { display: block; height: 100%; background: var(--accent); }
-  .pc .name, .wc .name { font-size: 13px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .pc .meta { margin-top: -.2rem; }
-  .pc .score { position: absolute; top: .45rem; right: .45rem; font-size: 11px; font-weight: 650; padding: .1rem .38rem; border-radius: 6px; background: color-mix(in srgb, var(--bg) 78%, transparent); color: var(--fg); }
+  .pc .name { font-size: 14px; font-weight: 600; line-height: 1.3; min-height: 2.6em; opacity: .8; transition: opacity .2s; }
+  .pc:hover .name { opacity: 1; }
+  .pc .name, .wc .name { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .pc .meta { margin-top: -.2rem; display: flex; gap: 6px; min-height: 14px; }
 
   .wc { display: flex; flex-direction: column; gap: .5rem; min-width: 0; cursor: pointer; }
-  .wc .frame { position: relative; border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 9; background: var(--card); transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s; }
+  .wc .frame { aspect-ratio: 16 / 9; }
   .wc .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .wc .frame .play {
     position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .18s;
@@ -297,7 +326,8 @@
   .wc .line .name { flex: 1; -webkit-line-clamp: 1; }
   .wc .line .go { font-size: 12px; color: var(--accent); white-space: nowrap; }
 
-  .empty { color: var(--muted); padding: 1.2rem 0; }
+  /* SumiEmptyState: a plain sentence where the content would be, semibold. */
+  .empty { color: var(--fg); font-size: 13.5px; font-weight: 600; padding: 12px 0; margin: 0; }
   .skel { background: linear-gradient(90deg, var(--card) 0%, var(--card-2) 50%, var(--card) 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 12px; }
   @keyframes shimmer { to { background-position: -200% 0; } }
 
@@ -337,9 +367,8 @@
 
   .eps { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1.2rem 1rem; }
   .ep { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
-  .ep .frame { position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: var(--card); cursor: pointer; border: 0; padding: 0; display: block; width: 100%; transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s; }
-  .ep .frame:hover { transform: translateY(-2px); box-shadow: 0 10px 28px var(--shade); }
-  .ep .frame:disabled { cursor: default; transform: none; box-shadow: none; }
+  .ep .frame { aspect-ratio: 16 / 9; cursor: pointer; border: 0; padding: 0; display: block; width: 100%; }
+  .ep .frame:disabled { cursor: default; }
   .ep .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ep .frame .ph { position: absolute; inset: 0; display: grid; place-items: center; font-size: 28px; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
   .ep .frame .play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .18s; background: color-mix(in srgb, var(--bg) 35%, transparent); }
@@ -367,7 +396,7 @@
   .tl.here .frame { box-shadow: 0 0 0 2px var(--accent); }
 
   .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: .8rem; }
-  .person { display: flex; gap: .7rem; align-items: center; background: var(--card); border-radius: 12px; padding: .5rem; box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
+  .person { display: flex; gap: .7rem; align-items: center; background: var(--card); border-radius: var(--r-xl); padding: .5rem; box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
   .person img, .person .ph { width: 46px; height: 62px; border-radius: 8px; object-fit: cover; background: var(--card-2); flex: none; }
   .person .who2 { flex: 1; min-width: 0; font-size: 13px; }
   .person .who2 div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -424,10 +453,10 @@
 
   /* ---- stats ---- */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .8rem; margin-bottom: 1.8rem; }
-  .tile { background: var(--card); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); padding: 1rem 1.1rem; }
+  .tile { background: var(--card); border-radius: var(--r-xl); box-shadow: inset 0 0 0 1px var(--line); padding: 1rem 1.1rem; }
   .tile .v { font-size: 28px; font-weight: 680; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
   .tile .k { font-size: 12.5px; color: var(--muted); }
-  .panel { background: var(--card); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); padding: 1.1rem 1.25rem; margin-bottom: 1.2rem; }
+  .panel { background: var(--card); border-radius: var(--r-xl); box-shadow: inset 0 0 0 1px var(--line); padding: 1.1rem 1.25rem; margin-bottom: 1.2rem; }
   .panel h2 { margin-bottom: .9rem; }
   .panel svg { display: block; max-width: 100%; }
   .two { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 1.2rem; }
@@ -482,7 +511,7 @@
   .toast.error { background: var(--danger); color: #fff; }
 
   .np {
-    position: fixed; left: 232px; right: 0; bottom: 0; z-index: 40; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 1rem; align-items: center;
+    position: fixed; left: 200px; right: 0; bottom: 0; z-index: 40; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 1rem; align-items: center;
     background: var(--card); box-shadow: inset 0 1px 0 var(--line); padding: .6rem 2.5rem .7rem;
   }
   .np img, .np .ph { width: 44px; height: 62px; border-radius: 7px; object-fit: cover; background: var(--card-2); }
@@ -495,16 +524,18 @@
   .signin ol a { color: var(--accent); }
   .signin .row { display: flex; gap: .6rem; flex-wrap: wrap; }
 
+
   @media (max-width: 1100px) {
     .two { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 860px) {
-    .shell { grid-template-columns: minmax(0, 1fr); }
-    aside.side { position: sticky; top: 0; z-index: 30; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .6rem 1rem; box-shadow: inset 0 -1px 0 var(--line); }
-    nav.nav { flex-direction: row; flex-wrap: wrap; }
-    nav.nav a span { display: none; }
-    nav.nav a[aria-current=page]::before { display: none; }
-    .side .grow, .who, .side-foot { display: none; }
+    .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+    aside.side { position: sticky; top: 0; z-index: 30; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; padding: .4rem .5rem; box-shadow: inset 0 -1px 0 var(--line); }
+    nav.nav { flex-direction: row; flex-wrap: wrap; padding: 0; }
+    nav.nav .grp { display: none; }
+    nav.nav a { min-height: 32px; margin: 0; }
+    .side .grow, .mark svg, .who, .sfind, .side-foot { display: none; }
+    .mark { padding: 0; }
     .page { padding: 1.2rem 1rem 0; }
     .hero .copy { padding: 1.5rem 1rem 1rem; }
     .hero h1 { font-size: 28px; }
@@ -523,20 +554,25 @@
 <div id="update-banner" class="banner" hidden></div>
 <div class="shell">
   <aside class="side">
-    <a class="brand" href="#/" aria-label="Anicat home"><span data-icon="paw"></span>Anicat</a>
-    <div class="slash" id="mode" role="group" aria-label="Catalog">
-      <button type="button" data-mode="anime">Anime</button><span class="sep">/</span><button type="button" data-mode="cinema">Films and TV</button>
-    </div>
     <nav class="nav" aria-label="Sections">
-      <a href="#/" data-tab="home"><span data-icon="home"></span><span>Home</span></a>
-      <a href="#/schedule" data-tab="schedule" data-anime-only><span data-icon="calendar"></span><span>Schedule</span></a>
-      <a href="#/library" data-tab="library"><span data-icon="library"></span><span>Library</span></a>
-      <a href="#/search" data-tab="search"><span data-icon="search"></span><span>Search</span></a>
-      <a href="#/stats" data-tab="stats"><span data-icon="chart"></span><span>Stats</span></a>
-      <a href="#/settings" data-tab="settings"><span data-icon="gear"></span><span>Settings</span></a>
+      <div class="grp">Browse</div>
+      <a href="#/" data-tab="home"><span>Anime</span></a>
+      <a href="#/schedule" data-tab="schedule" data-anime-only><span>Schedule</span></a>
+      <a href="#/library" data-tab="library"><span>Library</span></a>
+      <a href="#/search" data-tab="search"><span>Search</span></a>
+      <a href="#/stats" data-tab="stats"><span>Stats</span></a>
+      <div class="grp">System</div>
+      <a href="#/settings" data-tab="settings"><span>Settings</span></a>
     </nav>
     <div class="grow"></div>
+    <div class="mark">
+      <span data-icon="paw"></span>
+      <div class="slash" id="mode" role="group" aria-label="Catalog">
+        <button type="button" data-mode="anime">Anime</button><span class="sep">/</span><button type="button" data-mode="cinema">Films and TV</button>
+      </div>
+    </div>
     <a class="who" id="who" href="#/settings"></a>
+    <a class="sfind" href="#/search">Search anything<kbd>/</kbd></a>
     <div class="side-foot" id="side-foot"></div>
   </aside>
   <main id="view" tabindex="-1"></main>
@@ -860,7 +896,7 @@ function menu({ label, options, value, onChange }) {
   const btn = el("button", { type: "button", class: "menu-btn", "aria-haspopup": "listbox" },
     label ? el("span", {}, label) : null, valueNode, icon("chevron"));
   btn.value = value === undefined ? options[0][0] : value;
-  const sync = () => { valueNode.textContent = current()[1]; };
+  const sync = () => { valueNode.textContent = current()[1]; btn.classList.toggle("set", btn.value !== options[0][0]); };
   btn.set = (v) => { btn.value = v; sync(); };
   sync();
   btn.addEventListener("click", () => {
@@ -1075,11 +1111,11 @@ function posterCard(item, opts = {}) {
   const node = el("div", { class: "pc" },
     el("a", { class: "frame", href, "aria-label": item.title },
       img(item.cover_image),
-      opts.score ? el("span", { class: "score num" }, opts.score) : null,
       frac > 0 ? el("span", { class: "tick" }, el("i", { style: `width:${(frac * 100).toFixed(1)}%` })) : null,
     ),
     el("a", { class: "name t-name", href }, item.title),
-    opts.sub !== "" ? el("div", { class: "meta" }, opts.sub !== undefined ? opts.sub : summarySub(item)) : null,
+    opts.sub !== "" || opts.score ? el("div", { class: "meta" }, opts.score ? el("span", {}, opts.score) : null,
+      opts.sub !== "" ? el("span", {}, opts.sub !== undefined ? opts.sub : summarySub(item)) : null) : null,
   );
   if (item.catalog && item.catalog_id) {
     const hooks = opts.menu ? opts.menu(node) : {};
@@ -2534,6 +2570,8 @@ function setMode(mode, keepRoute) {
     b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
   }
   for (const a of document.querySelectorAll("[data-anime-only]")) a.hidden = mode !== "anime";
+  // The Mac rail calls the anime home "Anime" and the cinema one "Home".
+  document.querySelector("[data-tab=home] span").textContent = mode === "anime" ? "Anime" : "Home";
   if (!keepRoute) {
     const tab = currentRoute().tab;
     // A title page belongs to one catalog, and the schedule is anime's alone;

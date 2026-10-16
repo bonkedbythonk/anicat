@@ -31,6 +31,8 @@
     --muted: color-mix(in srgb, var(--fg) var(--mute-a), transparent);
     --faint: color-mix(in srgb, var(--fg) calc(var(--mute-a) * .58), transparent);
     --line: color-mix(in srgb, var(--fg) var(--line-a), transparent);
+    --gauge: var(--accent);
+    --art: none;
     --r-sm: 6px; --r-md: 10px; --r-lg: 12px; --r-xl: 14px;
   }
   [data-theme=dark] { --danger: #e2674a; --ok: #8fb573; --warn: #d9a441; }
@@ -39,61 +41,63 @@
   :root, [data-skin=ink][data-theme=dark] {
     color-scheme: dark;
     --bg: #161310; --card: #1e1a15; --card-2: #26211b; --fg: #ede7dc;
-    --accent: #8fb8dc; --accent-2: #a8c9e6; --mute-a: 55%; --line-a: 10%;
+    --accent: #8fb8dc; --mute-a: 55%; --line-a: 10%;
     --shade: rgba(0, 0, 0, 0.45);
   }
   [data-skin=ink][data-theme=light] {
     color-scheme: light;
     --bg: #f1ece2; --card: #faf7f0; --card-2: #e9e3d6; --fg: #26221b;
-    --accent: #2f5a76; --accent-2: #45789a; --mute-a: 65%; --line-a: 14%;
+    --accent: #2f5a76; --mute-a: 65%; --line-a: 14%;
     --shade: rgba(38, 34, 27, 0.18);
   }
   [data-skin=sakura][data-theme=dark] {
     color-scheme: dark;
     --bg: #180a10; --card: #201016; --card-2: #2b1620; --fg: #fcfafb;
-    --accent: #e0607e; --accent-2: #ea8ea3; --mute-a: 55%; --line-a: 16%;
+    --accent: #e0607e; --mute-a: 55%; --line-a: 16%;
     --shade: rgba(0, 0, 0, 0.5);
   }
   [data-skin=sakura][data-theme=light] {
     color-scheme: light;
     --bg: #fdf5f7; --card: #ffffff; --card-2: #f6e6eb; --fg: #2d1822;
-    --accent: #c04060; --accent-2: #d86884; --mute-a: 65%; --line-a: 12%;
+    --accent: #c04060; --mute-a: 65%; --line-a: 12%;
     --shade: rgba(45, 24, 34, 0.16);
   }
   [data-skin=royal][data-theme=dark] {
     color-scheme: dark;
     --bg: #0e0618; --card: #170b26; --card-2: #20142f; --fg: #f1eaff;
-    --accent: #a66bff; --accent-2: #c79bff; --mute-a: 58%; --line-a: 16%;
+    --accent: #a66bff; --mute-a: 58%; --line-a: 16%;
     --shade: rgba(0, 0, 0, 0.5);
   }
   [data-skin=royal][data-theme=light] {
     color-scheme: light;
     --bg: #f5f0ff; --card: #ffffff; --card-2: #ece4fb; --fg: #1e1033;
-    --accent: #5b1fd1; --accent-2: #7c3aed; --mute-a: 65%; --line-a: 14%;
+    --accent: #5b1fd1; --mute-a: 65%; --line-a: 14%;
     --shade: rgba(30, 16, 51, 0.16);
   }
+  /* Evangelion, stored as dusk like the Mac's skin id. --gauge is Unit-01 green,
+     which only the segmented progress bars draw; every other skin's gauge is its accent. */
   [data-skin=dusk][data-theme=dark] {
     color-scheme: dark;
-    --bg: #14124f; --card: #1e1b6b; --card-2: #27236f; --fg: #f6ecd2;
-    --accent: #ff6b57; --accent-2: #ff9486; --mute-a: 62%; --line-a: 16%;
+    --bg: #0c0a10; --card: #16121e; --card-2: #1f1c27; --fg: #f1ecf5;
+    --accent: #ff6a13; --gauge: #7cff3a; --mute-a: 62%; --line-a: 16%;
     --shade: rgba(0, 0, 0, 0.5);
   }
   [data-skin=dusk][data-theme=light] {
     color-scheme: light;
-    --bg: #f6ebd0; --card: #fff8e6; --card-2: #efe1c2; --fg: #1b1a4a;
-    --accent: #b72e26; --accent-2: #d4473d; --mute-a: 68%; --line-a: 14%;
-    --shade: rgba(27, 26, 74, 0.16);
+    --bg: #f4efe8; --card: #ffffff; --card-2: #ece5da; --fg: #1c1230;
+    --accent: #b84300; --gauge: #2a6f10; --mute-a: 68%; --line-a: 14%;
+    --shade: rgba(28, 18, 48, 0.16);
   }
   [data-skin=cyber] {
     color-scheme: dark;
     --bg: #0a0a0f; --card: #14141c; --card-2: #1d1d24; --fg: #edede6;
-    --accent: #fcee0a; --accent-2: #00f0ff; --mute-a: 62%; --line-a: 16%;
+    --accent: #fcee0a; --mute-a: 62%; --line-a: 16%;
     --shade: rgba(0, 0, 0, 0.6); --danger: #ff4d7a;
   }
   [data-skin=oled] {
     color-scheme: dark;
     --bg: #000000; --card: #0b0a09; --card-2: #16140f; --fg: #ede7dc;
-    --accent: #8fb8dc; --accent-2: #a8c9e6; --mute-a: 58%; --line-a: 18%;
+    --accent: #8fb8dc; --mute-a: 58%; --line-a: 18%;
     --shade: rgba(0, 0, 0, 0.6);
   }
   /* Sakura is the one skin that changes anything but colour: headings and
@@ -104,7 +108,10 @@
   /* Class rules below set display, which would otherwise beat the hidden
      attribute and leave an empty now-playing bar on screen. */
   [hidden] { display: none !important; }
-  html, body { margin: 0; background: var(--bg); color: var(--fg); }
+  /* The ground is on html alone: a background on body too would paint over the
+     page picture, which sits at z-index -1 behind the content. */
+  html { background: var(--bg); }
+  html, body { margin: 0; color: var(--fg); }
   body {
     font: 13px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -145,7 +152,7 @@
   .btn.danger { color: var(--danger); }
   .btn svg { width: 14px; height: 14px; flex: none; }
   .link { color: var(--accent); cursor: pointer; background: none; border: 0; padding: 0; font: inherit; }
-  .link:hover { color: var(--accent-2); }
+  .link:hover { color: color-mix(in srgb, var(--accent) 80%, var(--fg)); }
 
   /* A slash toggle: the choices as words, the chosen one in ink. */
   .slash { display: inline-flex; align-items: baseline; gap: .1rem; font-size: 13px; }
@@ -304,7 +311,7 @@
   }
   .pc:hover .frame::after, .wc:hover .frame::after, .ep .frame:hover::after { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 25%, transparent); }
   .pc .tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(0, 0, 0, .45); }
-  .pc .tick > i { display: block; height: 100%; background: var(--accent); }
+  .pc .tick > i { display: block; height: 100%; background: var(--gauge); }
   .pc .name { font-size: 14px; font-weight: 600; line-height: 1.3; min-height: 2.6em; opacity: .8; transition: opacity .2s; }
   .pc:hover .name { opacity: 1; }
   .pc .name, .wc .name { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
@@ -321,7 +328,7 @@
   .play-dot { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: var(--bg); display: grid; place-items: center; }
   .play-dot svg { width: 18px; height: 18px; margin-left: 2px; }
   .wc .tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in srgb, var(--bg) 60%, transparent); }
-  .wc .tick > i { display: block; height: 100%; background: var(--accent); }
+  .wc .tick > i { display: block; height: 100%; background: var(--gauge); }
   .wc .line { display: flex; gap: .6rem; align-items: baseline; }
   .wc .line .name { flex: 1; -webkit-line-clamp: 1; }
   .wc .line .go { font-size: 12px; color: var(--accent); white-space: nowrap; }
@@ -375,7 +382,7 @@
   .ep .frame:hover .play, .ep .frame:focus-visible .play { opacity: 1; }
   .ep .frame:disabled .play { display: none; }
   .ep .tick { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in srgb, var(--bg) 60%, transparent); }
-  .ep .tick > i { display: block; height: 100%; background: var(--accent); }
+  .ep .tick > i { display: block; height: 100%; background: var(--gauge); }
   .ep.watched .frame img { opacity: .55; }
   .ep .hd { display: flex; gap: .5rem; align-items: baseline; font-size: 13px; }
   .ep .hd .n { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
@@ -525,30 +532,114 @@
   .signin .row { display: flex; gap: .6rem; flex-wrap: wrap; }
 
 
-  /* Night City (SumiRect and sumiBrackets): the top-right and bottom-left
-     corners are cut on the diagonal by the amount the radius would have
-     rounded them, accent brackets sit on the two square corners of posters
-     and cards, and the hovered poster and the active row glow. corner-shape is
-     Chromium's; a browser without it keeps the two corners rounded and the
-     other two square, which is the same silhouette at a glance. The cut has to
-     be corner-shape and not clip-path: clip-path also takes the inset
-     hairline off the diagonals. */
-  [data-skin=cyber] nav.nav a { border-radius: 0 var(--r-sm) 0 var(--r-sm); corner-shape: bevel; }
-  [data-skin=cyber] :is(.btn, input.field, textarea.field, .menu-btn, .frame, .toast, .rel, .slot, .skin i) { border-radius: 0 var(--r-md) 0 var(--r-md); corner-shape: bevel; }
-  [data-skin=cyber] :is(.popover, .days button, .person.va) { border-radius: 0 var(--r-lg) 0 var(--r-lg); corner-shape: bevel; }
-  [data-skin=cyber] :is(.panel, .tile, .person, .searchbar, .tp .cover) { border-radius: 0 var(--r-xl) 0 var(--r-xl); corner-shape: bevel; }
-  [data-skin=cyber] .modal { border-radius: 0 16px 0 16px; corner-shape: bevel; }
-  [data-skin=cyber] { --brackets:
-    linear-gradient(var(--accent), var(--accent)) top left / 12px 1.5px no-repeat,
-    linear-gradient(var(--accent), var(--accent)) top left / 1.5px 12px no-repeat,
-    linear-gradient(var(--accent), var(--accent)) bottom right / 12px 1.5px no-repeat,
-    linear-gradient(var(--accent), var(--accent)) bottom right / 1.5px 12px no-repeat; }
-  [data-skin=cyber] :is(.panel, .tile, .person) { position: relative; }
+  /* ---- the two HUD skins: Night City (cyber) and Evangelion (dusk) ----
+     The Mac's SumiRect, sumiBrackets, sumiFrame, SumiHazard, CyberSegmentedBar
+     and the HUD rail. Nothing here moves. The cut is corner-shape: bevel and
+     not clip-path, because clip-path also takes the inset hairline off the
+     diagonals; a browser without corner-shape keeps the corners rounded (on
+     Night City only the same two as the cut). Night City cuts the top-right and
+     bottom-left corners, Evangelion all four, by the amount the radius rounds. */
+  [data-skin=cyber], [data-skin=dusk] {
+    --hazard: repeating-linear-gradient(-45deg, var(--accent) 0 3.5px, rgba(0, 0, 0, .85) 3.5px 7.07px);
+    --brackets:
+      linear-gradient(var(--accent), var(--accent)) top left / 12px 1.5px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) top left / 1.5px 12px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) bottom right / 12px 1.5px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) bottom right / 1.5px 12px no-repeat;
+    --head: "Bahnschrift SemiCondensed", "Bahnschrift", "Avenir Next Condensed", "Arial Narrow", "Segoe UI", sans-serif;
+  }
+  [data-skin=dusk] { --head: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Yu Mincho", serif; --cells: 24; }
+  [data-skin=cyber] { --cells: 12; }
+  :is([data-skin=cyber], [data-skin=dusk]) :is(nav.nav a, .btn, input.field, textarea.field, .menu-btn, .frame, .toast, .rel, .slot, .skin i, .popover, .days button, .panel, .tile, .person, .searchbar, .tp .cover, .modal) { corner-shape: bevel; }
+  [data-skin=cyber] nav.nav a { border-radius: 0 var(--r-sm) 0 var(--r-sm); }
+  [data-skin=cyber] :is(.btn, input.field, textarea.field, .menu-btn, .frame, .toast, .rel, .slot, .skin i) { border-radius: 0 var(--r-md) 0 var(--r-md); }
+  [data-skin=cyber] :is(.popover, .days button, .person.va) { border-radius: 0 var(--r-lg) 0 var(--r-lg); }
+  [data-skin=cyber] :is(.panel, .tile, .person, .searchbar, .tp .cover) { border-radius: 0 var(--r-xl) 0 var(--r-xl); }
+  [data-skin=cyber] .modal { border-radius: 0 16px 0 16px; }
+
+  /* Cards and posters: brackets on Night City, a second frame inset 3px at 40%
+     accent on Evangelion, and the hovered poster's accent outline on both. */
+  :is([data-skin=cyber], [data-skin=dusk]) :is(.panel, .tile, .person) { position: relative; }
+  :is([data-skin=cyber], [data-skin=dusk]) :is(.panel, .tile, .person)::before,
+  [data-skin=dusk] .frame::before { content: ""; position: absolute; pointer-events: none; }
   [data-skin=cyber] :is(.panel, .tile, .person)::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; corner-shape: inherit; }
   [data-skin=cyber] :is(.panel, .tile, .person, .frame)::after { background: var(--brackets); }
+  [data-skin=dusk] :is(.panel, .tile, .person)::before, [data-skin=dusk] .frame::before {
+    inset: 3px; border-radius: calc(var(--r-md) - 3px); corner-shape: bevel; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  [data-skin=dusk] :is(.panel, .tile, .person)::before { border-radius: calc(var(--r-xl) - 3px); }
   [data-skin=cyber] .pc:hover .frame { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent); }
-  [data-skin=cyber] .pc:hover .frame::after { box-shadow: inset 0 0 0 1px var(--accent); }
+  :is([data-skin=cyber], [data-skin=dusk]) .pc:hover .frame::after { box-shadow: inset 0 0 0 1px var(--accent); }
   [data-skin=cyber] nav.nav a[aria-current=page] { box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 25%, transparent); }
+
+  /* Headings: condensed bold on Night City, heavy serif on Evangelion; page and
+     section titles upper case. Page titles carry a 36x2 accent underline (Night
+     City) or a 44x5 hazard bar; section titles are objective lines, a pip, the
+     title in the accent and a hairline running out to the count. */
+  :is([data-skin=cyber], [data-skin=dusk]) :is(h1, h2, h3, .t-name) { font-family: var(--head); font-weight: 700; }
+  [data-skin=dusk] :is(h1, h2, h3, .t-name) { font-weight: 800; }
+  :is([data-skin=cyber], [data-skin=dusk]) :is(h1, h2) { text-transform: uppercase; }
+  :is([data-skin=cyber], [data-skin=dusk]) .page > h1::after { content: ""; display: block; margin-top: 6px; }
+  [data-skin=cyber] .page > h1::after { width: 36px; height: 2px; background: var(--accent); }
+  [data-skin=dusk] .page > h1::after { width: 44px; height: 5px; background: var(--hazard); }
+  :is([data-skin=cyber], [data-skin=dusk]) :is(.shelf-head h2, .settings h2, .panel h2) { display: flex; align-items: center; gap: 8px; flex: 1; color: var(--accent); }
+  :is([data-skin=cyber], [data-skin=dusk]) :is(.shelf-head h2, .settings h2, .panel h2)::before { content: ""; flex: none; width: 6px; height: 6px; background: var(--accent); }
+  [data-skin=dusk] :is(.shelf-head h2, .settings h2, .panel h2)::before { width: 22px; background: var(--hazard); }
+  :is([data-skin=cyber], [data-skin=dusk]) :is(.shelf-head h2, .settings h2, .panel h2)::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  :is([data-skin=cyber], [data-skin=dusk]) .shelf-head .grow { display: none; }
+
+  /* Progress bars cut into cells, 12 on Night City and 24 on Evangelion, in
+     green there. A partly filled cell shows partly lit, where the Mac rounds up. */
+  :is([data-skin=cyber], [data-skin=dusk]) :is(.pc, .wc, .ep) .tick {
+    height: 4px; background: rgba(0, 0, 0, .55);
+    -webkit-mask: linear-gradient(90deg, #000 calc(100% - 2px), transparent 0) 0 0 / calc(100% / var(--cells)) 100%;
+    mask: linear-gradient(90deg, #000 calc(100% - 2px), transparent 0) 0 0 / calc(100% / var(--cells)) 100%;
+  }
+
+  /* The rail: a solid card at 90% so the page picture shows through, a brand
+     bar over the accent wordmark, pip-and-hairline group captions, rows with a
+     5px square (hazard stripes when active on Evangelion), the active row boxed
+     in a 60% accent outline, the Search shortcut as a key cap, and a right edge
+     of one accent line (Night City) or a 4px hazard strip (Evangelion). */
+  .hudbrand { display: none; }
+  :is([data-skin=cyber], [data-skin=dusk]) .hudbrand { display: block; padding: 6px 20px 2px; }
+  .hudbrand i { display: block; }
+  .hudbrand span { display: block; margin-top: 8px; font: 800 22px/1.2 var(--head); letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); }
+  [data-skin=cyber] .hudbrand i { width: 28px; height: 3px; background: var(--accent); }
+  [data-skin=dusk] .hudbrand i { height: 6px; background: var(--hazard); }
+  :is([data-skin=cyber], [data-skin=dusk]) aside.side { background: color-mix(in srgb, var(--card) 90%, transparent); }
+  [data-skin=cyber] aside.side { box-shadow: inset -1px 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+  [data-skin=dusk] aside.side { box-shadow: none; }
+  [data-skin=dusk] aside.side::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 4px; background: var(--hazard); }
+  :is([data-skin=cyber], [data-skin=dusk]) nav.nav .grp { display: flex; align-items: center; gap: 8px; font: 700 11px/1.4 var(--head); letter-spacing: 1.2px; text-transform: uppercase; }
+  :is([data-skin=cyber], [data-skin=dusk]) nav.nav .grp::before { content: ""; width: 5px; height: 5px; background: var(--accent); }
+  :is([data-skin=cyber], [data-skin=dusk]) nav.nav .grp::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  :is([data-skin=cyber], [data-skin=dusk]) nav.nav a { font: 700 14px/1.3 var(--head); letter-spacing: .6px; text-transform: uppercase; }
+  :is([data-skin=cyber], [data-skin=dusk]) nav.nav a::before { content: ""; flex: none; width: 5px; height: 5px; margin: 0 10.5px 0 2.5px; background: var(--line); }
+  :is([data-skin=cyber], [data-skin=dusk]) nav.nav a[aria-current=page] { color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent); }
+  [data-skin=cyber] nav.nav a[aria-current=page] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent), 0 0 8px color-mix(in srgb, var(--accent) 25%, transparent); }
+  :is([data-skin=cyber], [data-skin=dusk]) nav.nav a[aria-current=page]::before { background: var(--accent); }
+  [data-skin=dusk] nav.nav a[aria-current=page]::before { width: 10px; height: 10px; margin: 0 8px 0 0; background: var(--hazard); }
+  :is([data-skin=cyber], [data-skin=dusk]) .sfind kbd { color: var(--accent); padding: 2px 5px; border-radius: 4px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent); opacity: 1; }
+
+  /* Evangelion's warning banner: hazard stripes along its top and bottom edge. */
+  [data-skin=dusk] .banner { position: relative; padding-block: 1rem; }
+  [data-skin=dusk] .banner::before, [data-skin=dusk] .banner::after { content: ""; position: absolute; left: 0; right: 0; height: 5px; background: var(--hazard); }
+  [data-skin=dusk] .banner::before { top: 0; }
+  [data-skin=dusk] .banner::after { bottom: 0; }
+
+  /* The page ground: the skin's own picture when <data dir>/skin-art/<skin>/background
+     exists, at 30% and faded into the ground toward the bottom so text keeps its
+     contrast. A missing file is a 404 and the ground stays plain. */
+  [data-skin=ink] { --art: url(/api/skin-art/ink/background); }
+  [data-skin=sakura] { --art: url(/api/skin-art/sakura/background); }
+  [data-skin=royal] { --art: url(/api/skin-art/royal/background); }
+  [data-skin=dusk] { --art: url(/api/skin-art/dusk/background); }
+  [data-skin=cyber] { --art: url(/api/skin-art/cyber/background); }
+  [data-skin=oled] { --art: url(/api/skin-art/oled/background); }
+  body::before, body::after { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+  body::before { background: var(--art) center top / cover no-repeat; opacity: .3; }
+  body::after { background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--bg) 90%, transparent)); }
 
   @media (max-width: 1100px) {
     .two { grid-template-columns: minmax(0, 1fr); }
@@ -557,7 +648,7 @@
     .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
     aside.side { position: sticky; top: 0; z-index: 30; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; padding: .4rem .5rem; box-shadow: inset 0 -1px 0 var(--line); }
     nav.nav { flex-direction: row; flex-wrap: wrap; padding: 0; }
-    nav.nav .grp { display: none; }
+    [data-skin] nav.nav .grp, [data-skin] .hudbrand { display: none; }
     nav.nav a { min-height: 32px; margin: 0; }
     .side .grow, .mark svg, .who, .sfind, .side-foot { display: none; }
     .mark { padding: 0; }
@@ -579,6 +670,7 @@
 <div id="update-banner" class="banner" hidden></div>
 <div class="shell">
   <aside class="side">
+    <div class="hudbrand"><i></i><span>anicat</span></div>
     <nav class="nav" aria-label="Sections">
       <div class="grp">Browse</div>
       <a href="#/" data-tab="home"><span>Anime</span></a>
@@ -640,7 +732,7 @@ const SKINS = [
   { id: "ink", label: "Ink & Index", dark: ["#161310", "#8fb8dc"], light: ["#f1ece2", "#2f5a76"] },
   { id: "sakura", label: "Sakura Zen", dark: ["#180a10", "#e0607e"], light: ["#fdf5f7", "#c04060"] },
   { id: "royal", label: "Royal Neon", dark: ["#0e0618", "#a66bff"], light: ["#f5f0ff", "#5b1fd1"] },
-  { id: "dusk", label: "Dusk Sea", dark: ["#14124f", "#ff6b57"], light: ["#f6ebd0", "#b72e26"] },
+  { id: "dusk", label: "Evangelion", dark: ["#0c0a10", "#ff6a13"], light: ["#f4efe8", "#b84300"] },
   { id: "cyber", label: "Night City", dark: ["#0a0a0f", "#fcee0a"] },
   { id: "oled", label: "OLED", dark: ["#000000", "#8fb8dc"] },
 ];

@@ -1,9 +1,9 @@
 //! The HTTP API. Route names follow `core/src/ffi.rs` one to one, so the
 //! Swift app stays the reference for what each call means.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -42,6 +42,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/cache", get(cache_bytes).delete(purge_cache))
         .route("/api/token", post(set_token))
         .route("/api/viewer", get(viewer))
+        .route("/api/skin-art/{skin}/{name}", get(skin_art))
         .route("/api/health", get(health))
         .route("/api/version", get(version))
         .route("/api/update", post(update))
@@ -423,6 +424,25 @@ async fn forget(State(s): State<AppState>, ApiJson(b): ApiJson<ForgetBody>) -> A
 async fn remove_from_list(State(s): State<AppState>, ApiPath(entry): ApiPath<i64>) -> ApiResult<StatusCode> {
     s.writer.remove_from_list(entry).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A skin's optional page picture, read from `<data dir>/skin-art/<skin>/<name>.<ext>`:
+/// the Windows twin of the Mac's `Application Support/Anicat/skin-art`. The art a
+/// skin wants is someone else's illustration, so it never ships in the exe or the
+/// repo; a missing file is a 404 and the page keeps its plain ground. Skin and
+/// name come from fixed lists, so no path segment of the request reaches the disk.
+async fn skin_art(State(s): State<AppState>, Path((skin, name)): Path<(String, String)>) -> Response {
+    const SKINS: [&str; 6] = ["ink", "sakura", "royal", "dusk", "cyber", "oled"];
+    if !SKINS.contains(&skin.as_str()) || name != "background" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    for (ext, mime) in [("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("png", "image/png"), ("webp", "image/webp")] {
+        let path = s.data_dir.join("skin-art").join(&skin).join(format!("{name}.{ext}"));
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            return ([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "no-cache")], bytes).into_response();
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
 }
 
 async fn cache_bytes(State(s): State<AppState>) -> Json<Value> {

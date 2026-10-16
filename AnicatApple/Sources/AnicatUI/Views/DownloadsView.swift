@@ -177,7 +177,8 @@ public struct DownloadsView: View {
                 if shown.isEmpty {
                     SumiEmptyState(
                         headline: tab == "queue" ? "Nothing queued" : "Nothing downloaded yet",
-                        detail: "Episodes queued from a show's episode list will appear here."
+                        detail: "Episodes queued from a show's episode list will appear here.",
+                        art: "empty"
                     )
                 } else {
                     VStack(alignment: .leading, spacing: 16) {

@@ -123,7 +123,8 @@ public struct LibraryView: View {
                 } else if items.isEmpty {
                     SumiEmptyState(
                         headline: "This list is empty",
-                        detail: "Search for \(mediaType.lowercased()) and add them to your list."
+                        detail: "Search for \(mediaType.lowercased()) and add them to your list.",
+                        art: "empty"
                     )
                 } else if layout == "grid" {
                     SumiPosterGrid(

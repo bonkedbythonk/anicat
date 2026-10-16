@@ -159,7 +159,8 @@ public struct HistoryView: View {
                 if activity.isEmpty {
                     SumiEmptyState(
                         headline: "Nothing watched yet",
-                        detail: "Episodes you play are logged here, signed in or not."
+                        detail: "Episodes you play are logged here, signed in or not.",
+                        art: "empty"
                     )
                 } else {
                     log

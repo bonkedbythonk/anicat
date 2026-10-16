@@ -324,6 +324,51 @@ public extension SumiPalette {
         warningLightHex: SumiPalette.lightStatus.warningLight
     )
 
+    /// "Dusk Sea", dark half: an indigo night over a red sea, cream for text and
+    /// one coral accent (6.10:1 on the ground; the primary button draws the
+    /// ground on it at the same ratio). The accent sits next to the shared
+    /// danger tone on the colour wheel, so a destructive control is told apart
+    /// by its label and position, not by hue alone.
+    static let dusk = SumiPalette(
+        id: "dusk",
+        name: "Dusk Sea",
+        isLight: false,
+        backgroundHex: "#14124F",
+        cardHex: "#1E1B6B",
+        foregroundHex: "#F6ECD2",
+        indigoHex: "#FF6B57",
+        indigoLightHex: "#FF9486",
+        mutedAlpha: 0.62,
+        borderAlpha: 0.16,
+        dangerHex: SumiPalette.darkStatus.danger,
+        dangerLightHex: SumiPalette.darkStatus.dangerLight,
+        successHex: SumiPalette.darkStatus.success,
+        successLightHex: SumiPalette.darkStatus.successLight,
+        warningHex: SumiPalette.darkStatus.warning,
+        warningLightHex: SumiPalette.darkStatus.warningLight
+    )
+
+    /// Dusk Sea's light half: cream sand under indigo ink. Coral is 2.5:1 on
+    /// cream, so the accent drops to a deep red `#B72E26` at 5.16:1.
+    static let duskLight = SumiPalette(
+        id: "dusk-light",
+        name: "Dusk Light",
+        isLight: true,
+        backgroundHex: "#F6EBD0",
+        cardHex: "#FFF8E6",
+        foregroundHex: "#1B1A4A",
+        indigoHex: "#B72E26",
+        indigoLightHex: "#D4473D",
+        mutedAlpha: 0.68,
+        borderAlpha: 0.14,
+        dangerHex: SumiPalette.lightStatus.danger,
+        dangerLightHex: SumiPalette.lightStatus.dangerLight,
+        successHex: SumiPalette.lightStatus.success,
+        successLightHex: SumiPalette.lightStatus.successLight,
+        warningHex: SumiPalette.lightStatus.warning,
+        warningLightHex: SumiPalette.lightStatus.warningLight
+    )
+
     /// Every palette that ships, derived from the skins rather than listed by
     /// hand. A hand-kept list is how a skin's light half reaches users with no
     /// contrast checking at all: the suite loops over this, so a palette
@@ -393,6 +438,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
     case ink
     case sakura
     case royal
+    case dusk
     case oled
 
     public var id: String { rawValue }
@@ -402,6 +448,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .ink: return "Ink & Index"
         case .sakura: return "Sakura Zen"
         case .royal: return "Royal Neon"
+        case .dusk: return "Dusk Sea"
         case .oled: return "OLED"
         }
     }
@@ -411,6 +458,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .ink: return "Warm sumi ink, washi paper by day"
         case .sakura: return "Cherry dark, sakura paper by day"
         case .royal: return "Electric violet, lavender paper by day"
+        case .dusk: return "Indigo night, red sea, cream sand by day"
         case .oled: return "True black. Dark only"
         }
     }
@@ -420,6 +468,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .ink: return .ink
         case .sakura: return .sakura
         case .royal: return .royal
+        case .dusk: return .dusk
         case .oled: return .oled
         }
     }
@@ -433,6 +482,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .ink: return .paper
         case .sakura: return .sakuraLight
         case .royal: return .royalLight
+        case .dusk: return .duskLight
         case .oled: return nil
         }
     }

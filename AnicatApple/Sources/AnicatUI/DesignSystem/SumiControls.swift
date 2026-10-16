@@ -251,14 +251,30 @@ public struct SumiFilterDropdown: View {
 public struct SumiEmptyState: View {
     let headline: String
     let detail: String?
+    let art: String?
 
-    public init(headline: String, detail: String? = nil) {
+    /// `art` names a picture in the active skin's `SkinArt` folder, drawn
+    /// above the sentence on page-level empties only; the many inline ones
+    /// ("No cast listed") stay a sentence.
+    public init(headline: String, detail: String? = nil, art: String? = nil) {
         self.headline = headline
         self.detail = detail
+        self.art = art
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if let art, let url = SkinArt.url(art, skin: ThemeStore.shared.skin) {
+                CachedAsyncImage(url: url, fit: .box(width: 1600, height: 480)) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Color.clear
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 190)
+                .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusMd))
+                .padding(.bottom, 10)
+            }
             Text(headline)
                 .font(.system(size: 13.5, weight: .semibold))
                 .foregroundColor(SumiTheme.foreground)

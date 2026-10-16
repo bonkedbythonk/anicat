@@ -116,7 +116,7 @@ struct ThemePaletteTests {
         // check would catch.
         #expect(SumiPalette.sakura.usesSerifHeadings)
         #expect(SumiPalette.sakuraLight.usesSerifHeadings)
-        for palette in [SumiPalette.ink, .paper, .oled, .royal, .royalLight] {
+        for palette in [SumiPalette.ink, .paper, .oled, .royal, .royalLight, .dusk, .duskLight] {
             #expect(palette.usesSerifHeadings == false, "\(palette.id) grew serif headings")
         }
     }
@@ -170,6 +170,8 @@ struct ThemePaletteTests {
         #expect(SumiSkin.sakura.palette(isLight: true).id == "sakura-light")
         #expect(SumiSkin.royal.palette(isLight: false).id == "royal")
         #expect(SumiSkin.royal.palette(isLight: true).id == "royal-light")
+        #expect(SumiSkin.dusk.palette(isLight: false).id == "dusk")
+        #expect(SumiSkin.dusk.palette(isLight: true).id == "dusk-light")
 
         // OLED is a statement about the panel, and there is no light ground
         // that switches pixels off. Asking for Light has to land back on its
@@ -187,6 +189,7 @@ struct ThemePaletteTests {
         #expect(SumiSkin(rawValue: "ink") == .ink)
         #expect(SumiSkin(rawValue: "sakura") == .sakura)
         #expect(SumiSkin(rawValue: "royal") == .royal)
+        #expect(SumiSkin(rawValue: "dusk") == .dusk)
         #expect(SumiSkin(rawValue: "oled") == .oled)
         #expect(AnicatAppearance(rawValue: "system") == .system)
         #expect(ThemeStore.skinKey == "anicat_skin")
@@ -225,5 +228,23 @@ struct ThemePaletteTests {
         palette.accentOverride = palette.successLight
         #expect(palette.indigoHex == SumiPalette.ink.indigoHex)
         #expect(palette.accentContrast == SumiPalette.ink.accentContrast)
+    }
+}
+
+@Suite("Skin art folder")
+struct SkinArtTests {
+    @Test("art is found per skin and per name, and absent files answer nil")
+    func lookup() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("skin-art-\(UUID().uuidString)", isDirectory: true)
+        let dusk = root.appendingPathComponent("dusk", isDirectory: true)
+        try FileManager.default.createDirectory(at: dusk, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data([0]).write(to: dusk.appendingPathComponent("empty.png"))
+
+        #expect(SkinArt.url("empty", skin: .dusk, root: root)?.lastPathComponent == "empty.png")
+        // One skin's folder is not another's, or Ink would show Dusk Sea's picture.
+        #expect(SkinArt.url("empty", skin: .ink, root: root) == nil)
+        #expect(SkinArt.url("hero", skin: .dusk, root: root) == nil)
     }
 }

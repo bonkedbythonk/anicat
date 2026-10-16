@@ -91,7 +91,7 @@ public struct RootView: View {
 
     public var body: some View {
         ZStack {
-            SumiTheme.background
+            SumiGround()
                 .ignoresSafeArea()
 
             // Ink & Index shell: fixed 200pt sidebar rail + 1px hairline border +
@@ -149,10 +149,16 @@ public struct RootView: View {
                 .frame(width: 200)
 
                 // 1px hairline border separating sidebar and main content
-                Rectangle()
-                    .fill(SumiTheme.border)
-                    .frame(width: 1)
-                    .ignoresSafeArea()
+                Group {
+                    if ThemeStore.shared.palette.isEva {
+                        SumiHazard().frame(width: 4)
+                    } else if ThemeStore.shared.palette.isCyber {
+                        Rectangle().fill(SumiTheme.indigo.opacity(0.6)).frame(width: 1)
+                    } else {
+                        Rectangle().fill(SumiTheme.border).frame(width: 1)
+                    }
+                }
+                .ignoresSafeArea()
 
                 // Dynamic Main Content Area
                 VStack(spacing: 0) {
@@ -180,6 +186,7 @@ public struct RootView: View {
                             SumiRect(cornerRadius: SumiTheme.radiusMd)
                                 .stroke(SumiTheme.warning.opacity(0.5), lineWidth: 1)
                         )
+                        .sumiHazardEdges()
                         .padding(.horizontal, 24)
                         .padding(.top, 12)
                         .padding(.bottom, 8)

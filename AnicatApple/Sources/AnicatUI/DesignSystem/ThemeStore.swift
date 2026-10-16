@@ -53,6 +53,12 @@ public struct SumiPalette: Sendable {
     /// third cyberpunk device has to name where it goes.
     public let isCyber: Bool
 
+    /// Evangelion's device: all four corners cut into an octagon with a second
+    /// hairline frame inside, hazard stripes on warnings, heavy serif
+    /// headings. A flag beside `isCyber` so the two skins can share the
+    /// shapes and still differ in which they draw.
+    public let isEva: Bool
+
     public let background: Color
     public let card: Color
     public let foreground: Color
@@ -90,6 +96,7 @@ public struct SumiPalette: Sendable {
         usesSerifHeadings: Bool = false,
         isNeon: Bool = false,
         isCyber: Bool = false,
+        isEva: Bool = false,
         dangerHex: String,
         dangerLightHex: String,
         successHex: String,
@@ -110,6 +117,7 @@ public struct SumiPalette: Sendable {
         self.usesSerifHeadings = usesSerifHeadings
         self.isNeon = isNeon
         self.isCyber = isCyber
+        self.isEva = isEva
 
         self.background = Color(hex: backgroundHex)
         self.card = Color(hex: cardHex)
@@ -332,22 +340,24 @@ public extension SumiPalette {
         warningLightHex: SumiPalette.lightStatus.warningLight
     )
 
-    /// "Dusk Sea", dark half: an indigo night over a red sea, cream for text and
-    /// one coral accent (6.10:1 on the ground; the primary button draws the
-    /// ground on it at the same ratio). The accent sits next to the shared
-    /// danger tone on the colour wheel, so a destructive control is told apart
-    /// by its label and position, not by hue alone.
+    /// "Evangelion", dark half: near-black glass with a violet cast, NERV orange
+    /// as the one accent (6.87:1 on the ground; the primary button draws the
+    /// ground on it at the same ratio) and Unit-01 green as the second tone,
+    /// which only the sync gauges use. Purple stays in the card and the
+    /// ground's tint rather than carrying the skin. Stored as `dusk` and drawn
+    /// from the `dusk` art folder, the names it shipped under.
     static let dusk = SumiPalette(
         id: "dusk",
-        name: "Dusk Sea",
+        name: "Evangelion",
         isLight: false,
-        backgroundHex: "#14124F",
-        cardHex: "#1E1B6B",
-        foregroundHex: "#F6ECD2",
-        indigoHex: "#FF6B57",
-        indigoLightHex: "#FF9486",
+        backgroundHex: "#0C0A10",
+        cardHex: "#16121E",
+        foregroundHex: "#F1ECF5",
+        indigoHex: "#FF6A13",
+        indigoLightHex: "#7CFF3A",
         mutedAlpha: 0.62,
         borderAlpha: 0.16,
+        isEva: true,
         dangerHex: SumiPalette.darkStatus.danger,
         dangerLightHex: SumiPalette.darkStatus.dangerLight,
         successHex: SumiPalette.darkStatus.success,
@@ -356,19 +366,21 @@ public extension SumiPalette {
         warningLightHex: SumiPalette.darkStatus.warningLight
     )
 
-    /// Dusk Sea's light half: cream sand under indigo ink. Coral is 2.5:1 on
-    /// cream, so the accent drops to a deep red `#B72E26` at 5.16:1.
+    /// Evangelion's light half: warm paper under violet ink. NERV orange is
+    /// 2.6:1 on paper, so the accent drops to burnt orange `#B84300` at 4.78:1
+    /// and the green to `#2A6F10` (5.43:1).
     static let duskLight = SumiPalette(
         id: "dusk-light",
-        name: "Dusk Light",
+        name: "Evangelion Light",
         isLight: true,
-        backgroundHex: "#F6EBD0",
-        cardHex: "#FFF8E6",
-        foregroundHex: "#1B1A4A",
-        indigoHex: "#B72E26",
-        indigoLightHex: "#D4473D",
+        backgroundHex: "#F4EFE8",
+        cardHex: "#FFFFFF",
+        foregroundHex: "#1C1230",
+        indigoHex: "#B84300",
+        indigoLightHex: "#2A6F10",
         mutedAlpha: 0.68,
         borderAlpha: 0.14,
+        isEva: true,
         dangerHex: SumiPalette.lightStatus.danger,
         dangerLightHex: SumiPalette.lightStatus.dangerLight,
         successHex: SumiPalette.lightStatus.success,
@@ -481,7 +493,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .ink: return "Ink & Index"
         case .sakura: return "Sakura Zen"
         case .royal: return "Royal Neon"
-        case .dusk: return "Dusk Sea"
+        case .dusk: return "Evangelion"
         case .cyber: return "Night City"
         case .oled: return "OLED"
         }
@@ -492,7 +504,7 @@ public enum SumiSkin: String, CaseIterable, Sendable, Identifiable {
         case .ink: return "Warm sumi ink, washi paper by day"
         case .sakura: return "Cherry dark, sakura paper by day"
         case .royal: return "Electric violet, lavender paper by day"
-        case .dusk: return "Indigo night, red sea, cream sand by day"
+        case .dusk: return "Black, NERV orange and Unit-01 green. Paper by day"
         case .cyber: return "Black glass, yellow and cyan. Dark only"
         case .oled: return "True black. Dark only"
         }

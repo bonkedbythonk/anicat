@@ -695,7 +695,7 @@ public struct SearchView: View {
         .onChange(of: page.size.width, initial: true) { _, width in pageWidth = width }
         }
         }
-        .background(SumiTheme.background)
+        .sumiGround()
         // `RootView` remounts this view (`.id(currentNavSection)`) on every
         // nav switch, so an unconditional `onAppear` refetched trending —
         // already sitting in `discoverItems` from startup — and flashed the

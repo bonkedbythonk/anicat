@@ -242,6 +242,9 @@ struct NightCityTests {
         for palette in SumiPalette.all {
             #expect(palette.isCyber == (palette.id == "night"), "\(palette.id) isCyber")
         }
+        for palette in SumiPalette.all {
+            #expect(palette.isEva == (palette.id == "dusk" || palette.id == "dusk-light"), "\(palette.id) isEva")
+        }
         #expect(SumiPalette.night.isNeon)
         #expect(SumiPalette.night.isLight == false)
     }
@@ -259,7 +262,7 @@ struct SkinArtTests {
         try Data([0]).write(to: dusk.appendingPathComponent("empty.png"))
 
         #expect(SkinArt.url("empty", skin: .dusk, root: root)?.lastPathComponent == "empty.png")
-        // One skin's folder is not another's, or Ink would show Dusk Sea's picture.
+        // One skin's folder is not another's, or Ink would show Evangelion's picture.
         #expect(SkinArt.url("empty", skin: .ink, root: root) == nil)
         #expect(SkinArt.url("hero", skin: .dusk, root: root) == nil)
     }

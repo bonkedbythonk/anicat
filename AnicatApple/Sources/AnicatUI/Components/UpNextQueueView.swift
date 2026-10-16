@@ -230,15 +230,26 @@ public struct UpNextQueueView: View {
                                 .padding(.top, 8)
                             if entry.totalCount > 0 {
                                 let pct = min(max(CGFloat(entry.progressPercent / 100.0), 0), 1)
-                                ZStack(alignment: .leading) {
-                                    Capsule().fill(SumiTheme.foreground.opacity(0.12))
-                                    Capsule()
-                                        .fill(SumiTheme.indigo)
-                                        .scaleEffect(x: pct, y: 1, anchor: .leading)
-                                        .animation(.smooth, value: pct)
+                                Group {
+                                    if ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva {
+                                        CyberSegmentedBar(
+                                            fraction: pct,
+                                            cells: ThemeStore.shared.palette.isEva ? 24 : 12,
+                                            tone: ThemeStore.shared.palette.isEva ? SumiTheme.indigoLight : nil
+                                        )
+                                        .frame(height: 5)
+                                    } else {
+                                        ZStack(alignment: .leading) {
+                                            Capsule().fill(SumiTheme.foreground.opacity(0.12))
+                                            Capsule()
+                                                .fill(SumiTheme.indigo)
+                                                .scaleEffect(x: pct, y: 1, anchor: .leading)
+                                                .animation(.smooth, value: pct)
+                                        }
+                                        .frame(height: 3)
+                                    }
                                 }
                                 .frame(maxWidth: 360)
-                                .frame(height: 3)
                                 .padding(.top, 12)
                             }
                         }
@@ -271,6 +282,8 @@ public struct UpNextQueueView: View {
             // Its own corners since the queue lost its bordered box: the
             // banner otherwise ends in square corners on the page ground.
             .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
+            .sumiBrackets()
+            .sumiFrame(radius: SumiTheme.radiusLg)
             .animation(.snappy, value: isInfoHovered)
             .animation(.snappy, value: isActionHovered)
             #if os(macOS)

@@ -48,22 +48,10 @@ struct HomeSectionView: View {
             LazyVStack(alignment: .leading, spacing: 40) {
                 // Up Next Section Header
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .bottom) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Up Next")
-                                .font(.sumiHeading(size: 19, weight: .semibold))
-                                .tracking(-0.3)
-                                .foregroundColor(SumiTheme.foreground)
-
-                            if !model.upNextItems.isEmpty {
-                                Text(upNextSubtitle)
-                                    .sumiTabularMono(size: 11.5)
-                                    .foregroundColor(SumiTheme.muted)
-                            }
-                        }
-
-                        Spacer()
-
+                    SumiPageHeader(
+                        title: "Up Next",
+                        subtitle: model.upNextItems.isEmpty ? nil : upNextSubtitle
+                    ) {
                         // Words, like the detail page's secondary actions:
                         // two boxed buttons were the last boxes left on the
                         // home screen once the queue lost its frame.
@@ -162,7 +150,7 @@ struct HomeSectionView: View {
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .scrollLagProbe("home")
-        .background(SumiTheme.background)
+        .sumiGround()
         .sheet(isPresented: $showHomeCustomize) {
             HomeCustomizeSheet(model: model, isPresented: $showHomeCustomize)
         }
@@ -281,18 +269,7 @@ struct HomeShelf: View {
 
     private func shelf(items: [MediaCard.Item]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .bottom) {
-                Text(title)
-                    .font(.sumiHeading(size: 15, weight: .semibold))
-                    .tracking(-0.2)
-                    .foregroundColor(SumiTheme.foreground)
-
-                Spacer()
-
-                Text("\(items.count) show\(items.count == 1 ? "" : "s")")
-                    .sumiTabularMono(size: 11.5)
-                    .foregroundColor(SumiTheme.muted)
-            }
+            SumiSectionHeader(title, trailing: "\(items.count) show\(items.count == 1 ? "" : "s")")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {

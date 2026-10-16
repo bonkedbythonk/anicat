@@ -16,6 +16,10 @@ public struct SumiPageHeader<Trailing: View>: View {
         self.trailing = trailing
     }
 
+    private var isHud: Bool {
+        ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva
+    }
+
     public var body: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 4) {
@@ -23,6 +27,13 @@ public struct SumiPageHeader<Trailing: View>: View {
                     .font(.sumiHeading(size: 19, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundColor(SumiTheme.foreground)
+                    .textCase(isHud ? .uppercase : nil)
+                if ThemeStore.shared.palette.isCyber {
+                    // The short underline under a menu title in the game.
+                    Rectangle().fill(SumiTheme.indigo).frame(width: 36, height: 2)
+                } else if ThemeStore.shared.palette.isEva {
+                    SumiHazard().frame(width: 44, height: 5)
+                }
                 if let subtitle {
                     Text(subtitle)
                         .sumiTabularMono(size: 11.5)
@@ -33,6 +44,24 @@ public struct SumiPageHeader<Trailing: View>: View {
             }
             Spacer(minLength: 16)
             trailing()
+        }
+        // A strip of the skin's own picture behind the title, fading out
+        // downward, when the folder has one. Behind, not in the layout, so a
+        // skin with no picture lays the page out exactly as before.
+        .background(alignment: .top) {
+            if let url = SkinArt.url("header", skin: ThemeStore.shared.skin) {
+                CachedAsyncImage(url: url, fit: .box(width: 2000, height: 400)) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Color.clear
+                }
+                .frame(height: 170)
+                .clipped()
+                .mask(LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom))
+                .padding(.horizontal, -SumiPage<EmptyView>.horizontalInset)
+                .offset(y: -40)
+                .allowsHitTesting(false)
+            }
         }
     }
 }
@@ -301,11 +330,30 @@ public struct SumiSectionHeader: View {
 
     public var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(.sumiHeading(size: 15, weight: .semibold))
-                .tracking(-0.2)
-                .foregroundColor(SumiTheme.foreground)
-            Spacer()
+            if ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva {
+                // An objective line: a pip (hazard stripes on Evangelion), the
+                // title in the accent, and a hairline running out to the count.
+                Group {
+                    if ThemeStore.shared.palette.isEva {
+                        SumiHazard().frame(width: 22, height: 6)
+                    } else {
+                        Rectangle().fill(SumiTheme.indigo).frame(width: 6, height: 6)
+                    }
+                }
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 3 }
+                Text(title)
+                    .font(.sumiHeading(size: 15, weight: .semibold))
+                    .textCase(.uppercase)
+                    .foregroundColor(SumiTheme.indigo)
+                Rectangle().fill(SumiTheme.border).frame(height: 1)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 3 }
+            } else {
+                Text(title)
+                    .font(.sumiHeading(size: 15, weight: .semibold))
+                    .tracking(-0.2)
+                    .foregroundColor(SumiTheme.foreground)
+                Spacer()
+            }
             if let trailing {
                 Text(trailing)
                     .sumiTabularMono(size: 11.5)
@@ -392,7 +440,7 @@ public struct SumiPage<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
         }
-        .background(SumiTheme.background)
+        .sumiGround()
     }
 }
 

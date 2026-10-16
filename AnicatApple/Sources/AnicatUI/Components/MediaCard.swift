@@ -233,16 +233,26 @@ public struct MediaCard: View, Equatable {
                         // MediaCard, the most-instantiated view in the app, and a
                         // GeometryReader here forced a second layout pass per card in
                         // every scrolling grid just to compute a fill width.
-                        ZStack(alignment: .leading) {
-                            Rectangle()
-                                .fill(Color.black.opacity(0.45))
-                            Rectangle()
-                                .fill(SumiTheme.indigo)
-                                .scaleEffect(x: pct, y: 1, anchor: .leading)
-                                .animation(.smooth, value: pct)
+                        if ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva {
+                            CyberSegmentedBar(
+                                fraction: pct,
+                                cells: ThemeStore.shared.palette.isEva ? 24 : 12,
+                                tone: ThemeStore.shared.palette.isEva ? SumiTheme.indigoLight : nil
+                            )
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 4)
+                        } else {
+                            ZStack(alignment: .leading) {
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.45))
+                                Rectangle()
+                                    .fill(SumiTheme.indigo)
+                                    .scaleEffect(x: pct, y: 1, anchor: .leading)
+                                    .animation(.smooth, value: pct)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 3)
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 3)
                     }
                 }
                 .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
@@ -250,12 +260,13 @@ public struct MediaCard: View, Equatable {
                     SumiRect(cornerRadius: SumiTheme.radiusMd)
                         .stroke(
                             isHovered
-                                ? (ThemeStore.shared.palette.isCyber ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.25))
+                                ? ((ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva) ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.25))
                                 : SumiTheme.border,
                             lineWidth: 1
                         )
                 )
                 .sumiBrackets()
+                .sumiFrame(radius: SumiTheme.radiusMd)
                 // The hovered poster only: a halo on every cell of a grid is a
                 // blur per card per scroll frame.
                 .sumiGlow(radius: isHovered ? 10 : 0, opacity: isHovered ? 0.45 : 0)

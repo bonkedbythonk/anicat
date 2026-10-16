@@ -206,6 +206,12 @@ public extension Font {
         if ThemeStore.shared.palette.usesSerifHeadings {
             return .system(size: size, weight: weight, design: .serif)
         }
+        if ThemeStore.shared.palette.isCyber {
+            return .system(size: size, weight: .bold).width(.condensed)
+        }
+        if ThemeStore.shared.palette.isEva {
+            return .system(size: size, weight: .heavy, design: .serif)
+        }
         return .system(size: size, weight: weight)
     }
 }
@@ -364,7 +370,7 @@ private struct SumiButtonBody: View {
         default: (28, 14, 12)
         }
         let radius = isPrimary && controlSize == .extraLarge ? SumiTheme.radiusLg : SumiTheme.radiusMd
-        let shape = RoundedRectangle(cornerRadius: radius)
+        let shape = SumiRect(cornerRadius: radius)
         configuration.label
             .font(.system(size: fontSize, weight: isPrimary ? .bold : .semibold))
             .labelStyle(SumiButtonLabelStyle())
@@ -456,6 +462,7 @@ public extension View {
                     .stroke(SumiTheme.border, lineWidth: 1)
             )
             .sumiBrackets()
+            .sumiFrame(radius: SumiTheme.radiusXl)
     }
 }
 

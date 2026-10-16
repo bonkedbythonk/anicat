@@ -709,7 +709,7 @@ public struct MediaDetailView: View {
         }
         .scrollPassedThreshold(Self.compactHeaderThreshold, passed: $isHeaderCompact)
         .scrollLagProbe("detail")
-        .background(SumiTheme.background)
+        .sumiGround()
         .task(id: AccentKey(cover: details.coverURL, isLight: themeStore.palette.isLight, enabled: posterAccentEnabled)) {
             await followPosterAccent()
         }

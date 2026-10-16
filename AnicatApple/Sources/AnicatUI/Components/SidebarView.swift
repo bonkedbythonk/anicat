@@ -174,11 +174,39 @@ public struct SidebarView: View {
         self.onOpenSearchPalette = onOpenSearchPalette
     }
 
+    /// Night City and Evangelion draw the rail as a HUD list; every other skin
+    /// keeps the Mac source-list look.
+    private var isHud: Bool {
+        ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva
+    }
+
+    /// The wordmark over the rail on the two HUD skins: a hazard bar on
+    /// Evangelion, a short accent bar on Night City.
+    private var brand: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if ThemeStore.shared.palette.isEva {
+                SumiHazard().frame(height: 6)
+            } else {
+                Rectangle().fill(SumiTheme.indigo).frame(width: 28, height: 3)
+            }
+            Text("anicat")
+                .font(.sumiHeading(size: 22, weight: .heavy))
+                .textCase(.uppercase)
+                .tracking(1.5)
+                .foregroundColor(SumiTheme.indigo)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Window Drag Region Spacer (38px on macOS for traffic lights)
             Color.clear
                 .frame(height: 38)
+
+            if isHud { brand }
 
             // Nav Groups
             VStack(alignment: .leading, spacing: 0) {
@@ -228,7 +256,16 @@ public struct SidebarView: View {
                         Spacer()
                         Text("⌘K")
                             .sumiTabularMono(size: 11)
-                            .foregroundColor(SumiTheme.muted.opacity(0.7))
+                            .foregroundColor(isHud ? SumiTheme.indigo : SumiTheme.muted.opacity(0.7))
+                            // A key cap on the HUD skins, like the [Q] and [R]
+                            // hints in the game's prompts.
+                            .padding(.horizontal, isHud ? 5 : 0)
+                            .padding(.vertical, isHud ? 2 : 0)
+                            .overlay {
+                                if isHud {
+                                    SumiRect(cornerRadius: 4).stroke(SumiTheme.indigo.opacity(0.7), lineWidth: 1)
+                                }
+                            }
                     }
                     .padding(.horizontal, 4)
                     .padding(.top, 10)
@@ -244,17 +281,42 @@ public struct SidebarView: View {
             .padding(.bottom, 16)
         }
         .frame(width: 200)
-        .background(VibrancyBackdrop())
+        .background {
+            if isHud {
+                // Solid, not the system material: the page picture behind the
+                // window shows through it, and a vibrancy layer would blur and
+                // tint it back to grey.
+                SumiTheme.card.opacity(0.9)
+            } else {
+                VibrancyBackdrop()
+            }
+        }
     }
 
     private func navGroup(title: String, items: [NavSection]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .sumiTabularMono(size: 11.5)
-                .foregroundColor(SumiTheme.muted)
+            if isHud {
+                // An objective line: a pip, the group name, a hairline.
+                HStack(spacing: 8) {
+                    Rectangle().fill(SumiTheme.indigo).frame(width: 5, height: 5)
+                    Text(title)
+                        .font(.sumiHeading(size: 11, weight: .bold))
+                        .textCase(.uppercase)
+                        .tracking(1.2)
+                        .foregroundColor(SumiTheme.muted)
+                    Rectangle().fill(SumiTheme.border).frame(height: 1)
+                }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 6)
+            } else {
+                Text(title)
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(SumiTheme.muted)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 6)
+            }
 
             ForEach(items) { item in
                 navItemButton(item)
@@ -287,11 +349,28 @@ public struct SidebarView: View {
         @State private var isHovered = false
 
         var body: some View {
+            let hud = ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva
             Button(action: onSelect) {
-                HStack {
+                HStack(spacing: 8) {
+                    if hud {
+                        // Active: a filled square, or hazard stripes on
+                        // Evangelion. Resting: an empty one.
+                        if isActive && ThemeStore.shared.palette.isEva {
+                            SumiHazard().frame(width: 10, height: 10)
+                        } else {
+                            Rectangle()
+                                .fill(isActive ? SumiTheme.indigo : SumiTheme.border)
+                                .frame(width: 5, height: 5)
+                                .frame(width: 10)
+                        }
+                    }
                     Text(item.label(for: mode))
-                        .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                        .foregroundColor(isActive ? SumiTheme.foreground : (isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
+                        .font(hud
+                            ? .sumiHeading(size: 14, weight: .bold)
+                            : .system(size: 13, weight: isActive ? .semibold : .regular))
+                        .textCase(hud ? .uppercase : nil)
+                        .tracking(hud ? 0.6 : 0)
+                        .foregroundColor(isActive ? (hud ? SumiTheme.indigo : SumiTheme.foreground) : (isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
 
                     Spacer()
                 }
@@ -309,6 +388,12 @@ public struct SidebarView: View {
                             .fill(SumiTheme.isNeon && isActive
                                 ? SumiTheme.indigo.opacity(0.14)
                                 : SumiTheme.foreground.opacity(isActive ? 0.08 : 0.04))
+                            .overlay {
+                                if hud && isActive {
+                                    SumiRect(cornerRadius: SumiTheme.radiusSm)
+                                        .stroke(SumiTheme.indigo.opacity(0.6), lineWidth: 1)
+                                }
+                            }
                             .sumiGlow(radius: isActive ? 8 : 0, opacity: 0.25)
                     }
                 }

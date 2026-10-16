@@ -170,7 +170,7 @@ public struct ScheduleView: View {
             .frame(maxWidth: .infinity, alignment: .top)
         }
         }
-        .background(SumiTheme.background)
+        .sumiGround()
         .onAppear { recomputeGroups() }
         .onChange(of: items) { _, _ in recomputeGroups() }
         // Asked for on every entry into the calendar tab and on every page,

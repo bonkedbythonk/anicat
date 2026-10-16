@@ -426,11 +426,12 @@ async fn remove_from_list(State(s): State<AppState>, ApiPath(entry): ApiPath<i64
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// A skin's optional page picture, read from `<data dir>/skin-art/<skin>/<name>.<ext>`:
-/// the Windows twin of the Mac's `Application Support/Anicat/skin-art`. The art a
-/// skin wants is someone else's illustration, so it never ships in the exe or the
-/// repo; a missing file is a 404 and the page keeps its plain ground. Skin and
-/// name come from fixed lists, so no path segment of the request reaches the disk.
+/// A skin's optional page picture. A file in `<data dir>/skin-art/<skin>/<name>.<ext>`
+/// wins, the Windows twin of the Mac's `Application Support/Anicat/skin-art`; with none
+/// there, the picture embedded from the Mac app's `Resources/SkinArt` answers (one copy
+/// in the repo, wallhaven.cc art committed at the owner's say-so). Neither is a 404
+/// and the page keeps its plain ground. Skin and name come from fixed lists, so no path
+/// segment of the request reaches the disk.
 async fn skin_art(State(s): State<AppState>, Path((skin, name)): Path<(String, String)>) -> Response {
     const SKINS: [&str; 6] = ["ink", "sakura", "royal", "dusk", "cyber", "oled"];
     if !SKINS.contains(&skin.as_str()) || name != "background" {
@@ -442,7 +443,15 @@ async fn skin_art(State(s): State<AppState>, Path((skin, name)): Path<(String, S
             return ([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "no-cache")], bytes).into_response();
         }
     }
-    StatusCode::NOT_FOUND.into_response()
+    let embedded: Option<&'static [u8]> = match skin.as_str() {
+        "dusk" => Some(include_bytes!("../../AnicatApple/Sources/AnicatUI/Resources/SkinArt/dusk/background.jpg")),
+        "cyber" => Some(include_bytes!("../../AnicatApple/Sources/AnicatUI/Resources/SkinArt/cyber/background.jpg")),
+        _ => None,
+    };
+    match embedded {
+        Some(bytes) => ([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "no-cache")], bytes).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn cache_bytes(State(s): State<AppState>) -> Json<Value> {

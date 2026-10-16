@@ -266,4 +266,16 @@ struct SkinArtTests {
         #expect(SkinArt.url("empty", skin: .ink, root: root) == nil)
         #expect(SkinArt.url("hero", skin: .dusk, root: root) == nil)
     }
+
+    @Test("the two art skins ship their pictures and the rest ship none")
+    func bundledArt() {
+        #expect(SkinArt.bundled("background", skin: .cyber) != nil)
+        #expect(SkinArt.bundled("background", skin: .dusk) != nil)
+        #expect(SkinArt.bundled("empty", skin: .dusk) != nil)
+        #expect(SkinArt.bundled("header", skin: .dusk) != nil)
+        // A bundled picture is a fallback behind the owner's folder, not a
+        // reason for every skin to draw one.
+        #expect(SkinArt.bundled("background", skin: .ink) == nil)
+        #expect(SkinArt.bundled("background", skin: .oled) == nil)
+    }
 }

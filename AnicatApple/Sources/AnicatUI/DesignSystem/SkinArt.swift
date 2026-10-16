@@ -1,11 +1,14 @@
 import Foundation
 
-/// Pictures a skin may show, read from a folder on this Mac and never from the
-/// bundle: `~/Library/Application Support/Anicat/skin-art/<skin>/<name>.jpg`.
+/// Pictures a skin may show. A file in
+/// `~/Library/Application Support/Anicat/skin-art/<skin>/<name>.jpg` wins, so
+/// the owner can swap any picture without a rebuild; with none there, the copy
+/// bundled under `Resources/SkinArt` answers. A name with neither answers nil
+/// and the view draws nothing in its place, which is also how every skin
+/// without art behaves.
 ///
-/// The art a skin wants is somebody else's illustration, so it cannot ship in
-/// the app or sit in the repo. A name with no file answers nil and the view
-/// draws nothing in its place, which is also how every other skin behaves.
+/// The bundled pictures are wallhaven.cc game and fan art, committed at the
+/// owner's say-so on 2026-10-17; they are not the app's own work.
 public enum SkinArt {
     static let extensions = ["jpg", "jpeg", "png", "heic"]
 
@@ -17,10 +20,21 @@ public enum SkinArt {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Anicat/skin-art", isDirectory: true)
     ) -> URL? {
-        guard let folder = root?.appendingPathComponent(skin.rawValue, isDirectory: true) else { return nil }
+        if let folder = root?.appendingPathComponent(skin.rawValue, isDirectory: true) {
+            for ext in extensions {
+                let candidate = folder.appendingPathComponent("\(name).\(ext)")
+                if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            }
+        }
+        return bundled(name, skin: skin)
+    }
+
+    /// The copy that ships in the app, if the skin has one.
+    static func bundled(_ name: String, skin: SumiSkin) -> URL? {
         for ext in extensions {
-            let candidate = folder.appendingPathComponent("\(name).\(ext)")
-            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            if let url = Bundle.anicatResources.url(
+                forResource: name, withExtension: ext, subdirectory: "SkinArt/\(skin.rawValue)"
+            ) { return url }
         }
         return nil
     }

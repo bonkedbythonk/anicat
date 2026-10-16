@@ -15,66 +15,90 @@
       theme = localStorage.getItem("anicat_theme") || "dark";
     } catch (e) { /* storage refused: defaults */ }
     if (follow) theme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-    if (skin === "oled") theme = "dark";
+    if (skin === "oled" || skin === "cyber") theme = "dark";
     document.documentElement.dataset.skin = skin;
     document.documentElement.dataset.theme = theme;
   })();
 </script>
 <style>
   /* The Sumi Ledger: ink or washi ground, one accent, hairlines, flat at
-     rest. Values are the Mac app's SumiPalette (ThemeStore.swift). */
+     rest. Values are the Mac app's SumiPalette (ThemeStore.swift), one rule
+     per palette. --mute-a and --line-a are its mutedAlpha and borderAlpha;
+     they differ per palette (OLED's hairline is 18% because 10% of the
+     foreground over true black is 1.17:1 and every card loses its edge),
+     so the tokens below are derived from them rather than hard-coded. */
+  :root {
+    --muted: color-mix(in srgb, var(--fg) var(--mute-a), transparent);
+    --faint: color-mix(in srgb, var(--fg) calc(var(--mute-a) * .58), transparent);
+    --line: color-mix(in srgb, var(--fg) var(--line-a), transparent);
+    --r-sm: 6px; --r-md: 10px; --r-lg: 12px; --r-xl: 14px;
+  }
+  [data-theme=dark] { --danger: #e2674a; --ok: #8fb573; --warn: #d9a441; }
+  [data-theme=light] { --danger: #a93a26; --ok: #4c6b35; --warn: #8c6310; }
+
   :root, [data-skin=ink][data-theme=dark] {
     color-scheme: dark;
     --bg: #161310; --card: #1e1a15; --card-2: #26211b; --fg: #ede7dc;
-    --accent: #8fb8dc; --accent-2: #a8c9e6;
-    --muted: color-mix(in srgb, var(--fg) 55%, transparent);
-    --faint: color-mix(in srgb, var(--fg) 32%, transparent);
-    --line: rgba(237, 231, 220, 0.1);
-    --danger: #e2674a; --ok: #8fb573; --warn: #d9a441;
+    --accent: #8fb8dc; --accent-2: #a8c9e6; --mute-a: 55%; --line-a: 10%;
     --shade: rgba(0, 0, 0, 0.45);
   }
   [data-skin=ink][data-theme=light] {
     color-scheme: light;
     --bg: #f1ece2; --card: #faf7f0; --card-2: #e9e3d6; --fg: #26221b;
-    --accent: #2f5a76; --accent-2: #45789a;
-    --muted: color-mix(in srgb, var(--fg) 65%, transparent);
-    --faint: color-mix(in srgb, var(--fg) 40%, transparent);
-    --line: rgba(38, 34, 27, 0.12);
-    --danger: #a93a26; --ok: #4c6b35; --warn: #8c6310;
+    --accent: #2f5a76; --accent-2: #45789a; --mute-a: 65%; --line-a: 14%;
     --shade: rgba(38, 34, 27, 0.18);
   }
   [data-skin=sakura][data-theme=dark] {
     color-scheme: dark;
     --bg: #180a10; --card: #201016; --card-2: #2b1620; --fg: #fcfafb;
-    --accent: #e0607e; --accent-2: #ea8ea3;
-    --muted: color-mix(in srgb, var(--fg) 55%, transparent);
-    --faint: color-mix(in srgb, var(--fg) 32%, transparent);
-    --line: rgba(252, 250, 251, 0.1);
-    --danger: #e2674a; --ok: #8fb573; --warn: #d9a441;
+    --accent: #e0607e; --accent-2: #ea8ea3; --mute-a: 55%; --line-a: 16%;
     --shade: rgba(0, 0, 0, 0.5);
   }
   [data-skin=sakura][data-theme=light] {
     color-scheme: light;
     --bg: #fdf5f7; --card: #ffffff; --card-2: #f6e6eb; --fg: #2d1822;
-    --accent: #c04060; --accent-2: #d86884;
-    --muted: color-mix(in srgb, var(--fg) 65%, transparent);
-    --faint: color-mix(in srgb, var(--fg) 40%, transparent);
-    --line: rgba(45, 24, 34, 0.12);
-    --danger: #a93a26; --ok: #4c6b35; --warn: #8c6310;
+    --accent: #c04060; --accent-2: #d86884; --mute-a: 65%; --line-a: 12%;
     --shade: rgba(45, 24, 34, 0.16);
+  }
+  [data-skin=royal][data-theme=dark] {
+    color-scheme: dark;
+    --bg: #0e0618; --card: #170b26; --card-2: #20142f; --fg: #f1eaff;
+    --accent: #a66bff; --accent-2: #c79bff; --mute-a: 58%; --line-a: 16%;
+    --shade: rgba(0, 0, 0, 0.5);
+  }
+  [data-skin=royal][data-theme=light] {
+    color-scheme: light;
+    --bg: #f5f0ff; --card: #ffffff; --card-2: #ece4fb; --fg: #1e1033;
+    --accent: #5b1fd1; --accent-2: #7c3aed; --mute-a: 65%; --line-a: 14%;
+    --shade: rgba(30, 16, 51, 0.16);
+  }
+  [data-skin=dusk][data-theme=dark] {
+    color-scheme: dark;
+    --bg: #14124f; --card: #1e1b6b; --card-2: #27236f; --fg: #f6ecd2;
+    --accent: #ff6b57; --accent-2: #ff9486; --mute-a: 62%; --line-a: 16%;
+    --shade: rgba(0, 0, 0, 0.5);
+  }
+  [data-skin=dusk][data-theme=light] {
+    color-scheme: light;
+    --bg: #f6ebd0; --card: #fff8e6; --card-2: #efe1c2; --fg: #1b1a4a;
+    --accent: #b72e26; --accent-2: #d4473d; --mute-a: 68%; --line-a: 14%;
+    --shade: rgba(27, 26, 74, 0.16);
+  }
+  [data-skin=cyber] {
+    color-scheme: dark;
+    --bg: #0a0a0f; --card: #14141c; --card-2: #1d1d24; --fg: #edede6;
+    --accent: #fcee0a; --accent-2: #00f0ff; --mute-a: 62%; --line-a: 16%;
+    --shade: rgba(0, 0, 0, 0.6); --danger: #ff4d7a;
   }
   [data-skin=oled] {
     color-scheme: dark;
     --bg: #000000; --card: #0b0a09; --card-2: #16140f; --fg: #ede7dc;
-    --accent: #8fb8dc; --accent-2: #a8c9e6;
-    --muted: color-mix(in srgb, var(--fg) 55%, transparent);
-    --faint: color-mix(in srgb, var(--fg) 32%, transparent);
-    --line: rgba(237, 231, 220, 0.12);
-    --danger: #e2674a; --ok: #8fb573; --warn: #d9a441;
+    --accent: #8fb8dc; --accent-2: #a8c9e6; --mute-a: 58%; --line-a: 18%;
     --shade: rgba(0, 0, 0, 0.6);
   }
-  /* Sakura is the one skin that changes anything but colour: names go serif. */
-  [data-skin=sakura] .t-name { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Yu Mincho", serif; }
+  /* Sakura is the one skin that changes anything but colour: headings and
+     names go serif, as Font.sumiHeading does on the Mac. */
+  [data-skin=sakura] :is(h1, h2, h3, .t-name) { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Yu Mincho", serif; }
 
   * { box-sizing: border-box; }
   /* Class rules below set display, which would otherwise beat the hidden
@@ -549,11 +573,17 @@ const PHASES = [
 const FORMAT_LABELS = { TV: "TV", TV_SHORT: "TV short", MOVIE: "Film", SPECIAL: "Special", OVA: "OVA", ONA: "ONA", MUSIC: "Music" };
 const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Horror", "Mahou Shoujo", "Mecha", "Music",
   "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"];
+// The Mac's SumiSkin order and names. A skin with no light half is dark
+// whatever the appearance setting says; the head script repeats that rule.
 const SKINS = [
-  { id: "ink", label: "Ink and index", dark: ["#161310", "#8fb8dc"], light: ["#f1ece2", "#2f5a76"] },
-  { id: "sakura", label: "Sakura zen", dark: ["#180a10", "#e0607e"], light: ["#fdf5f7", "#c04060"] },
+  { id: "ink", label: "Ink & Index", dark: ["#161310", "#8fb8dc"], light: ["#f1ece2", "#2f5a76"] },
+  { id: "sakura", label: "Sakura Zen", dark: ["#180a10", "#e0607e"], light: ["#fdf5f7", "#c04060"] },
+  { id: "royal", label: "Royal Neon", dark: ["#0e0618", "#a66bff"], light: ["#f5f0ff", "#5b1fd1"] },
+  { id: "dusk", label: "Dusk Sea", dark: ["#14124f", "#ff6b57"], light: ["#f6ebd0", "#b72e26"] },
+  { id: "cyber", label: "Night City", dark: ["#0a0a0f", "#fcee0a"] },
   { id: "oled", label: "OLED", dark: ["#000000", "#8fb8dc"] },
 ];
+const hasLight = (skin) => Boolean((SKINS.find((s) => s.id === skin) || SKINS[0]).light);
 
 const ICONS = {
   paw: '<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="6.2" cy="9.6" rx="2.1" ry="2.6"/><ellipse cx="10" cy="5.8" rx="2.1" ry="2.7"/><ellipse cx="14.6" cy="5.8" rx="2.1" ry="2.7"/><ellipse cx="18.2" cy="9.6" rx="2.1" ry="2.6"/><path d="M12.2 11.2c-3.2 0-6.4 4.3-6.4 6.9 0 1.7 1.3 2.6 2.9 2.6 1.4 0 2.3-.8 3.5-.8s2.1.8 3.5.8c1.6 0 2.9-.9 2.9-2.6 0-2.6-3.2-6.9-6.4-6.9z"/></svg>',
@@ -2405,16 +2435,16 @@ async function viewSettings(host) {
   };
   const appearanceHost = el("div");
   const drawAppearance = () => {
-    const oled = (store.get("anicat_skin") || "ink") === "oled";
+    const darkOnly = !hasLight(store.get("anicat_skin") || "ink");
     const follow = store.get("anicat_follow_system") !== "0";
     appearanceHost.replaceChildren(...[
-      oled ? null : setRow("Follow system appearance", "Light or dark with Windows.",
+      darkOnly ? null : setRow("Follow system appearance", "Light or dark with Windows.",
         slash([[true, "On"], [false, "Off"]], follow, (v) => { store.set("anicat_follow_system", v ? "1" : "0"); applyTheme(); drawSkins(); drawAppearance(); })),
-      oled || follow ? null : setRow("Appearance", "Each skin has a light and a dark side.",
+      darkOnly || follow ? null : setRow("Appearance", "Each skin has a light and a dark side.",
         slash([["light", "Light"], ["dark", "Dark"]], store.get("anicat_theme") || "dark", (v) => { store.set("anicat_theme", v); applyTheme(); drawSkins(); })),
     ].filter(Boolean));
   };
-  wrap.append(setRow("Skin", "The Mac app's three skins.", skinRow), appearanceHost);
+  wrap.append(setRow("Skin", "The same six skins as the Mac app.", skinRow), appearanceHost);
   drawSkins();
   drawAppearance();
 
@@ -2489,7 +2519,7 @@ function applyTheme() {
   const skin = store.get("anicat_skin") || "ink";
   const follow = store.get("anicat_follow_system") !== "0";
   let theme = follow ? (systemLight.matches ? "light" : "dark") : (store.get("anicat_theme") || "dark");
-  if (skin === "oled") theme = "dark";
+  if (!hasLight(skin)) theme = "dark";
   document.documentElement.dataset.skin = skin;
   document.documentElement.dataset.theme = theme;
 }

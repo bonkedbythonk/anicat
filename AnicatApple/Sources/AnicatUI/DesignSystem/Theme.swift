@@ -141,8 +141,9 @@ public enum SumiFontManager {
         isRegistered = true
 
         // Geist is only the reader's optional body face now; the app's own
-        // text is all SF Pro.
-        let fontFiles = ["Geist.ttf"]
+        // text is all SF Pro. Rajdhani and Shippori Mincho are the headings
+        // of Night City and Evangelion, Latin subsets of the OFL originals.
+        let fontFiles = ["Geist.ttf", "Rajdhani-Bold.ttf", "ShipporiMinchoB1-ExtraBold.ttf"]
 
         for file in fontFiles {
             let candidates: [URL?] = [
@@ -161,6 +162,20 @@ public enum SumiFontManager {
                 }
             }
         }
+    }
+
+    /// Whether a registered font answers to this PostScript name. A skin's
+    /// heading face falls back to the system's when it does not, so a build
+    /// that lost the file shows the old look instead of a missing font.
+    static func hasFont(_ name: String) -> Bool {
+        registerCustomFonts()
+        #if os(macOS)
+        return NSFont(name: name, size: 12) != nil
+        #elseif canImport(UIKit)
+        return UIFont(name: name, size: 12) != nil
+        #else
+        return false
+        #endif
     }
 
     public static let isGeistAvailable: Bool = {
@@ -207,9 +222,13 @@ public extension Font {
             return .system(size: size, weight: weight, design: .serif)
         }
         if ThemeStore.shared.palette.isCyber {
+            // Rajdhani runs small on the body: a 12% larger size sets it level
+            // with the system face it replaces.
+            if SumiFontManager.hasFont("Rajdhani-Bold") { return .custom("Rajdhani-Bold", size: size * 1.12) }
             return .system(size: size, weight: .bold).width(.condensed)
         }
         if ThemeStore.shared.palette.isEva {
+            if SumiFontManager.hasFont("ShipporiMinchoB1-ExtraBold") { return .custom("ShipporiMinchoB1-ExtraBold", size: size) }
             return .system(size: size, weight: .heavy, design: .serif)
         }
         return .system(size: size, weight: weight)

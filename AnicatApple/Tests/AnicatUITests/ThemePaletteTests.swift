@@ -245,6 +245,10 @@ struct NightCityTests {
         for palette in SumiPalette.all {
             #expect(palette.isEva == (palette.id == "dusk" || palette.id == "dusk-light"), "\(palette.id) isEva")
         }
+        // The heading faces the two skins set their titles in ship in the
+        // bundle; without them the headings quietly fall back to the system.
+        #expect(SumiFontManager.hasFont("Rajdhani-Bold"))
+        #expect(SumiFontManager.hasFont("ShipporiMinchoB1-ExtraBold"))
         #expect(SumiPalette.night.isNeon)
         #expect(SumiPalette.night.isLight == false)
     }

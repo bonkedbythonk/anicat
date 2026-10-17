@@ -1991,6 +1991,13 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
+Rajdhani and Shippori Mincho B1 (Latin subsets) are under the same license; their notices:
+
+Copyright (c) 2014, Indian Type Foundry (info@indiantypefoundry.com).
+
+Copyright 2021 The Shippori Mincho Project Authors (https://github.com/fontdasu/ShipporiMincho)
+
+
 
 3. Anime4K shaders
 ==================

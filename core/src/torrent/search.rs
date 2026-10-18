@@ -698,6 +698,39 @@ pub(crate) fn names_a_sibling(name_norm: &str, titles: &[String], siblings: &[St
     false
 }
 
+/// Does the release spell out a word only this entry's titles use?
+///
+/// The evidence that a release is *this* extra and not another of the
+/// franchise's. Every special of a franchise matches the franchise's title, so
+/// the title match proves nothing about which one a release is; what does is a
+/// word one of this entry's titles has and no related entry's has ("Amber",
+/// "Melancholy", "Kohakuiro" for Spice and Wolf II's OVA). An entry with no
+/// such word -- a bare "Show OVA" -- cannot be told from its siblings by name,
+/// and neither can an entry with no related titles at all, where every word
+/// would count as its own. Both answer false: the caller refuses rather than
+/// guesses.
+pub(crate) fn names_own_distinctive_word(name_norm: &str, own: &[String], related: &[String]) -> bool {
+    if related.is_empty() {
+        return false;
+    }
+    let words = |titles: &[String]| -> Vec<String> {
+        titles.iter().flat_map(|t| normalize(t).split(' ').map(str::to_string).collect::<Vec<_>>()).collect()
+    };
+    let related_words = words(related);
+    let padded = format!(" {} ", name_norm);
+    words(own).iter().any(|w| {
+        w.len() >= 4
+            && w.chars().all(|c| c.is_ascii_alphabetic())
+            && !KIND_WORDS.contains(&w.as_str())
+            && !GENERIC_TITLE_WORDS.contains(&w.as_str())
+            && !related_words.contains(w)
+            && padded.contains(&format!(" {} ", w))
+    })
+}
+
+/// Words too common in titles to tell one entry from another.
+const GENERIC_TITLE_WORDS: &[&str] = &["edition", "episode", "the", "and", "chapter", "final", "complete"];
+
 /// Nyaa exclusion terms (" -Alternative -Ordinal") for the words that make
 /// each related entry that entry. Nyaa sorts by seeders and answers one page
 /// of 75: "Sword Art Online II 1080p" came back as 75 releases of the Gun
@@ -709,7 +742,6 @@ pub(crate) fn names_a_sibling(name_norm: &str, titles: &[String], siblings: &[St
 /// what names it, while later words ("Bullet", "Episode") are the kind this
 /// entry's own releases use too.
 pub(crate) fn sibling_exclusions(siblings: &SiblingTitles<'_>) -> String {
-    const GENERIC: &[&str] = &["edition", "episode", "the", "and", "chapter", "final", "complete"];
     const MAX_TERMS: usize = 4;
     let own: Vec<String> = siblings
         .own
@@ -725,7 +757,7 @@ pub(crate) fn sibling_exclusions(siblings: &SiblingTitles<'_>) -> String {
                     && w.chars().all(|c| c.is_ascii_alphabetic())
                     && !own.iter().any(|o| o == w)
                     && !KIND_WORDS.contains(w)
-                    && !GENERIC.contains(w)
+                    && !GENERIC_TITLE_WORDS.contains(w)
             })
             .map(str::to_string);
         if let Some(word) = word {
@@ -1393,6 +1425,24 @@ fn score_release(
                 && episode_count == Some((b - a + 1.0) as i64)
                 && ep >= 1.0
                 && ep <= b - a + 1.0 =>
+        {
+            600
+        }
+        // The same renumbering for a lone OVA: "Spice and Wolf S00E04 ... |
+        // Spice and Wolf II: Wolf and the Amber Melancholy" is the franchise's
+        // fourth special and AniList's episode 1 of 1, so the exact-number rule
+        // above threw away the only release there is. One episode and an
+        // explicit season 0 is what makes the number carry no information
+        // about which file is wanted. The title match alone does not say the
+        // release is *this* special -- every special of the franchise
+        // matches it, and the number used to be what refused the others -- so
+        // the name must also carry a word only this entry's titles use.
+        (Some(_), _)
+            if extras
+                && episode_count == Some(1)
+                && ep == 1.0
+                && name_norm.split(' ').filter_map(season_episode).any(|(season, _)| season == 0)
+                && names_own_distinctive_word(&name_norm, siblings.own, siblings.related) =>
         {
             600
         }
@@ -3615,6 +3665,59 @@ mod extras_tests {
         let qb = normalize("Shinmai Maou no Testament Burst Specials");
         assert!(score_release(BURST_SP, &qb, &[], &sib_b, crit(1, 5)).is_some(), "five-special entry");
         assert!(score_release(KUROMII, &qb, &[], &sib_b, crit(1, 5)).is_none(), "the other collection");
+    }
+
+    #[test]
+    fn a_single_ova_release_numbered_in_the_specials_sequence_answers_a_one_episode_entry() {
+        // The only release of "Wolf and the Amber Melancholy" on Nyaa. It calls
+        // the OVA S00E04 -- fourth in the franchise's specials -- and the entry
+        // is AniList's episode 1 of 1.
+        const WSE: &str = "[WSE] Spice and Wolf S00E04 (BD 1080p x264 Hi10P FLAC) [Dual Audio] | Spice and Wolf II: Wolf and the Amber Melancholy | Ookami to Koushinryou II: Ookami to Kohakuiro no Yuuutsu | OVA | Episode 0";
+        let crit = ReleaseCriteria {
+            episode: 1,
+            allow_episodeless: false,
+            prefer_dub: false,
+            browser_client: false,
+            extras: true,
+            episode_count: Some(1),
+            aired_episodes: Some(1),
+        };
+        let own: Vec<String> = vec![
+            "Spice and Wolf II: Wolf and the Amber Melancholy".into(),
+            "Ookami to Koushinryou II: Ookami to Kohakuiro no Yuuutsu".into(),
+            "Spice and Wolf II OVA Chapter 0".into(),
+        ];
+        let related: Vec<String> = vec![
+            "Spice and Wolf".into(),
+            "Ookami to Koushinryou".into(),
+            "Spice and Wolf II".into(),
+            "Ookami to Koushinryou II".into(),
+        ];
+        let sib = SiblingTitles { own: &own, related: &related };
+        for title in ["Spice and Wolf II: Wolf and the Amber Melancholy", "Ookami to Koushinryou II: Ookami to Kohakuiro no Yuuutsu"] {
+            let q = normalize(title);
+            assert!(score_release(WSE, &q, &[], &sib, crit).is_some(), "{title}");
+        }
+        // Refuse rather than guess: with no related titles every word would
+        // look like this entry's own, and nothing then separates it from a
+        // sibling.
+        let no_related = SiblingTitles { own: &own, related: &[] };
+        let q = normalize("Spice and Wolf II: Wolf and the Amber Melancholy");
+        assert!(score_release(WSE, &q, &[], &no_related, crit).is_none(), "no related titles");
+        // A bare "Show OVA" entry shares every word with its franchise, so
+        // another special's single S00 release must not be taken for it: the
+        // title matches either way and the number used to be what refused it.
+        const OTHER_SPECIAL: &str = "[Grp] Spice and Wolf - S00E02 (BD 1080p x264 FLAC)";
+        let bare_own: Vec<String> = vec!["Spice and Wolf OVA".into()];
+        let bare_related: Vec<String> = vec!["Spice and Wolf".into()];
+        let bare = SiblingTitles { own: &bare_own, related: &bare_related };
+        let q = normalize("Spice and Wolf OVA");
+        assert!(score_release(OTHER_SPECIAL, &q, &[], &bare, crit).is_none(), "an entry with nothing of its own");
+        // A TV entry asking for episode 1 must still not take it.
+        let tv = ReleaseCriteria { extras: false, episode_count: Some(12), aired_episodes: Some(12), ..crit };
+        let q = normalize("Spice and Wolf");
+        let tv_sib = SiblingTitles { own: &[], related: &own };
+        assert!(score_release(WSE, &q, &[], &tv_sib, tv).is_none());
     }
 
     #[test]

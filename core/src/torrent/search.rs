@@ -1613,7 +1613,7 @@ async fn search_animetosho(
 ) -> Vec<Candidate> {
     let mut out = vec![];
     let url = format!(
-        "https://feed.animetosho.org/json?q={}&only_tor=1",
+        "https://animetosho.org/feed/json?q={}&only_tor=1",
         urlencoding_encode(query)
     );
     let mut items: Vec<Value> = Vec::new();

@@ -70,7 +70,7 @@ pub async fn release_aid(client: &reqwest::Client, cand: &Candidate) -> Option<i
     // Only by Nyaa id. The info-hash lookup works too but took 2.4 s against
     // 0.12 s, and a SubsPlease magnet is the only candidate without a Nyaa id.
     let id = cand.torrent_url.as_deref().and_then(nyaa_id)?;
-    let url = format!("https://feed.animetosho.org/json?show=torrent&nyaa_id={}", id);
+    let url = format!("https://animetosho.org/feed/json?show=torrent&nyaa_id={}", id);
     let resp = client.get(&url).timeout(VERIFY_BUDGET).send().await.ok()?;
     let body: serde_json::Value = resp.json().await.ok()?;
     body.get("anidb_aid").and_then(|v| v.as_i64())

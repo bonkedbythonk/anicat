@@ -15,6 +15,15 @@ private final class UnsafeSendableBox<T>: @unchecked Sendable {
     init(_ value: T) { self.value = value }
 }
 
+/// Whether anything draws the ambient glow, and so whether the video is
+/// sampled for it. Only the Mac's player does; the phone's has no glow, and
+/// feeding one cost it a readable drawable and a copy per sample.
+#if os(iOS)
+private let ambientGlowAvailable = false
+#else
+private let ambientGlowAvailable = true
+#endif
+
 /// How mpv's frames reach the screen: mpv's own `gpu-next` output through
 /// Vulkan, which MoltenVK maps onto Metal, drawing into a `CAMetalLayer` we
 /// own and hand over as `wid`. That needs MPVKit's libmpv, whose `moltenvk`
@@ -50,11 +59,14 @@ final class MpvMetalLayer: CAMetalLayer {
     /// ever a colour attachment, and a framebuffer-only texture cannot be
     /// sampled by the ambient glow's scale kernel. Pinned false; the cost
     /// is a texture the GPU cannot treat as write-only, which does not
-    /// register at 1080p.
+    /// register at 1080p on a desktop GPU. Not on the phone, which has no
+    /// glow to feed and pays for it in every presented frame.
+    #if !os(iOS)
     override var framebufferOnly: Bool {
         get { false }
         set {}
     }
+    #endif
 
     /// The ambient sampler. Every
     /// drawable handed to MoltenVK is registered so its presented handler
@@ -645,7 +657,8 @@ public struct MpvSurface {
                         MainActor.assumeIsolated { self.fullScreenTransitionEnded(view: view) }
                     }
                     #endif
-                    if let layer = view.metalView?.metalLayer,
+                    if ambientGlowAvailable,
+                       let layer = view.metalView?.metalLayer,
                        let device = layer.device ?? MTLCreateSystemDefaultDevice(),
                        let sampler = AmbientMetalSampler(device: device) {
                         sampler.videoAspect = { [weak self] in self?.controller.videoAspectRatio }
@@ -1165,7 +1178,7 @@ public struct MpvSurface {
             reconfigAttemptsForSize = 0
         }
 
-        func runCommand(_ args: [String]) {
+        func runCommand(_ args: [String], async: Bool = false) {
             guard let mpv = mpv else { return }
             var cArgs = args.map { UnsafePointer<CChar>?(strdup($0)) }
             cArgs.append(nil)
@@ -1175,7 +1188,9 @@ public struct MpvSurface {
                 }
             }
             cArgs.withUnsafeMutableBufferPointer { ptr in
-                let res = mpv_command(mpv, ptr.baseAddress)
+                // `mpv_command_async` copies the arguments before it returns,
+                // so the `defer` above may free them straight away.
+                let res = async ? mpv_command_async(mpv, 0, ptr.baseAddress) : mpv_command(mpv, ptr.baseAddress)
                 if res < 0 {
                     let errStr = String(cString: mpv_error_string(res))
                     print("[libmpv] mpv_command(\(args.joined(separator: " "))) error: \(errStr) (\(res))")
@@ -1239,33 +1254,53 @@ public struct MpvSurface {
             pendingStreamURL = nil
         }
 
-        func setPaused(_ paused: Bool) {
+        // On the phone the transport controls hand mpv their value and
+        // return, rather than waiting for its core thread to answer.
+        // `mpv_set_property` blocks until the core has serviced it, and the
+        // core is busy for as long as a seek into pieces the swarm has not
+        // delivered or a track switch takes; the main thread waited with it,
+        // so on a weak link a tap on pause or a volume swipe froze the whole
+        // UI instead of just lagging the sound. `updateHostView` also repeats
+        // `setPaused` on every SwiftUI update, which made that a stall per
+        // redraw. The Mac keeps the synchronous calls its seek and
+        // paused-frame paths were written against.
+        #if os(iOS)
+        private static let asyncTransport = true
+        #else
+        private static let asyncTransport = false
+        #endif
+
+        private func setTransport(_ name: String, flag: Bool) {
             guard let mpv = mpv else { return }
-            var flag: Int32 = paused ? 1 : 0
-            mpv_set_property(mpv, "pause", MPV_FORMAT_FLAG, &flag)
+            var value: Int32 = flag ? 1 : 0
+            if Self.asyncTransport {
+                mpv_set_property_async(mpv, 0, name, MPV_FORMAT_FLAG, &value)
+            } else {
+                mpv_set_property(mpv, name, MPV_FORMAT_FLAG, &value)
+            }
         }
+
+        private func setTransport(_ name: String, double: Double) {
+            guard let mpv = mpv else { return }
+            var value = double
+            if Self.asyncTransport {
+                mpv_set_property_async(mpv, 0, name, MPV_FORMAT_DOUBLE, &value)
+            } else {
+                mpv_set_property(mpv, name, MPV_FORMAT_DOUBLE, &value)
+            }
+        }
+
+        func setPaused(_ paused: Bool) { setTransport("pause", flag: paused) }
 
         func seek(to seconds: Double) {
-            runCommand(["seek", String(format: "%.2f", seconds), "absolute"])
+            runCommand(["seek", String(format: "%.2f", seconds), "absolute"], async: Self.asyncTransport)
         }
 
-        func setVolume(_ volume: Double) {
-            guard let mpv = mpv else { return }
-            var value = volume * 100
-            mpv_set_property(mpv, "volume", MPV_FORMAT_DOUBLE, &value)
-        }
+        func setVolume(_ volume: Double) { setTransport("volume", double: volume * 100) }
 
-        func setMuted(_ muted: Bool) {
-            guard let mpv = mpv else { return }
-            var flag: Int32 = muted ? 1 : 0
-            mpv_set_property(mpv, "mute", MPV_FORMAT_FLAG, &flag)
-        }
+        func setMuted(_ muted: Bool) { setTransport("mute", flag: muted) }
 
-        func setSpeed(_ rate: Double) {
-            guard let mpv = mpv else { return }
-            var value = rate
-            mpv_set_property(mpv, "speed", MPV_FORMAT_DOUBLE, &value)
-        }
+        func setSpeed(_ rate: Double) { setTransport("speed", double: rate) }
 
         /// `sub-scale`, which mpv applies to ASS as well under the default
         /// `sub-ass-override=yes`. Scale only, no colour or border: those
@@ -1691,7 +1726,7 @@ public struct MpvSurface {
         nonisolated(unsafe) var usesMetalAmbientSampler = false
 
         func sampleAmbientIfDue() async {
-            guard !usesMetalAmbientSampler else { return }
+            guard ambientGlowAvailable, !usesMetalAmbientSampler else { return }
             // Checked before the main-actor hop below, not after: this runs
             // on every 50ms idle tick, and hopping twenty times a second to
             // read three booleans that matter once a second is the whole

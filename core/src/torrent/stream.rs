@@ -160,10 +160,20 @@ pub async fn torrent_stream_handler(
         }
     }
 
+    // How long the first of the requested bytes takes to arrive: a slow
+    // start on a weak link was visible only as a player that sat with sound
+    // and no picture.
+    let asked = std::time::Instant::now();
+    let mut first_chunk = true;
     let reader = stream.take(len);
-    let body = Body::from_stream(tokio_util::io::ReaderStream::with_capacity(
-        reader,
-        256 * 1024,
+    let body = Body::from_stream(futures_util::StreamExt::inspect(
+        tokio_util::io::ReaderStream::with_capacity(reader, 256 * 1024),
+        move |_| {
+            if first_chunk {
+                first_chunk = false;
+                log::info!("[stream] first bytes of {}.. after {}ms", start, asked.elapsed().as_millis());
+            }
+        },
     ));
 
     let mut builder = Response::builder()

@@ -702,9 +702,13 @@ public struct RootView: View {
             Text("You are on \(UpdateChecker.currentVersion). \(updatePromptHint)")
         }
         .onContinueUserActivity(ContinuityManager.playbackActivityType) { activity in
-            guard case .playback(let catalogId, let catalog, let title, _, _) =
+            guard case .playback(let catalogId, let catalog, let title, let episode, let timePosition) =
                     ContinuityManager.shared.parseIncomingActivity(activity) else { return }
+            let duration = ContinuityManager.incomingDuration(activity)
             Task {
+                if catalog == "anilist" {
+                    await model.adoptHandoffPosition(catalogId: catalogId, episode: episode, time: timePosition, duration: duration)
+                }
                 switch catalog {
                 case "tmdb_movie":
                     await model.openCinemaDetail(catalog: .tmdbMovie, id: catalogId, title: title)

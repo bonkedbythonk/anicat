@@ -21,7 +21,8 @@ public final class ContinuityManager: @unchecked Sendable {
         catalog: String = "anilist",
         title: String,
         episode: Int,
-        timePositionSeconds: Double
+        timePositionSeconds: Double,
+        durationSeconds: Double = 0
     ) {
         let activity = NSUserActivity(activityType: Self.playbackActivityType)
         activity.title = "Watching \(title) - Episode \(episode)"
@@ -35,6 +36,9 @@ public final class ContinuityManager: @unchecked Sendable {
             "title": title,
             "episode": episode,
             "timePosition": timePositionSeconds,
+            // Not in `requiredUserInfoKeys`: an older build's activity has
+            // none, and a position without a length cannot be recorded.
+            "duration": durationSeconds,
             "timestamp": Date().timeIntervalSince1970
         ]
 
@@ -81,6 +85,12 @@ public final class ContinuityManager: @unchecked Sendable {
     public func stopAdvertising() {
         currentActivity?.invalidate()
         currentActivity = nil
+    }
+
+    /// The episode length the sending device attached, 0 from a build that
+    /// sent none.
+    public static func incomingDuration(_ activity: NSUserActivity) -> Double {
+        activity.userInfo?["duration"] as? Double ?? 0
     }
 
     /// Parses an incoming Handoff activity from another Apple device.

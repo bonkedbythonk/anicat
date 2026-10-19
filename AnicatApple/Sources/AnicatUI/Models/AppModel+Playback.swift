@@ -1296,8 +1296,31 @@ extension AppModel {
                 catalog: Self.handoffCatalog(currentPlaybackCatalog),
                 title: title,
                 episode: Int(episode),
-                timePositionSeconds: currentTime
+                timePositionSeconds: currentTime,
+                durationSeconds: duration
             )
+        }
+    }
+
+    /// Watch history is per device, and the only thing that crossed to the
+    /// other one was the AniList episode number: an episode left at 12:34 on
+    /// the Mac started from 0:00 on the phone. A Handoff the viewer picked up
+    /// is the newest position there is, so it is written into this device's
+    /// registry before the page opens and reads it back. AniList titles only;
+    /// cinema keeps its own resume rows.
+    func adoptHandoffPosition(catalogId: Int64, episode: Int, time: Double, duration: Double) async {
+        guard let engine, time > 0, duration > 0 else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            engineIOQueue.async {
+                try? engine.recordProgress(
+                    catalog: .anilist,
+                    catalogId: catalogId,
+                    episodeNumber: Int64(episode),
+                    stopTime: Int64(time),
+                    duration: Int64(duration)
+                )
+                continuation.resume()
+            }
         }
     }
 

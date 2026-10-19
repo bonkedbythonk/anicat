@@ -36,9 +36,6 @@ struct PhonePlayerView: View {
     @State private var isLoadingReleases = false
     @State private var showReleases = false
     @State private var showEpisodes = false
-    /// Set when Sub/Dub asked for a language the playing file has no track
-    /// in; the alert offers to fetch this episode again in that language.
-    @State private var languageReloadOffer: Bool?
     /// A pinch and the one-finger recogniser see the same touches. While
     /// this is set, or just after, the drag is ignored: a pinch opening
     /// sideways otherwise read as a scrub and landed a seek on lift.
@@ -145,21 +142,6 @@ struct PhonePlayerView: View {
         .statusBarHidden(!isMinimized)
         .sheet(isPresented: $showReleases) { releaseSheet }
         .sheet(isPresented: $showEpisodes) { episodesSheet }
-        .alert(
-            languageReloadOffer == true ? "No English audio in this release" : "No Japanese audio in this release",
-            isPresented: Binding(
-                get: { languageReloadOffer != nil },
-                set: { if !$0 { languageReloadOffer = nil } }
-            ),
-            presenting: languageReloadOffer
-        ) { wantsDub in
-            Button(wantsDub ? "Find a dub" : "Find a sub") {
-                controller.onReloadForAudioLanguage?(wantsDub)
-            }
-            Button("Not now", role: .cancel) {}
-        } message: { wantsDub in
-            Text("Next episodes will look for \(wantsDub ? "a dub" : "the subtitled version") first. Search again for this one, from where you are?")
-        }
         .onChange(of: controller.isBuffering, initial: true) { _, buffering in
             bufferingSince = buffering ? Date() : nil
         }
@@ -433,8 +415,10 @@ struct PhonePlayerView: View {
                 let wantsDub = option == "Dubbed"
                 guard let select = controller.onSelectAudioLanguage else { return }
                 select(wantsDub) { switched in
-                    if !switched { languageReloadOffer = wantsDub }
                     fetchTracks()
+                    // No such track in this file: the app finds a release that
+                    // has one, from where the viewer is, without asking first.
+                    if !switched { controller.onReloadForAudioLanguage?(wantsDub) }
                 }
             }
         )

@@ -121,6 +121,24 @@ pub struct MediaSummary {
     pub list_entry_id: Option<i64>,
 }
 
+/// An automatic report under a dub preference about a release whose name never
+/// claimed a dub is not worth acting on: the show has no dub, its sub release
+/// is playing, and re-resolving it reloads the same Japanese. A viewer's own
+/// press, and every sub-side report, always counts.
+fn declines_automatic_report(automatic: bool, wanted_dub: bool, claims_dub: bool) -> bool {
+    automatic && wanted_dub && !claims_dub
+}
+
+/// What `report_missing_audio` decided about the release that was playing.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AudioMiss {
+    pub name: String,
+    /// Worth resolving again: the release is newly known to lack the
+    /// language, and (for an automatic report under a dub preference) it
+    /// had claimed to carry a dub, so another release may really have one.
+    pub retry: bool,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct MangaSummary {
     pub id: String,
@@ -1336,6 +1354,57 @@ impl AnicatEngine {
         Ok(Some(name))
     }
 
+    /// The player opened the release playing this episode and found no audio
+    /// track in the language asked for (English under a dub preference,
+    /// Japanese under a sub one). It is remembered for this title and that
+    /// language, so the next resolve prefers every other release and the
+    /// remembered-winner fast path stops handing it back. `retry` says
+    /// whether resolving again can help: false when the release had been
+    /// reported before (the same one came back because nothing else
+    /// exists), and, for an `automatic` report under a dub preference, when
+    /// its name never claimed a dub -- a show with no dub plays its sub
+    /// release, and re-resolving it would only reload the same Japanese.
+    /// A viewer pressing Dub (`automatic` false) always gets the retry.
+    /// `None` when nothing is known to have played this episode.
+    pub async fn report_missing_audio(
+        &self,
+        catalog: FfiCatalog,
+        catalog_id: i64,
+        episode: i64,
+        wanted_dub: bool,
+        automatic: bool,
+    ) -> FfiResult<Option<AudioMiss>> {
+        let media = MediaKey::new(catalog.into(), catalog_id);
+        let name = match self.torrents.winner_name(media, episode).await {
+            Some(name) => Some(name),
+            None => self
+                .registry
+                .remembered_release(media.catalog, media.id, episode)
+                .map_err(|msg| AnicatError::Internal { msg })?
+                .map(|r| r.name),
+        };
+        let Some(name) = name else { return Ok(None) };
+        let claims_dub = crate::torrent::search::is_dub_release(&crate::torrent::search::normalize(&name));
+        if declines_automatic_report(automatic, wanted_dub, claims_dub) {
+            return Ok(Some(AudioMiss { name, retry: false }));
+        }
+        let is_new = self
+            .registry
+            .record_audio_miss(media.catalog, media.id, &name, wanted_dub)
+            .map_err(|msg| AnicatError::Internal { msg })?;
+        self.torrents.forget_media(media).await;
+        log::warn!(
+            "[verify] '{}' has no {} audio for {} ep {} ({}{})",
+            name,
+            if wanted_dub { "English" } else { "Japanese" },
+            media,
+            episode,
+            if is_new { "new" } else { "already known" },
+            if automatic { ", found on load" } else { ", asked for" }
+        );
+        Ok(Some(AudioMiss { name, retry: is_new }))
+    }
+
     pub async fn resolve_stream(&self, req: StreamRequest) -> FfiResult<StreamHandle> {
         // A film or an episode of a western series is searched on year or on
         // SxxEyy, neither of which the anime path has any notion of. Falling
@@ -1373,6 +1442,10 @@ impl AnicatEngine {
             .registry
             .rejected_releases(media.catalog, media.id)
             .unwrap_or_default();
+        let lacking = self
+            .registry
+            .audio_misses(media.catalog, media.id, req.prefer_dub)
+            .unwrap_or_default();
         // Started now and read by each candidate as it is tried, so the AniDB
         // lookups overlap the search instead of adding to it.
         let franchise = self.franchise_aids(req.catalog_id);
@@ -1403,6 +1476,7 @@ impl AnicatEngine {
                     resume_fraction: req.resume_fraction,
                     remembered,
                     rejected: &rejected,
+                    lacking_audio: &lacking,
                     franchise: Some(franchise),
                 },
                 port,
@@ -2463,6 +2537,7 @@ impl AnicatEngine {
                     resume_fraction: None,
                     remembered: None,
                     rejected: &[],
+                    lacking_audio: &[],
                     franchise: None,
                 },
             )
@@ -2561,6 +2636,7 @@ impl AnicatEngine {
                     resume_fraction: None,
                     remembered: None,
                     rejected: &[],
+                    lacking_audio: &[],
                     franchise: None,
                 },
                 port,
@@ -4365,6 +4441,7 @@ impl AnicatEngine {
                     resume_fraction: req.resume_fraction,
                     remembered,
                     rejected: &[],
+                    lacking_audio: &[],
                     franchise: None,
                 },
                 port,
@@ -5614,11 +5691,111 @@ mod cinema_live_tests {
         engine.playback_stopped().await;
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The audio languages ffprobe reads from a stream URL the engine serves.
+    /// On a blocking thread: the engine's range server runs on this test's
+    /// runtime, and a `Command::output()` here would hold the only worker while
+    /// ffprobe waits for the server to answer it.
+    async fn probe_audio_languages(url: &str) -> Vec<String> {
+        let url = url.to_string();
+        tokio::task::spawn_blocking(move || {
+            let out = std::process::Command::new("ffprobe")
+                .args(["-v", "error", "-select_streams", "a", "-show_entries", "stream_tags=language", "-of", "csv=p=0", &url])
+                .output()
+                .expect("ffprobe on PATH");
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|l| l.trim().to_lowercase())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .await
+        .expect("probe task")
+    }
+
+    /// Live, and the whole chain the Sub/Dub switcher depends on, against the
+    /// release that played Japanese under a dub preference: Date A Live
+    /// season 1 episode 3. `cargo test --lib live_a_dub_the_file_lacks -- --ignored --nocapture`
+    ///
+    /// 1. A hand pick of the Anime Time Director's Cut pack reproduces the
+    ///    report: its file has no English track.
+    /// 2. Reporting that, as a viewer pressing Dub would, says a retry is worth it.
+    /// 3. Resolving again under the dub preference must land on a file that
+    ///    does carry English, which needs both the demotion of cuts and the
+    ///    record of the miss.
+    /// Needs ffprobe on PATH and live peers for the Anime Time packs.
+    #[tokio::test]
+    #[ignore]
+    async fn live_a_dub_the_file_lacks_is_replaced_by_one_that_has_it() {
+        let _ = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or("info,librqbit=warn,librqbit_dht=warn"),
+        )
+        .try_init();
+        let dir = std::env::temp_dir().join("anicat-dub-recovery-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine = AnicatEngine::new(dir.to_string_lossy().to_string(), None, None, None).expect("engine");
+        let request = |chosen: Option<&str>| StreamRequest {
+            catalog: FfiCatalog::Anilist,
+            catalog_id: 15583,
+            episode: 3,
+            title: Some("Date A Live".into()),
+            prefer_dub: true,
+            chosen_name: chosen.map(str::to_string),
+            resume_fraction: None,
+            preload: false,
+        };
+
+        let cut = "[Anime Time] Date A Live (Season 01+02+03+04 + Movie + OVAs) (Director's Cut) [BD] [Dual Audio][1080p][HEVC 10bit x265][AAC][Eng Sub]";
+        let first = engine.resolve_stream(request(Some(cut))).await.expect("resolve the cut");
+        let before = probe_audio_languages(&first.url).await;
+        println!("hand-picked cut: audio {before:?}");
+        assert!(!before.is_empty(), "ffprobe read no audio from the cut");
+        assert!(!before.iter().any(|l| l == "eng"), "the cut now has English; update this test: {before:?}");
+
+        let miss = engine
+            .report_missing_audio(FfiCatalog::Anilist, 15583, 3, true, false)
+            .await
+            .expect("report")
+            .expect("a release was playing");
+        println!("reported: {miss:?}");
+        assert!(miss.retry, "a press on Dub must get a retry: {miss:?}");
+
+        let second = engine.resolve_stream(request(None)).await.expect("resolve again");
+        let after = probe_audio_languages(&second.url).await;
+        println!("after the report: audio {after:?}");
+        assert!(after.iter().any(|l| l == "eng"), "the retry still has no English: {after:?}");
+
+        engine.playback_stopped().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_automatic_dub_report_about_a_release_that_never_claimed_one_is_declined() {
+        for automatic in [false, true] {
+            for wanted_dub in [false, true] {
+                for claims_dub in [false, true] {
+                    let declined = declines_automatic_report(automatic, wanted_dub, claims_dub);
+                    assert_eq!(
+                        declined,
+                        automatic && wanted_dub && !claims_dub,
+                        "automatic={automatic} wanted_dub={wanted_dub} claims_dub={claims_dub}"
+                    );
+                }
+            }
+        }
+        // The cases that matter: a pack that says Dual Audio and has no English
+        // is retried on load; a plain sub release under a dub preference is not;
+        // a viewer pressing Dub always gets the search.
+        assert!(!declines_automatic_report(true, true, true));
+        assert!(declines_automatic_report(true, true, false));
+        assert!(!declines_automatic_report(false, true, false));
+        assert!(!declines_automatic_report(true, false, false));
+    }
 
     #[test]
     fn the_downloads_scan_adopts_what_it_can_identify_and_skips_the_rest() {

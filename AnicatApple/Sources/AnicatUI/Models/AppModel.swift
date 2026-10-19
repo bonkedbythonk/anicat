@@ -429,6 +429,9 @@ public final class AppModel {
     /// the orphaned work on the other side of the FFI boundary stops
     /// instantly too.
     public var activeResolveTask: Task<Void, Never>?
+    /// Looks for another release made on the viewer's behalf when a file opens
+    /// without the language asked for. See `AudioRecovery`.
+    var audioRecovery = AudioRecovery()
     /// The status-line poller `resolveAndPlay` runs beside its resolve; see
     /// `cancelResolve` for why Cancel stops it directly.
     var activeResolvePoller: Task<Void, Never>?

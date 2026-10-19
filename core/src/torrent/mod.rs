@@ -174,8 +174,26 @@ pub struct ResolveTarget<'a> {
     /// Releases the viewer marked as the wrong episode or show for this
     /// title. Never offered again unless picked by hand.
     pub rejected: &'a [String],
+    /// Releases the player opened for this title and found without the audio
+    /// language now asked for. A preference, not a filter: every other
+    /// release is tried first and these only when nothing else is left.
+    pub lacking_audio: &'a [String],
     /// This entry's AniDB franchise, for `verify`. `None` skips the check.
     pub franchise: Option<verify::FranchiseAids>,
+}
+
+/// Drops the releases the player has already found without the audio language
+/// asked for, unless that would leave nothing to play: then they stay, in
+/// order, and the viewer gets the language the file has. A hand pick is kept
+/// whatever its record says. Pure, so the rule is testable without a swarm.
+fn prefer_without_lacking(candidates: &mut Vec<search::Candidate>, lacking: &[String], chosen: Option<&str>) {
+    if lacking.is_empty() {
+        return;
+    }
+    let keeps = |c: &search::Candidate| !lacking.contains(&c.name) || chosen == Some(c.name.as_str());
+    if candidates.iter().any(keeps) {
+        candidates.retain(keeps);
+    }
 }
 
 /// Where an in-flight `resolve` has got to, for the player to say so.
@@ -1098,7 +1116,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub, prefer_small, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered, rejected, franchise } = target;
+        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub, prefer_small, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered, rejected, lacking_audio, franchise } = target;
         let criteria = search::ReleaseCriteria {
             episode,
             allow_episodeless,
@@ -1209,7 +1227,10 @@ impl TorrentManager {
         // heal on their next play instead of needing a migration.
         let remembered = remembered
             .filter(|rem| !prefer_dub || search::is_dub_release(&search::normalize(&rem.name)));
-        let remembered = remembered.filter(|rem| !rejected.contains(&rem.name)).filter(|rem| {
+        let remembered = remembered
+            .filter(|rem| !rejected.contains(&rem.name))
+            .filter(|rem| !lacking_audio.contains(&rem.name))
+            .filter(|rem| {
             let disowned = search::names_a_sibling(&search::normalize(&rem.name), titles, sibling_titles);
             if disowned {
                 log::warn!("[resolve] remembered release '{}' names a related entry, searching", rem.name);
@@ -1355,6 +1376,7 @@ impl TorrentManager {
         }
         // A hand pick overrides an earlier rejection; nothing else does.
         candidates.retain(|c| !rejected.contains(&c.name) || chosen_name.as_deref() == Some(c.name.as_str()));
+        prefer_without_lacking(&mut candidates, lacking_audio, chosen_name.as_deref());
         if prefer_small && chosen_name.is_none() {
             search::prefer_smaller(&mut candidates);
         }
@@ -3334,6 +3356,36 @@ mod tests {
         Resolved { torrent_id: 3, file_id: 0, browser_playable: true, prefer_dub }
     }
 
+    #[test]
+    fn releases_without_the_audio_asked_for_go_last_but_are_never_all_there_is() {
+        let names = |v: &[search::Candidate]| v.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        let pool = || vec![candidate("cut"), candidate("plain"), candidate("other")];
+        let lacking = vec!["cut".to_string()];
+
+        let mut kept = pool();
+        prefer_without_lacking(&mut kept, &lacking, None);
+        assert_eq!(names(&kept), ["plain", "other"], "order of the rest is kept");
+
+        // Nothing else to play: the lacking release stays, so the episode still plays.
+        let mut only = vec![candidate("cut")];
+        prefer_without_lacking(&mut only, &lacking, None);
+        assert_eq!(names(&only), ["cut"]);
+
+        // A hand pick wins over the record.
+        let mut picked = pool();
+        prefer_without_lacking(&mut picked, &lacking, Some("cut"));
+        assert_eq!(names(&picked), ["cut", "plain", "other"]);
+
+        // Every release recorded: all stay rather than none.
+        let mut all = pool();
+        prefer_without_lacking(&mut all, &["cut".into(), "plain".into(), "other".into()], None);
+        assert_eq!(all.len(), 3);
+
+        let mut untouched = pool();
+        prefer_without_lacking(&mut untouched, &[], None);
+        assert_eq!(untouched.len(), 3);
+    }
+
     fn candidate(name: &str) -> search::Candidate {
         search::Candidate {
             anidb_aid: None,
@@ -3645,6 +3697,35 @@ mod tests {
         );
     }
 
+    /// Live. `cargo test --lib live_date_a_live_dub_pick -- --ignored --nocapture`
+    ///
+    /// Searches only, nothing is downloaded. Date A Live season 1 under a dub
+    /// preference used to rank an Anime Time Director's Cut pack first, whose
+    /// season 1 is Japanese only; the plain pack beside it has English.
+    #[tokio::test]
+    #[ignore]
+    async fn live_date_a_live_dub_pick_is_not_the_directors_cut() {
+        let titles = vec!["Date A Live".to_string()];
+        let criteria = search::ReleaseCriteria {
+            episode: 3,
+            allow_episodeless: false,
+            prefer_dub: true,
+            browser_client: false,
+            extras: false,
+            episode_count: Some(12),
+            aired_episodes: Some(12),
+        };
+        let found =
+            search::find_candidates(&client(), &titles, &[], criteria, search::Breadth::Full).await;
+        for (i, c) in found.iter().take(8).enumerate() {
+            println!("{i}: score={} seeders={} {}", c.score, c.seeders, c.name);
+        }
+        assert!(!found.is_empty(), "nothing found");
+        let best = search::normalize(&found[0].name);
+        assert!(search::is_dub_release(&best), "best is not a dub: {}", found[0].name);
+        assert!(!search::is_directors_cut(&best), "best is a Director's Cut: {}", found[0].name);
+    }
+
     // Live network test: a show whose AniList title is a 95-character mouthful
     // and whose release groups all use the glued `Title SxxEyy` convention.
     // Both of those independently produced "no streams found" on every episode
@@ -3803,6 +3884,7 @@ mod tests {
                 resume_fraction: None,
                 remembered: None,
                 rejected: &[],
+                lacking_audio: &[],
                 franchise: None,
             },
             13370,
@@ -3855,6 +3937,7 @@ mod tests {
             resume_fraction: None,
             remembered,
             rejected: &[],
+            lacking_audio: &[],
             franchise: None,
         };
 
@@ -4271,6 +4354,7 @@ mod tests {
                         resume_fraction: None,
                         remembered: None,
                         rejected: &[],
+                        lacking_audio: &[],
                         franchise: None,
                     },
                     13370,
@@ -4475,6 +4559,7 @@ mod tests {
                 resume_fraction: None,
                 remembered: None,
                 rejected: &[],
+                lacking_audio: &[],
                 franchise: None,
                 },
                 13370,
@@ -4538,6 +4623,7 @@ mod tests {
                     resume_fraction: None,
                     remembered: None,
                     rejected: &[],
+                    lacking_audio: &[],
                     franchise: None,
                 },
                 13370,
@@ -4607,6 +4693,7 @@ mod tests {
                     resume_fraction: None,
                     remembered: None,
                     rejected: &[],
+                    lacking_audio: &[],
                     franchise: None,
                 },
                 13370,
@@ -4682,6 +4769,7 @@ mod tests {
                 resume_fraction: None,
                 remembered: None,
                 rejected: &[],
+                lacking_audio: &[],
                 franchise: None,
         };
 

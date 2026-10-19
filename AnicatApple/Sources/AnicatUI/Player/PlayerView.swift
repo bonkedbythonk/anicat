@@ -85,10 +85,6 @@ public struct PlayerView: View {
     /// searches with — but this episode's audio did not, and saying nothing
     /// is how the old control read as broken.
     @State private var audioSwitchNote: String?
-    /// Set alongside the note when the playing file has no track in the
-    /// language just asked for, so the note can offer to go and find a
-    /// release that does.
-    @State private var audioSwitchReloadTo: Bool?
     /// Latched once per playback session, never reset: neither signal behind
     /// it is one-shot on its own. `isBuffering` goes true again on every
     /// mid-playback `paused-for-cache` stall and `awaitingNewFile` on every
@@ -953,6 +949,9 @@ public struct PlayerView: View {
             }
         }
         .onChange(of: firstFrameLanded) { _, _ in advanceOpeningIfReady() }
+        // A note about the file that was playing says nothing about the one
+        // that replaced it.
+        .onChange(of: streamURL) { _, _ in audioSwitchNote = nil }
         // A stream that lands during the zoom waits here for the window:
         // opening the card while the layout is still the old size is the
         // mid-screen hang all over again.
@@ -1566,15 +1565,17 @@ public struct PlayerView: View {
                             storedSubDub = option
                             guard let select = controller.onSelectAudioLanguage else {
                                 audioSwitchNote = nil
-                                audioSwitchReloadTo = nil
                                 return
                             }
                             select(wantsDub) { switched in
                                 audioSwitchNote = switched
                                     ? nil
                                     : "No \(wantsDub ? "English" : "Japanese") audio track in this release."
-                                audioSwitchReloadTo = switched ? nil : wantsDub
                                 refreshTracks()
+                                // A press is a request for the language, not for
+                                // a setting: the file has no such track, so the
+                                // app goes and finds a release that does.
+                                if !switched { controller.onReloadForAudioLanguage?(wantsDub) }
                             }
                         } label: {
                             // Slash words like the detail page's Sub / Dub,
@@ -1598,27 +1599,6 @@ public struct PlayerView: View {
                             .font(.system(size: 10.5))
                             .foregroundColor(SumiTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
-                        // The switch used to end here, which is why it read
-                        // as broken: a single-audio release is the common
-                        // case on nyaa, and changing what the *next* episode
-                        // searches for is not what pressing Dub during an
-                        // episode is asking for. This goes back to the
-                        // indexers for this episode, resuming where the
-                        // current file is.
-                        if let wantsDub = audioSwitchReloadTo {
-                            Button {
-                                audioSwitchNote = nil
-                                audioSwitchReloadTo = nil
-                                showInfoMenu = false
-                                controller.onReloadForAudioLanguage?(wantsDub)
-                            } label: {
-                                Text("Find \(wantsDub ? "a dub" : "a sub") of this episode")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(SumiTheme.indigo)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.sumiPressable)
-                        }
                     }
                 }
             }

@@ -927,6 +927,41 @@ impl Registry {
         .map_err(|e| e.to_string())
     }
 
+    /// Notes that `name` was opened for this title and had no audio track in
+    /// the language asked for. Answers whether the row is new: `false` means
+    /// the release was already known to lack it, which is how a caller tells
+    /// "a different release was tried and failed" from "the same one came
+    /// back because nothing else exists".
+    pub fn record_audio_miss(&self, catalog: Catalog, catalog_id: i64, name: &str, wanted_dub: bool) -> Result<bool, String> {
+        let conn = self.lock()?;
+        let inserted = conn
+            .execute(
+                "INSERT OR IGNORE INTO audio_misses (catalog, catalog_id, name, wanted_dub) VALUES (?1, ?2, ?3, ?4)",
+                params![catalog.as_str(), catalog_id, name, wanted_dub],
+            )
+            .map_err(|e| e.to_string())?;
+        // Forgotten as a remembered winner for every episode of this title,
+        // for the language it failed in: the fast path would hand it straight
+        // back otherwise.
+        conn.execute(
+            "DELETE FROM resolved_releases WHERE catalog = ?1 AND catalog_id = ?2 AND name = ?3 AND prefer_dub = ?4",
+            params![catalog.as_str(), catalog_id, name, wanted_dub],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(inserted > 0)
+    }
+
+    pub fn audio_misses(&self, catalog: Catalog, catalog_id: i64, wanted_dub: bool) -> Result<Vec<String>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT name FROM audio_misses WHERE catalog = ?1 AND catalog_id = ?2 AND wanted_dub = ?3")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![catalog.as_str(), catalog_id, wanted_dub], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
     pub fn rejected_releases(&self, catalog: Catalog, catalog_id: i64) -> Result<Vec<String>, String> {
         let conn = self.lock()?;
         let mut stmt = conn
@@ -1473,7 +1508,7 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 11);
+        assert_eq!(v, 12);
     }
 
     /// A database stamped 5, 6 or 7 by a build that numbered the `completed`
@@ -1601,6 +1636,28 @@ mod tests {
         assert_eq!(db.remembered_release(Catalog::Anilist, 20594, 2).unwrap(), None);
         assert_eq!(db.remembered_release(Catalog::Anilist, 20594, 3).unwrap(), None);
         assert!(db.rejected_releases(Catalog::Anilist, 1535).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_audio_miss_is_per_title_and_per_language_and_reports_whether_it_is_new() {
+        let db = Registry::open_in_memory().unwrap();
+        let name = "[Anime Time] Date A Live (Director's Cut) [Dual Audio]";
+        let release = RememberedRelease {
+            name: name.into(),
+            magnet: None,
+            torrent_url: None,
+            assume_batch: true,
+            prefer_dub: true,
+        };
+        db.remember_release(Catalog::Anilist, 15583, 3, &release).unwrap();
+        assert!(db.record_audio_miss(Catalog::Anilist, 15583, name, true).unwrap());
+        assert!(!db.record_audio_miss(Catalog::Anilist, 15583, name, true).unwrap(), "a second report is not new");
+        assert_eq!(db.audio_misses(Catalog::Anilist, 15583, true).unwrap(), vec![name.to_string()]);
+        // A sub viewer is not told this pack is unusable, and another season is another title.
+        assert!(db.audio_misses(Catalog::Anilist, 15583, false).unwrap().is_empty());
+        assert!(db.audio_misses(Catalog::Anilist, 20594, true).unwrap().is_empty());
+        // The fast path no longer replays it for the dub preference.
+        assert_eq!(db.remembered_release(Catalog::Anilist, 15583, 3).unwrap(), None);
     }
 
     #[test]

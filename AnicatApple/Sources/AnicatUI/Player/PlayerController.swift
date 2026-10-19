@@ -798,6 +798,12 @@ public final class PlayerController {
     /// do nothing but change what the *next* episode searches for -- which
     /// reads as a switch that does not work.
     public var onReloadForAudioLanguage: (@MainActor (_ preferDub: Bool) -> Void)?
+    /// Told once per loaded file whether its audio tracks carry the language
+    /// the standing Sub/Dub preference asks for. A file that does not is the
+    /// "Dual Audio" release with no English in it: the app looks for another
+    /// release itself instead of playing the wrong language and waiting for
+    /// the viewer to find the switch.
+    public var onAudioChecked: (@MainActor (_ preferDub: Bool, _ lacks: Bool) -> Void)?
     /// The Info popover's "Block & find another" button. See `AppModel.rejectPlayingRelease`.
     public var onRejectRelease: (@MainActor () -> Void)?
     
@@ -1428,6 +1434,34 @@ public struct PlayerTrack: Identifiable, Sendable, Hashable {
         self.title = title
         self.isSelected = isSelected
         self.isForced = isForced
+    }
+
+    /// Whether a file's audio tracks leave out the language the Sub/Dub
+    /// preference asks for: no English one under Dub, no Japanese one under
+    /// Sub. The one rule `MpvSurface.selectAudioLanguage` already applies
+    /// when it looks for the track to switch to, written here so the check
+    /// after a file loads and the switch agree, and so it needs no mpv.
+    ///
+    /// Silent where it cannot judge: no audio tracks at all, or a single
+    /// track with no language and no title, which is a release that never
+    /// labelled it rather than one that lacks the language.
+    public static func lacksWantedAudio(preferDub: Bool, audio: [PlayerTrack]) -> Bool {
+        guard !audio.isEmpty else { return false }
+        let wanted = preferDub ? ["en", "eng", "english"] : ["ja", "jp", "jpn", "japanese"]
+        let has = audio.contains { track in
+            let lang = (track.lang ?? "").lowercased()
+            let title = (track.title ?? "").lowercased()
+            return wanted.contains(lang)
+                || wanted.contains(where: { title.contains($0) })
+                || (preferDub && title.contains("dub"))
+        }
+        if has { return false }
+        if audio.count == 1 {
+            let lang = (audio[0].lang ?? "").lowercased()
+            let title = (audio[0].title ?? "").trimmingCharacters(in: .whitespaces)
+            if (lang.isEmpty || lang == "und") && title.isEmpty { return false }
+        }
+        return true
     }
 
     /// "English", "English (Signs & Songs)", "Track 3".

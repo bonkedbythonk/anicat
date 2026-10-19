@@ -1941,6 +1941,9 @@ public struct MpvSurface {
                         // Last writer of `aid`/`sid` for this file, after
                         // mpv's own load-time selection has settled.
                         self.applyTrackMemory(memory)
+                        let preferDub = Self.preferDubSetting()
+                        let lacks = PlayerTrack.lacksWantedAudio(preferDub: preferDub, audio: self.trackList().audio)
+                        await MainActor.run { self.controller.onAudioChecked?(preferDub, lacks) }
                         continue
                     }
 

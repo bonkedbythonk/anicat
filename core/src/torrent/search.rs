@@ -139,12 +139,27 @@ pub(crate) fn short_title(title: &str) -> Option<String> {
 /// candidates so a sub-only release never gets tagged "dub" just because
 /// dub was the requested preference.
 pub fn is_dub_release(name_norm: &str) -> bool {
+    // A Director's Cut is a re-edit with no English recording to go with it:
+    // "[Anime Time] Date A Live (Season 01+02+03+04 ...) (Director's Cut) [Dual
+    // Audio]" says in its own description that seasons 1 and 2 are Japanese
+    // only (ffprobe on its episode 3: one track, jpn), while the same uploader's
+    // plain pack has English for all four. The label is the pack's, not the
+    // season's, so a cut is not offered as a dub; `find_candidates` refunds the
+    // penalty when nothing else is, so a cut is still played if it is all there is.
+    if is_directors_cut(name_norm) {
+        return false;
+    }
     name_norm.contains("dual audio")
         || name_norm.contains("english dub")
         || name_norm.contains(" eng dub")
         || name_norm.contains(" dub ")
         || name_norm.ends_with(" dub")
         || name_norm.contains("dubbed")
+}
+
+/// "Director's Cut" in a normalized name: the apostrophe has become a space.
+pub fn is_directors_cut(name_norm: &str) -> bool {
+    name_norm.contains("director s cut") || name_norm.contains("directors cut")
 }
 
 /// How far a dub outranks the same show's subs when a dub was asked for.
@@ -2791,6 +2806,35 @@ mod tests {
             scored(false),
             "the whole difference must be the refundable penalty, so find_candidates can undo it"
         );
+    }
+
+    /// The pair that played Japanese under a dub preference: two Anime Time
+    /// packs of Date A Live, both named "Dual Audio". The Director's Cut one
+    /// says in its description that seasons 1 and 2 are Japanese only (and
+    /// ffprobe on its episode 3 agreed); the plain one is dual for all four.
+    /// The cut raced the plain pack and won on its swarm.
+    #[test]
+    fn a_directors_cut_is_not_a_dub_and_ranks_below_the_plain_dual_audio_pack() {
+        let cut = "[Anime Time] Date A Live (Season 01+02+03+04 + Movie + OVAs) (Director's Cut) [BD] [Dual Audio][1080p][HEVC 10bit x265][AAC][Eng Sub]";
+        let plain = "[Anime Time] Date A Live (Season 01+02+03+04+Movie+OVAs) [BD] [Dual Audio][1080p][HEVC 10bit x265][AAC][Eng Sub]";
+        assert!(is_directors_cut(&normalize(cut)));
+        assert!(!is_directors_cut(&normalize(plain)));
+        assert!(!is_dub_release(&normalize(cut)));
+        assert!(is_dub_release(&normalize(plain)));
+        assert!(is_directors_cut(&normalize("Show Directors Cut 1080p")));
+
+        let alts: Vec<String> = vec![normalize("date a live")];
+        let scored = |name: &str, prefer_dub: bool| {
+            score_release(name, &normalize("date a live"), &alts, &NO_SIBLINGS, crit(3, false, prefer_dub))
+                .expect("both packs name the show")
+                .0
+        };
+        assert!(
+            scored(plain, true) > scored(cut, true) + DUB_BONUS,
+            "a dub preference must put the plain pack clear of the cut"
+        );
+        // Subs viewers are unaffected: neither is penalized for the other.
+        assert_eq!(scored(plain, false), scored(cut, false));
     }
 
     /// The mirror case, and the one that actually reached a viewer: a

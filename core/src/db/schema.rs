@@ -413,6 +413,34 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 12 {
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+            -- A release the player opened and found without the audio language
+            -- asked for: no English track under a dub preference, no Japanese
+            -- one under a sub preference. Per title and per language, never
+            -- global: a pack that is Japanese-only for this season is a fine sub
+            -- for the same viewer, and the next season is another title with
+            -- its own row. A soft exclusion (a resolve prefers every other
+            -- release and falls back to this one when it is all there is), so
+            -- it is not folded into rejected_releases, which is hard.
+            CREATE TABLE IF NOT EXISTS audio_misses (
+                catalog TEXT NOT NULL,
+                catalog_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                wanted_dub INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (catalog, catalog_id, name, wanted_dub)
+            );
+
+            COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 12)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.
@@ -441,7 +469,7 @@ fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> Result<
 mod tests {
     use super::*;
 
-    const LATEST: i64 = 11;
+    const LATEST: i64 = 12;
 
     fn user_version(conn: &Connection) -> i64 {
         conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap()

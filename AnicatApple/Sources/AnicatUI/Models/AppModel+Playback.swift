@@ -162,6 +162,9 @@ extension AppModel {
         playerController.onReloadForAudioLanguage = { [weak self] preferDub in
             self?.reloadCurrentEpisodeForAudioLanguage(preferDub: preferDub)
         }
+        playerController.onAudioChecked = { [weak self] preferDub, lacks in
+            self?.audioWasChecked(preferDub: preferDub, lacks: lacks)
+        }
         playerController.onRejectRelease = { [weak self] in
             self?.rejectPlayingRelease()
         }
@@ -320,29 +323,83 @@ extension AppModel {
         }
     }
 
-    /// Re-fetches the playing episode in the other language.
-    ///
-    /// Pressing Dub during an episode whose release carries only Japanese
-    /// audio could previously do nothing but change what the *next* episode
-    /// searched for -- the switch read as broken. The Sub/Dub row offers this
-    /// when, and only when, `onSelectAudioLanguage` reports that the file has
-    /// no track in the language asked for.
-    ///
-    /// `anicat_sub_dub` is already written by the row itself and
-    /// `resolveAndPlay` reads it, so the search asks for the new language.
-    /// The engine's remembered release and its resolved-stream cache are both
-    /// keyed on `prefer_dub`, so neither hands back the file that was just
-    /// rejected.
+    /// Looks for the playing episode in the language the viewer pressed, from
+    /// where they are. Pressing Sub or Dub on a file that carries the language
+    /// is a track switch and never gets here; this is the other case, a file
+    /// with no such track, which used to end at a note and a button.
     public func reloadCurrentEpisodeForAudioLanguage(preferDub: Bool) {
-        guard currentPlaybackCatalogId != nil, currentPlaybackEpisode != nil else { return }
+        recoverMissingAudio(preferDub: preferDub, userInitiated: true)
+    }
+
+    /// A file just opened. One that carries the standing Sub/Dub language
+    /// ends the search for one; one that does not starts it, once per release.
+    func audioWasChecked(preferDub: Bool, lacks: Bool) {
+        // Films and TV have no sub/dub split, and a download or a local file
+        // has no release to swap for another.
+        guard currentPlaybackCatalog == .anilist,
+              let catalogId = currentPlaybackCatalogId,
+              let episode = currentPlaybackEpisode else { return }
+        let key = AudioRecovery.Key(catalogId: catalogId, episode: episode, preferDub: preferDub)
+        PlayerLog.write("[audio] checked \(catalogId) ep \(episode): wants \(preferDub ? "dub" : "sub"), file \(lacks ? "lacks it" : "has it")")
+        if lacks {
+            recoverMissingAudio(preferDub: preferDub, userInitiated: false)
+        } else {
+            audioRecovery.settle(key)
+        }
+    }
+
+    /// The playing release has no audio track in the language wanted. Tells
+    /// the engine, which remembers it for this title and that language and
+    /// answers whether another release is worth fetching, then swaps the file
+    /// in place from the current position.
+    ///
+    /// `userInitiated` is a press on Sub or Dub: it always gets a search. The
+    /// other caller is a file that just loaded wrong, and the engine declines
+    /// that one when the release never claimed a dub (a show with no dub
+    /// plays its sub release, and reloading it finds the same Japanese) or
+    /// when the same release has already been reported (nothing else exists).
+    func recoverMissingAudio(preferDub: Bool, userInitiated: Bool) {
+        guard let engine, let catalogId = currentPlaybackCatalogId,
+              let episode = currentPlaybackEpisode,
+              currentPlaybackCatalog == .anilist else { return }
+        let key = AudioRecovery.Key(catalogId: catalogId, episode: episode, preferDub: preferDub)
+        let word = preferDub ? "dub" : "sub"
+        PlayerLog.write("[audio] recover \(catalogId) ep \(episode): \(word), \(userInitiated ? "asked for" : "found on load"), attempt \(audioRecovery.count(key) + 1)")
+        guard audioRecovery.begin(key, userInitiated: userInitiated) else {
+            playerController.flashHUD("No \(word) found for this episode", symbol: "exclamationmark.triangle")
+            return
+        }
         activeResolveTask?.cancel()
         activeResolveTask = Task { [weak self] in
             guard let self else { return }
+            let miss: AudioMiss?
+            do {
+                miss = try await engine.reportMissingAudio(
+                    catalog: self.currentPlaybackCatalog,
+                    catalogId: catalogId,
+                    episode: episode,
+                    wantedDub: preferDub,
+                    automatic: !userInitiated
+                )
+            } catch {
+                self.errorMessage = "Could not look for a \(word): \(error.localizedDescription)"
+                return
+            }
+            guard self.currentPlaybackCatalogId == catalogId, self.currentPlaybackEpisode == episode else { return }
+            PlayerLog.write("[audio] engine says \(miss.map { "retry=\($0.retry)" } ?? "nothing on record")")
+            guard let miss, miss.retry else {
+                // Quiet for a file that was never going to have it (a show
+                // with no dub, played as subs). Said for a press, and at the
+                // end of a search that did swap files and still found none.
+                if userInitiated || self.audioRecovery.count(key) > 1 {
+                    self.playerController.flashHUD("No \(word) found for this episode", symbol: "exclamationmark.triangle")
+                }
+                return
+            }
+            self.playerController.flashHUD("Looking for a \(word) release", symbol: "arrow.triangle.2.circlepath")
             await self.swapPlayingFile(chosenName: nil, forceNewFile: true)
-            // `swapPlayingFile` reports its own failures as "Failed to switch
-            // release", which says nothing about what was asked for here.
             if self.errorMessage != nil {
-                self.errorMessage = "No \(preferDub ? "dub" : "sub") found for this episode."
+                self.errorMessage = "No \(word) found for this episode."
             }
         }
     }

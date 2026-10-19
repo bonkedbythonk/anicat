@@ -1819,6 +1819,14 @@ async fn search_nyaa(
                 body = r.text().await.unwrap_or_default();
                 break;
             }
+            // A timeout or a refused connection on a weak link is not a
+            // verdict on the show: the second attempt usually lands once the
+            // first has warmed the route, and the alternative is a play that
+            // searched with Nyaa's half of the pool missing.
+            Err(e) if attempt == 0 && (e.is_timeout() || e.is_connect()) => {
+                log::info!("torrent: nyaa search retrying after: {}", e);
+                continue;
+            }
             Err(e) => {
                 log::warn!("torrent: nyaa search failed: {}", e);
                 return out;

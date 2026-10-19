@@ -2667,8 +2667,13 @@ impl TorrentManager {
         }
         // Prefer the .torrent file (instant metadata) over the magnet.
         let torrent_bytes: Option<bytes::Bytes> = if let Some(ref url) = cand.torrent_url {
+            // Bounded like every index request: this one had only the 5s
+            // connect timeout, so a host that answered and then trickled the
+            // body held its candidate until the 120s resolve ceiling, one
+            // candidate of the race at a time on a weak link.
             let b = client
                 .get(url)
+                .timeout(search::INDEX_TIMEOUT)
                 .send()
                 .await
                 .and_then(|r| r.error_for_status())

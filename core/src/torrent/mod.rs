@@ -2264,6 +2264,30 @@ impl TorrentManager {
             .stream(file_id)
             .map_err(|e| format!("prebuffer stream open failed: {}", e))?;
         let file_len = stream.len();
+        // Ask for the file's last bytes now, alongside the first. A Matroska
+        // file keeps its index (cues, tags) at the end and mpv reads it right
+        // after the header, one request after the first: sequential, so a
+        // slow swarm paid for two pieces back to back. Measured on a phone on
+        // a slow network (0.3-0.6 MiB/s, 4 MiB pieces): the head piece took
+        // 57s, then the 23 KB at the end timed out at 60s and arrived 22s
+        // after the retry, 3m20s from open to the first picture. Reading the
+        // tail here makes librqbit fetch both pieces at once, so the wait is
+        // the slower of the two instead of their sum. Detached and bounded:
+        // nothing waits on it, and the stream is released when it finishes.
+        const TAIL_WARM_BYTES: u64 = 128 * 1024;
+        if file_len > 8 * 1024 * 1024 {
+            let tail_handle = handle.clone();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncSeekExt};
+                let Ok(mut tail) = tail_handle.stream(file_id) else { return };
+                let start = file_len.saturating_sub(TAIL_WARM_BYTES);
+                if tail.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+                    return;
+                }
+                let mut buf = vec![0u8; (file_len - start) as usize];
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(240), tail.read_exact(&mut buf)).await;
+            });
+        }
         // Resume opens mpv at `--start=<seconds>`, not byte 0 — its first real
         // read lands wherever that maps to in the file. Probing byte 0 in that
         // case proves nothing about the region mpv is about to block on, so

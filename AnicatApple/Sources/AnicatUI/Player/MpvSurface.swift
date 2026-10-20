@@ -1390,7 +1390,6 @@ public struct MpvSurface {
             mpv_set_property_string(mpv, "alang", Coordinator.audioLanguages(preferDub: preferDub))
             guard let countString = stringProperty("track-list/count"),
                   let count = Int(countString) else { return false }
-            let wanted = preferDub ? ["en", "eng", "english"] : ["ja", "jp", "jpn", "japanese"]
             // Says what the release actually carries: "dub doesn't work" is
             // two different bugs depending on whether the file has a second
             // audio track at all, and nothing else in the app prints it.
@@ -1400,14 +1399,15 @@ public struct MpvSurface {
             print("[libmpv] audio tracks: \(audioTracks.joined(separator: ", "))")
             for index in 0..<count {
                 guard stringProperty("track-list/\(index)/type") == "audio" else { continue }
-                let lang = (stringProperty("track-list/\(index)/lang") ?? "").lowercased()
-                let title = (stringProperty("track-list/\(index)/title") ?? "").lowercased()
-                let matches = wanted.contains(lang)
-                    || wanted.contains(where: { title.contains($0) })
-                    // A dub-only release often labels neither, so the
-                    // English word in the title is the only signal left.
-                    || (preferDub && title.contains("dub"))
-                guard matches, let id = stringProperty("track-list/\(index)/id") else { continue }
+                // The same test the menu and the after-load check use, so the
+                // track this picks is the one they count. A dub-only release
+                // often labels neither language, so "dub" in the title is the
+                // only signal left.
+                let track = PlayerTrack(
+                    id: "", lang: stringProperty("track-list/\(index)/lang"),
+                    title: stringProperty("track-list/\(index)/title"), isSelected: false, isForced: false)
+                guard preferDub ? track.isEnglishAudio : track.isJapaneseAudio,
+                      let id = stringProperty("track-list/\(index)/id") else { continue }
                 mpv_set_property_string(mpv, "aid", id)
                 return true
             }

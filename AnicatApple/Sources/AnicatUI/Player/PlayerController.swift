@@ -1461,13 +1461,8 @@ public struct PlayerTrack: Identifiable, Sendable, Hashable {
     /// labelled it rather than one that lacks the language.
     public static func lacksWantedAudio(preferDub: Bool, audio: [PlayerTrack]) -> Bool {
         guard !audio.isEmpty else { return false }
-        let wanted = preferDub ? ["en", "eng", "english"] : ["ja", "jp", "jpn", "japanese"]
         let has = audio.contains { track in
-            let lang = (track.lang ?? "").lowercased()
-            let title = (track.title ?? "").lowercased()
-            return wanted.contains(lang)
-                || wanted.contains(where: { title.contains($0) })
-                || (preferDub && title.contains("dub"))
+            preferDub ? track.isEnglishAudio : track.isJapaneseAudio
         }
         if has { return false }
         if audio.count == 1 {
@@ -1476,6 +1471,37 @@ public struct PlayerTrack: Identifiable, Sendable, Hashable {
             if (lang.isEmpty || lang == "und") && title.isEmpty { return false }
         }
         return true
+    }
+
+    /// The test `lacksWantedAudio` and `MpvSurface.selectAudioLanguage` share:
+    /// the language tag or the title names it, and under Dub a title that
+    /// says "dub" counts as English.
+    var isEnglishAudio: Bool { matches(["en", "eng", "english"], dubTitle: true) }
+    var isJapaneseAudio: Bool { matches(["ja", "jp", "jpn", "japanese"], dubTitle: false) }
+
+    /// Whole words of the title, not substrings: "en" sits inside "French"
+    /// and "Commentary", and a substring match took a French track for the
+    /// English dub.
+    private func matches(_ wanted: [String], dubTitle: Bool) -> Bool {
+        let lang = (lang ?? "").lowercased()
+        let title = (title ?? "").lowercased()
+        let words = title.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        return wanted.contains(lang)
+            || words.contains(where: wanted.contains)
+            || (dubTitle && title.contains("dub"))
+    }
+
+    /// Whether the player menu needs its own Audio list beside the Sub / Dub
+    /// row. A file with one Japanese and one English track is fully handled
+    /// by Sub / Dub, so a second control for the same two choices only
+    /// disagreed with it after a manual pick. The list stays when there is
+    /// something Sub / Dub cannot name: two tracks in one language (a
+    /// commentary, a 5.1 mix, two dubs) or a track that is neither.
+    public static func needsAudioPicker(_ audio: [PlayerTrack]) -> Bool {
+        guard audio.count > 1 else { return false }
+        let english = audio.filter(\.isEnglishAudio).count
+        let japanese = audio.filter(\.isJapaneseAudio).count
+        return english > 1 || japanese > 1 || english + japanese < audio.count
     }
 
     /// "English", "English (Signs & Songs)", "Track 3".

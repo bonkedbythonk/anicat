@@ -1518,10 +1518,16 @@ public struct PlayerView: View {
             // full subtitles, not the signs track"), and the automatic
             // result of the global toggle is not, so only the pick made here
             // by hand is written down.
-            trackPicker(kind: .audio, label: "Audio", rows: audioTracks) { track in
-                controller.onSelectAudioTrack?(track.id)
-                controller.rememberAudioTrack(track)
-                refreshTracks()
+            // Only when the file has a choice Sub / Dub below cannot name:
+            // for plain Japanese plus English it was a second control for
+            // the same two answers, and a hand pick here left the Sub / Dub
+            // highlight pointing at the other language.
+            if PlayerTrack.needsAudioPicker(audioTracks) {
+                trackPicker(kind: .audio, label: "Audio", rows: audioTracks) { track in
+                    controller.onSelectAudioTrack?(track.id)
+                    controller.rememberAudioTrack(track)
+                    refreshTracks()
+                }
             }
             // An Off row in the list rather than a toggle beside it:
             // turning subtitles off is one of the values mpv takes for
@@ -1582,7 +1588,9 @@ public struct PlayerView: View {
                             // not tinted pill chips.
                             HStack(spacing: 6) {
                                 if option == "Dubbed" { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
-                                Text("Dub").hidden().overlay {
+                                // Sized in the selected weight: at regular weight the
+                                // bold "Dub" did not fit and showed as "D...".
+                                Text("Dub").fontWeight(.semibold).hidden().overlay {
                                     Text(option == "Dubbed" ? "Dub" : "Sub")
                                         .fontWeight(storedSubDub == option ? .semibold : .regular)
                                         .foregroundColor(storedSubDub == option ? SumiTheme.foreground : SumiTheme.muted)

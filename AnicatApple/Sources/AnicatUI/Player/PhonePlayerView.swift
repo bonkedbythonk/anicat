@@ -461,7 +461,11 @@ struct PhonePlayerView: View {
                 }
                 .pickerStyle(.menu)
             }
-            if !audioTracks.isEmpty {
+            // Anime already has Sub / Dub above, so the track list appears
+            // only when the file has a choice that row cannot name; films
+            // and TV have no such row, and keep the list whenever there are tracks.
+            if !audioTracks.isEmpty,
+               AppModel.shared?.currentPlaybackCatalog != .anilist || PlayerTrack.needsAudioPicker(audioTracks) {
                 Picker("Audio", selection: audioSelection) {
                     ForEach(audioTracks) { track in
                         Text(label(for: track)).tag(track.id)

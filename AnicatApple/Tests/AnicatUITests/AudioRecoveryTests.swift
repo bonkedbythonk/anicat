@@ -23,6 +23,32 @@ struct AudioRecoveryTests {
         #expect(!PlayerTrack.lacksWantedAudio(preferDub: false, audio: audio))
     }
 
+    // MARK: When the menu needs its own Audio list
+
+    @Test("plain Japanese plus English, and single-track files, leave it to Sub / Dub")
+    func plainPairNeedsNoPicker() {
+        #expect(!PlayerTrack.needsAudioPicker([]))
+        #expect(!PlayerTrack.needsAudioPicker([track("1", "jpn", "Japanese")]))
+        #expect(!PlayerTrack.needsAudioPicker([track("1", "jpn"), track("2", "eng")]))
+        #expect(!PlayerTrack.needsAudioPicker([track("1", "ja", "Japanese"), track("2", "en", "English Dub")]))
+    }
+
+    @Test("two tracks in one language, or a third language, keep the list")
+    func realChoiceKeepsPicker() {
+        #expect(PlayerTrack.needsAudioPicker([track("1", "jpn"), track("2", "eng"), track("3", "eng", "Dub 5.1")]))
+        #expect(PlayerTrack.needsAudioPicker([track("1", "jpn", "Japanese"), track("2", "jpn", "Japanese")]))
+        #expect(PlayerTrack.needsAudioPicker([track("1", "jpn"), track("2", "fre", "French")]))
+        #expect(PlayerTrack.needsAudioPicker([track("1", nil), track("2", nil)]))
+    }
+
+    @Test("a title is read by whole words: French and Commentary are not English")
+    func titlesAreMatchedByWord() {
+        #expect(PlayerTrack.lacksWantedAudio(preferDub: true, audio: [track("1", "jpn"), track("2", nil, "French")]))
+        #expect(PlayerTrack.lacksWantedAudio(preferDub: true, audio: [track("1", "jpn"), track("2", nil, "Commentary")]))
+        #expect(!PlayerTrack.lacksWantedAudio(preferDub: true, audio: [track("1", "jpn"), track("2", nil, "English 5.1")]))
+        #expect(!PlayerTrack.lacksWantedAudio(preferDub: true, audio: [track("1", "jpn"), track("2", nil, "Funimation Dub")]))
+    }
+
     @Test("an English-only file lacks the Japanese a sub viewer asked for")
     func englishOnlyLacksSub() {
         let audio = [track("1", "eng", "English")]

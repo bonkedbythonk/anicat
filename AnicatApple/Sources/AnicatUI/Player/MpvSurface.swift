@@ -299,6 +299,7 @@ final class MpvEventCatcherView: NSView {
     /// (the same trade-off YouTube's own player makes) rather than making
     /// every single click wait ~300ms to find out whether it's a double.
     override func mouseDown(with event: NSEvent) {
+        if coordinator?.controller.isDismissingMenu == true { return }
         coordinator?.controller.togglePlayPause()
         if event.clickCount >= 2 {
             if let window = AppWindow.main ?? NSApp.keyWindow {

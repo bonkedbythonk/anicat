@@ -809,7 +809,21 @@ public final class PlayerController {
     
     // Autohide controls timer & state
     public var areControlsVisible: Bool = true
-    public var isMenuOpen: Bool = false
+    public var isMenuOpen: Bool = false {
+        didSet { if oldValue && !isMenuOpen { menuClosedAt = .now } }
+    }
+    @ObservationIgnored private var menuClosedAt: ContinuousClock.Instant?
+
+    /// True for a click that is only closing a menu. A popover dismisses on
+    /// the mouse-down outside it and that same click still reaches the video,
+    /// where it toggled pause -- the first click back on the picture paused
+    /// the episode. Which side of the SwiftUI state flip the click lands on
+    /// varies, so both "still open" and "closed an instant ago" count.
+    var isDismissingMenu: Bool {
+        if isMenuOpen { return true }
+        guard let menuClosedAt else { return false }
+        return ContinuousClock.now - menuClosedAt < .milliseconds(350)
+    }
     /// Whether the pointer is resting on the top or the bottom bar. Tracked
     /// as two flags rather than one: SwiftUI can deliver the new bar's
     /// `onHover(true)` before the old bar's `onHover(false)`, and a single

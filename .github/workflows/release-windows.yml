@@ -100,11 +100,24 @@ jobs:
           # publish-release.sh pushes the tag before it runs `gh release
           # create`, and on a manual release someone may create it by hand
           # later still, so the release can be missing when this step starts.
-          # Uploading to a missing release fails outright. `gh release view`
-          # also finds a draft by its tag, which is what the Mac side creates
-          # by default. 20 minutes, then fail loudly rather than drop the zip.
+          # Uploading to a missing release fails outright. 20 minutes, then
+          # fail loudly rather than drop the zip.
+          #
+          # The release is found by listing and matched on its tag OR its
+          # title, then addressed by whatever tag_name it reports. On 1.1.0
+          # the release came out bound to "untagged-<hash>" instead of
+          # v1.1.0, and `gh release view v1.1.0` answered "not found" for
+          # the whole 20 minutes while the release sat there with every Mac
+          # asset on it; the job failed and the zip had to be attached by
+          # hand. The title is the one thing publish-release.sh always sets
+          # to "Anicat <version>".
+          title="Anicat ${tag#v}"
           deadline=$(( $(date +%s) + 20 * 60 ))
-          until gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; do
+          rel=""
+          while :; do
+            rel="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+              --jq ".[] | select(.tag_name == \"$tag\" or .name == \"$title\") | .tag_name" | head -n 1)" || true
+            [ -n "$rel" ] && break
             if [ "$(date +%s)" -ge "$deadline" ]; then
               echo "::error::No release for $tag after 20 minutes. Create it, then re-run this job, or attach the anicat-windows-x64 artifact from this run by hand."
               exit 1
@@ -112,10 +125,11 @@ jobs:
             echo "Release $tag does not exist yet; waiting 30s"
             sleep 30
           done
+          [ "$rel" = "$tag" ] || echo "::warning::The release for $tag is bound to the tag $rel; fix its tag_name before it is published."
           # --clobber: a re-run replaces the asset instead of failing on the
           # name already being taken.
-          gh release upload "$tag" "$zip" --clobber --repo "$GITHUB_REPOSITORY"
-          echo "Uploaded $(basename "$zip") to $tag"
+          gh release upload "$rel" "$zip" --clobber --repo "$GITHUB_REPOSITORY"
+          echo "Uploaded $(basename "$zip") to $rel"
           # install_windows.ps1 checks the zip against the release's
           # SHA256SUMS, which the Mac side wrote before this zip existed.
           # Download, drop any earlier line for this file (a re-run), append,
@@ -128,8 +142,8 @@ jobs:
           # /dev/null and fell through to "no SHA256SUMS". A failed download
           # of a file the release does have now fails the job instead.
           sums="$(mktemp)"
-          if gh release view "$tag" --json assets --jq '.assets[].name' --repo "$GITHUB_REPOSITORY" | grep -qx SHA256SUMS; then
-            gh release download "$tag" --pattern SHA256SUMS --output "$sums" --clobber --repo "$GITHUB_REPOSITORY"
+          if gh release view "$rel" --json assets --jq '.assets[].name' --repo "$GITHUB_REPOSITORY" | grep -qx SHA256SUMS; then
+            gh release download "$rel" --pattern SHA256SUMS --output "$sums" --clobber --repo "$GITHUB_REPOSITORY"
           else
             : > "$sums"
           fi
@@ -140,5 +154,5 @@ jobs:
           # right before the name, so they found no entry for the zip.
           printf '%s  %s\n' "$(sha256sum "$zip" | cut -d' ' -f1)" "$name" >> "$sums.new"
           mv "$sums.new" SHA256SUMS
-          gh release upload "$tag" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
-          echo "Updated SHA256SUMS on $tag"
+          gh release upload "$rel" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          echo "Updated SHA256SUMS on $rel"

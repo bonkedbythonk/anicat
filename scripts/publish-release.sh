@@ -134,7 +134,19 @@ fi
 
 git -C "$ROOT" tag -a "$TAG" -m "Anicat $VERSION"
 git -C "$ROOT" push origin "$TAG"
-gh release create "$TAG" "${ASSETS[@]}" --title "Anicat $VERSION" --notes-file "$NOTES" $DRAFT
+# Wait until the API can see the pushed tag, and make `release create` refuse
+# a tag it cannot see. 1.1.0's draft came out bound to "untagged-<hash>"
+# instead of v1.1.0: publishing it made GitHub cut a stray tag of that name,
+# the Windows workflow's lookup by tag never matched, and install_windows.ps1
+# derives the zip name from the tag, so it would have asked for the wrong file.
+# Created seconds after the push, the draft most likely beat the API to the
+# new tag [GUESS: nobody saw the order]; without --verify-tag gh then makes
+# the release anyway.
+for _ in $(seq 12); do
+    (cd "$ROOT" && gh api "repos/{owner}/{repo}/git/ref/tags/$TAG") >/dev/null 2>&1 && break
+    sleep 5
+done
+gh release create "$TAG" "${ASSETS[@]}" --verify-tag --title "Anicat $VERSION" --notes-file "$NOTES" $DRAFT
 rm -f "$NOTES"
 echo "publish-release: $TAG ${DRAFT:+(draft) }created"
 

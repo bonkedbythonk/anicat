@@ -470,6 +470,11 @@ public final class AppModel {
     /// while this is set means the timeout withdrew it.
     @ObservationIgnored var lastReadingPresence: DiscordPresence?
     @ObservationIgnored var readingIdleTask: Task<Void, Never>?
+    /// Withdraws a paused episode's presence ten minutes after the pause.
+    /// `playbackPresenceWithdrawn` stops the per-tick publish from putting
+    /// it straight back while the pause lasts.
+    @ObservationIgnored var pausePresenceTask: Task<Void, Never>?
+    @ObservationIgnored var playbackPresenceWithdrawn = false
     // Guards the AniList auto-advance below to one attempt per episode
     // rather than once a second for the rest of the episode once past 85%.
     var hasAdvancedAniListForCurrentEpisode = false

@@ -785,6 +785,27 @@ extension AppModel {
         guard let engine, activeStreamURL != nil,
               let catalogId = currentPlaybackCatalogId,
               let episode = currentPlaybackEpisode else { return }
+        // A file still opening reports not playing; shown as paused, it
+        // was the first thing Discord drew for every episode.
+        let paused = !playerController.isPlaying && !playerController.awaitingNewFile
+        if paused {
+            if playbackPresenceWithdrawn { return }
+            if pausePresenceTask == nil {
+                // Discord has no paused state and counts up from when the
+                // activity was set, so a pause left open would keep a
+                // climbing clock on the profile for as long as the app ran.
+                print("[discord] paused: presence withdrawn in 600s")
+                pausePresenceTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(600))
+                    guard !Task.isCancelled, let self else { return }
+                    print("[discord] pause timer fired: presence withdrawn")
+                    playbackPresenceWithdrawn = true
+                    engine.discordClearPresence(source: .playback)
+                }
+            }
+        } else {
+            resetPausePresenceTimer()
+        }
         let catalog = currentPlaybackCatalog
         let title = currentPlaybackTitle ?? playerController.title
         let episodeName = Self.presenceEpisodeName(
@@ -833,10 +854,14 @@ extension AppModel {
             linkUrl: link?.url,
             positionSecs: Int64(playerController.currentTime),
             durationSecs: Int64(playerController.duration),
-            // A file still opening reports not playing; shown as paused, it
-            // was the first thing Discord drew for every episode.
-            paused: !playerController.isPlaying && !playerController.awaitingNewFile
+            paused: paused
         ))
+    }
+
+    func resetPausePresenceTimer() {
+        pausePresenceTask?.cancel()
+        pausePresenceTask = nil
+        playbackPresenceWithdrawn = false
     }
 
     /// The one place that follows "is an episode playing right now": every
@@ -1364,6 +1389,7 @@ extension AppModel {
         // Inline and ahead of the queue: it returns at once, and a play
         // started right after this close must not have its presence wiped by
         // a clear that ran later.
+        resetPausePresenceTimer()
         engine?.discordClearPresence(source: .playback)
         // `recordProgress` hits SQLite, which can stall. Closing the player is
         // the one action a viewer expects to be instant, so it stays off the

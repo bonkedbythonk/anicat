@@ -135,13 +135,20 @@
             # next steps strip the Mark of the Web from every file in it.
             $sumsUrl = ($downloadUrl -replace '/[^/]+$', '/SHA256SUMS')
             $sums = $null
-            try { $sums = (Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing).Content } catch { }
+            # GitHub serves release assets as application/octet-stream, so
+            # Invoke-WebRequest's .Content is a byte[] here, not text. -split
+            # on it joins the bytes into "98 52 ..." and no line ever
+            # matches: every release with a SHA256SUMS was refused with "has
+            # no entry for". DownloadString decodes the body whatever the
+            # content type.
+            $web = New-Object Net.WebClient
+            try { $sums = $web.DownloadString($sumsUrl) } catch { }
             # A release from before the checksums (1.0.1) has none on GitHub;
             # the mirror holds sums computed from its assets. Taken only when
             # it names this exact file.
             if (-not $sums) {
                 try {
-                    $mirrorSums = (Invoke-WebRequest -Uri "$Mirror/SHA256SUMS" -UseBasicParsing).Content
+                    $mirrorSums = $web.DownloadString("$Mirror/SHA256SUMS")
                     $name = $downloadUrl.Substring($downloadUrl.LastIndexOf('/') + 1)
                     if ($mirrorSums -match ('\s' + [regex]::Escape($name) + '(\r?\n|$)')) { $sums = $mirrorSums }
                 } catch { }

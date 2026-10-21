@@ -268,7 +268,7 @@ extension AppModel {
     /// under different terms and hand mpv the new URL. The player view stays
     /// mounted throughout (`activeStreamURL` never goes nil), so this is a
     /// file swap, not a close and reopen.
-    private func swapPlayingFile(chosenName: String?, forceNewFile: Bool) async {
+    func swapPlayingFile(chosenName: String?, forceNewFile: Bool) async {
         guard let engine, let catalogId = currentPlaybackCatalogId,
               let episode = currentPlaybackEpisode else { return }
         let previousURL = activeStreamURL
@@ -1392,6 +1392,7 @@ extension AppModel {
         cancelOpeningWatchdog()
         stalledReleaseNames = []
         openingSwitchCount = 0
+        openingFreshRetried = false
         // Inline and ahead of the queue: it returns at once, and a play
         // started right after this close must not have its presence wiped by
         // a clear that ran later.
@@ -1557,6 +1558,7 @@ extension AppModel {
         if currentPlaybackCatalogId != catalogId || currentPlaybackEpisode != episode {
             stalledReleaseNames = []
             openingSwitchCount = 0
+            openingFreshRetried = false
         }
 
         let effectiveTitle = title ?? self.selectedMediaDetails?.title

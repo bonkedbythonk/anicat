@@ -455,6 +455,10 @@ public final class AppModel {
     /// miss, so a nameless stall used to add nothing to the set and buy a
     /// switch the cap was supposed to have spent. Cleared with the episode.
     var openingSwitchCount = 0
+    /// Whether the watchdog has already re-resolved the stalled release itself
+    /// for the episode playing, once, when no other release was left. Cleared
+    /// with the episode.
+    var openingFreshRetried = false
     /// From a cinema page opening until its deferred extras fetch has
     /// answered either way. `cinemaExtras == nil` alone cannot tell "not
     /// yet" from "failed", and a series page waiting on it drew a spinner in

@@ -405,6 +405,8 @@ pub struct TorrentManager {
     /// Torrent ids with a `spawn_stall_logger` task currently running —
     /// dedupes against the burst of range requests mpv fires per seek.
     stall_logging: std::sync::Mutex<std::collections::HashSet<usize>>,
+    /// Written by the stall logger, read by `swarm_is_dead`.
+    swarm_health: std::sync::Mutex<HashMap<usize, SwarmHealth>>,
     /// SeaDex's parsed release list per AniList id — see
     /// `seadex::find_candidates`'s doc comment for why this is cached at all.
     seadex_cache: tokio::sync::Mutex<HashMap<i64, Vec<seadex::SeadexRelease>>>,
@@ -501,6 +503,58 @@ pub(crate) fn downloads_root() -> PathBuf {
     base.unwrap_or_else(std::env::temp_dir).join("Anicat")
 }
 
+/// No byte for this long, with the swarm reduced to a few live peers among
+/// many dead ones, is a swarm that will not recover on its own. Shorter than
+/// the player's 20s opening watchdog so the record already says "dead" when
+/// the watchdog asks for the same release again.
+const DEAD_SWARM_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+/// At most this many live peers for a swarm to count as dead. A buffered
+/// stream also receives no bytes (the lookahead cap) but keeps its 15-25
+/// peers, which is what tells the two apart.
+const DEAD_SWARM_MAX_LIVE: u32 = 3;
+/// And at least this many dead peers: a small healthy swarm has few peers of
+/// any kind. The failing torrent sat at dead=117..149 of seen=152.
+const DEAD_SWARM_MIN_DEAD: u32 = 20;
+
+/// What the 5s stall logger last saw of a torrent, kept so a *reuse* can tell
+/// a dead swarm from a live one. Reading the torrent at reuse time cannot:
+/// closing the player pauses it, and a paused torrent reports no peers at all.
+struct SwarmHealth {
+    progress_bytes: u64,
+    last_progress: std::time::Instant,
+    peers_live: u32,
+    peers_dead: u32,
+    finished: bool,
+}
+
+impl SwarmHealth {
+    fn new(now: std::time::Instant) -> Self {
+        Self { progress_bytes: 0, last_progress: now, peers_live: u32::MAX, peers_dead: 0, finished: false }
+    }
+
+    /// `peers` is `None` while the torrent is not live (paused, initializing):
+    /// the last live reading stands, since that is the evidence a later reuse
+    /// has to go on.
+    fn observe(&mut self, now: std::time::Instant, progress_bytes: u64, peers: Option<(u32, u32)>, finished: bool) {
+        if progress_bytes != self.progress_bytes {
+            self.progress_bytes = progress_bytes;
+            self.last_progress = now;
+        }
+        self.finished = finished;
+        if let Some((live, dead)) = peers {
+            self.peers_live = live;
+            self.peers_dead = dead;
+        }
+    }
+
+    fn is_dead(&self, now: std::time::Instant) -> bool {
+        !self.finished
+            && now.saturating_duration_since(self.last_progress) >= DEAD_SWARM_WINDOW
+            && self.peers_live <= DEAD_SWARM_MAX_LIVE
+            && self.peers_dead >= DEAD_SWARM_MIN_DEAD
+    }
+}
+
 /// The torrents `pause_all` may pause: all of them but those a download is
 /// still fetching. A pure function so the rule is tested without a session.
 fn pausable_torrents(all: &[usize], downloading: &HashSet<usize>) -> HashSet<usize> {
@@ -593,6 +647,7 @@ impl TorrentManager {
             resolved: tokio::sync::Mutex::new(HashMap::new()),
             winners: tokio::sync::Mutex::new(HashMap::new()),
             stall_logging: std::sync::Mutex::new(std::collections::HashSet::new()),
+            swarm_health: std::sync::Mutex::new(HashMap::new()),
             seadex_cache: tokio::sync::Mutex::new(HashMap::new()),
             release_aids: std::sync::Mutex::new(HashMap::new()),
             candidate_cache: tokio::sync::Mutex::new(HashMap::new()),
@@ -1204,10 +1259,29 @@ impl TorrentManager {
                 .filter(|r| r.prefer_dub == prefer_dub)
                 .copied()
         };
+        // The release behind a dropped dead torrent, so it is re-added by
+        // name below even when the host passed nothing remembered and the
+        // indexers cannot be reached (the search failed in the log that
+        // showed this).
+        let mut revived: Option<RememberedRelease> = None;
         // An evicted file goes through the full path, where `try_candidate`
         // re-adds its torrent.
         if let Some(r) = reusable.filter(|r| !self.is_evicted(r.torrent_id, r.file_id)) {
-            if let Some(handle) = session.get(r.torrent_id.into()) {
+            let dead = session.get(r.torrent_id.into()).is_some() && self.swarm_is_dead(r.torrent_id);
+            if dead {
+                // Handing this back froze playback until the opening watchdog
+                // gave up: the torrent had stopped receiving bytes with 145 of
+                // 152 peers dead, and a fresh add of the same release then
+                // ran at 47 MiB/s. Falls through to the remembered release or
+                // a search, either of which adds it as a new torrent.
+                log::warn!(
+                    "[resolve] torrent {} has a dead swarm, dropping it instead of reusing for media={} ep={}",
+                    r.torrent_id, media, episode
+                );
+                self.drop_dead_swarm(&session, r.torrent_id).await;
+                self.resolved.lock().await.remove(&(media, episode));
+                revived = self.winners.lock().await.get(&(media, episode)).cloned();
+            } else if let Some(handle) = session.get(r.torrent_id.into()) {
                 let _ = session.unpause(&handle).await;
                 // Being in the session is not the same as still being
                 // selected: another episode of the same pack resolving in the
@@ -1276,6 +1350,7 @@ impl TorrentManager {
         // it on every Dub play without a search. Dropped here so those rows
         // heal on their next play instead of needing a migration.
         let remembered = remembered
+            .or(revived)
             .filter(|rem| !prefer_dub || search::is_dub_release(&search::normalize(&rem.name)));
         let remembered = remembered
             .filter(|rem| !rejected.contains(&rem.name))
@@ -1781,6 +1856,29 @@ impl TorrentManager {
         }
     }
 
+    /// Whether the stall logger last saw this torrent starved of bytes with
+    /// almost no live peers left. False for a torrent it has not sampled.
+    fn swarm_is_dead(&self, torrent_id: usize) -> bool {
+        self.swarm_health
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&torrent_id)
+            .is_some_and(|h| h.is_dead(std::time::Instant::now()))
+    }
+
+    /// Removes a dead torrent from the session so the next add starts a new
+    /// swarm: fresh tracker announces and DHT lookups instead of a peer list
+    /// that is 95% dead. Files stay on disk, so what was fetched is kept and
+    /// re-checked rather than downloaded again.
+    async fn drop_dead_swarm(&self, session: &Session, torrent_id: usize) {
+        let _ = session.delete(torrent_id.into(), false).await;
+        self.selected_files.lock().await.remove(&torrent_id);
+        self.swarm_health
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&torrent_id);
+    }
+
     /// Samples peer counts and download speed every 5s into the app log for
     /// as long as the torrent is downloading, so "why isn't this buffering"
     /// can be answered from Anicat.log after the fact instead of needing
@@ -1809,6 +1907,17 @@ impl TorrentManager {
                 let stats = handle.stats();
                 let finished = stats.finished;
                 let peers = stats.live.as_ref().map(|l| &l.snapshot.peer_stats);
+                mgr.swarm_health
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry(torrent_id)
+                    .or_insert_with(|| SwarmHealth::new(std::time::Instant::now()))
+                    .observe(
+                        std::time::Instant::now(),
+                        stats.progress_bytes,
+                        peers.map(|p| (p.live as u32, p.dead as u32)),
+                        finished,
+                    );
                 log::info!(
                     "torrent: stall-check id {} — {} [peers live={} connecting={} seen={} dead={}]",
                     torrent_id,
@@ -1823,6 +1932,12 @@ impl TorrentManager {
                 }
             }
             mgr.stall_logging
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&torrent_id);
+            // Ids are handed out again, and a stale "dead" would condemn an
+            // unrelated torrent that inherits this one.
+            mgr.swarm_health
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .remove(&torrent_id);
@@ -2661,10 +2776,33 @@ impl TorrentManager {
             only_files: pre_selected_file_id.map(|id| vec![id]),
             ..Default::default()
         };
-        let resp = session
+        let mut resp = session
             .add_torrent(add, Some(opts))
             .await
             .map_err(|e| format!("add_torrent failed: {}", e))?;
+        // The session already has this release, but its swarm has gone dead
+        // (see `swarm_is_dead`): adding it again would hand back the same
+        // stalled torrent, which is how the only candidate left stayed
+        // unplayable until the watchdog gave up. Drop it and add it anew.
+        if let AddTorrentResponse::AlreadyManaged(id, _) = &resp {
+            let id = *id;
+            if self.swarm_is_dead(id) {
+                log::warn!("[resolve] torrent {} '{}' has a dead swarm, adding it again", id, cand.name);
+                self.drop_dead_swarm(session, id).await;
+                // The pin names a file in a torrent that no longer exists.
+                if self.pinned_file_in(id).is_some() {
+                    self.clear_playing();
+                }
+                resp = session
+                    .add_torrent(make_add(&torrent_bytes)?, Some(AddTorrentOptions {
+                        overwrite: true,
+                        only_files: pre_selected_file_id.map(|id| vec![id]),
+                        ..Default::default()
+                    }))
+                    .await
+                    .map_err(|e| format!("add_torrent failed: {}", e))?;
+            }
+        }
         let (handle, already_managed) = match resp {
             AddTorrentResponse::Added(_, h) => (h, false),
             AddTorrentResponse::AlreadyManaged(_, h) => (h, true),
@@ -3372,6 +3510,75 @@ mod tests {
     /// no lookup is needed. A Gun Gale Online pack for Sword Art Online II is
     /// refused; a combined pack carrying the first season's id is not; a
     /// franchise that could not be established lets everything through.
+    /// Torrent 6 of the 2026-10-20 log, sampled every 5s from its own
+    /// stall-check lines: (progress MiB, live, dead). Bytes stopped at 20:56:14
+    /// and the peers drained; it is dead by 20:56:34, and stays dead through
+    /// the pause that follows, which is when the reopen reused it.
+    #[test]
+    fn a_swarm_that_stops_receiving_and_drains_is_dead() {
+        let t0 = std::time::Instant::now();
+        let at = |s: u64| t0 + std::time::Duration::from_secs(s);
+        let mut h = SwarmHealth::new(t0);
+        let samples: [(u64, u64, u32, u32); 9] = [
+            (0, 20, 16, 90),   // 20:56:09
+            (5, 24, 11, 117),  // 20:56:14 last byte
+            (10, 24, 6, 143),
+            (15, 24, 3, 146),
+            (20, 24, 3, 145),  // 20:56:29, 15s without a byte
+            (25, 24, 3, 146),
+            (30, 24, 1, 149),
+            (35, 24, 1, 141),
+            (40, 24, 0, 136),
+        ];
+        let mut dead_at = None;
+        for (t, mib, live, dead) in samples {
+            h.observe(at(t), mib << 20, Some((live, dead)), false);
+            if dead_at.is_none() && h.is_dead(at(t)) {
+                dead_at = Some(t);
+            }
+        }
+        assert_eq!(dead_at, Some(20));
+        // Paused afterwards: no peers reported, the last reading stands.
+        h.observe(at(45), 24 << 20, None, false);
+        assert!(h.is_dead(at(46)));
+    }
+
+    /// The same silence from a healthy stream whose buffer is full must not
+    /// condemn it: it keeps its peers.
+    #[test]
+    fn a_buffered_stream_with_peers_is_not_dead() {
+        let t0 = std::time::Instant::now();
+        let mut h = SwarmHealth::new(t0);
+        h.observe(t0, 100 << 20, Some((22, 110)), false);
+        h.observe(t0 + std::time::Duration::from_secs(120), 100 << 20, Some((22, 110)), false);
+        assert!(!h.is_dead(t0 + std::time::Duration::from_secs(120)));
+    }
+
+    /// A small swarm that is simply idle, and a finished torrent, are alive.
+    #[test]
+    fn few_peers_of_any_kind_or_a_finished_file_is_not_dead() {
+        let t0 = std::time::Instant::now();
+        let later = t0 + std::time::Duration::from_secs(60);
+        let mut small = SwarmHealth::new(t0);
+        small.observe(t0, 1 << 20, Some((1, 4)), false);
+        assert!(!small.is_dead(later));
+        let mut done = SwarmHealth::new(t0);
+        done.observe(t0, 1 << 20, Some((0, 100)), true);
+        assert!(!done.is_dead(later));
+    }
+
+    /// Progress resets the clock, and a torrent never sampled is not dead.
+    #[test]
+    fn progress_keeps_a_swarm_alive() {
+        let t0 = std::time::Instant::now();
+        let mut h = SwarmHealth::new(t0);
+        h.observe(t0, 1 << 20, Some((0, 100)), false);
+        h.observe(t0 + std::time::Duration::from_secs(14), 2 << 20, Some((0, 100)), false);
+        assert!(!h.is_dead(t0 + std::time::Duration::from_secs(28)));
+        assert!(h.is_dead(t0 + std::time::Duration::from_secs(29)));
+        assert!(!SwarmHealth::new(t0).is_dead(t0 + std::time::Duration::from_secs(600)));
+    }
+
     /// Closing the player paused the download's torrent with the rest, and
     /// nothing resumed it.
     #[test]

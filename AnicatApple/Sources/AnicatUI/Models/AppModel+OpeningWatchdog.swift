@@ -131,6 +131,24 @@ extension AppModel {
                 ?? candidates.first { !stalledReleaseNames.contains($0.name) }?.name
         }
 
+        // The stalled release is the only one there is (the search came back
+        // empty while the network was down, or the pool had one release). Its
+        // torrent is what stalled, not necessarily the release: resolving it
+        // again makes the engine drop a dead swarm and add the release as a
+        // new torrent, which ran at 47 MiB/s where the old one had received
+        // nothing for a minute. Once, so a release that is dead for real
+        // still ends in the message below.
+        if next == nil, !openingFreshRetried {
+            openingFreshRetried = true
+            PlayerLog.write("[watchdog] no other release, retrying '\(current ?? "?")' with a fresh torrent")
+            playerController.flashHUD("Stream stalled, reconnecting", symbol: "arrow.triangle.2.circlepath")
+            activeResolveTask?.cancel()
+            activeResolveTask = Task { [weak self] in
+                await self?.swapPlayingFile(chosenName: nil, forceNewFile: false)
+            }
+            return
+        }
+
         guard let next else {
             PlayerLog.write("[watchdog] no release left to try after \(openingSwitchCount) switches")
             stopPlayback()

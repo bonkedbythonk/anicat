@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::catalog::{anilist, cache::AniListCache, fuzzy, Catalogs};
+use crate::catalog::{anilist, cache::AniListCache, fallback, fuzzy, Catalogs};
 use crate::db::{Catalog, ExportedRelease, Registry};
 use crate::discord::{DiscordClient, DiscordPresence, DiscordPresenceDetail, DiscordPresenceSource};
 use crate::media::MediaKey;
@@ -1285,10 +1285,22 @@ impl AnicatEngine {
         {
             Ok(items) => items,
             Err(msg) => {
-                let stale: Vec<anilist::types::MediaItem> = self
-                    .catalogs
-                    .stale_or(&cache_key, msg)
-                    .map_err(|msg| AnicatError::Network { msg })?;
+                let stale: Vec<anilist::types::MediaItem> = match self.catalogs.stale_or(&cache_key, msg) {
+                    Ok(stale) => stale,
+                    // Only a typed query: Kitsu cannot answer a browse by
+                    // filter, and an unfiltered list of its own would be
+                    // taken for the filtered one.
+                    Err(msg) if fallback::is_outage(&msg) => {
+                        let typed = query.as_deref().map(str::trim).filter(|q| !q.is_empty());
+                        match typed {
+                            Some(typed) if !filters.as_ref().is_some_and(narrows_search) => {
+                                fallback::search(&self.http, typed, media_type.as_deref().unwrap_or("ANIME"), page_num).await
+                            }
+                            _ => return Err(AnicatError::Network { msg }),
+                        }
+                    }
+                    Err(msg) => return Err(AnicatError::Network { msg }),
+                };
                 return Ok(stale.iter().map(summarize).collect());
             }
         };
@@ -2841,6 +2853,15 @@ impl AnicatEngine {
             }
         };
         let (detail_res, anizip) = tokio::join!(self.catalogs.media_detail(catalog_id, is_manga), anizip_fut);
+        // With AniList suspended and no cached copy of this title, rebuild
+        // the record from AniZip and Kitsu rather than fail the page.
+        let detail_res = match detail_res {
+            Err(msg) if !is_manga && fallback::is_outage(&msg) => fallback::anime_detail(&self.http, catalog_id)
+                .await
+                .map(|media| anilist::responses::MediaResponse { media: Some(media) })
+                .ok_or(msg),
+            other => other,
+        };
         let res = detail_res.map_err(|msg| AnicatError::Network { msg })?;
         let m = res.media.ok_or_else(|| AnicatError::NotFound {
             msg: format!("AniList has no media {catalog_id}"),
@@ -4976,6 +4997,19 @@ async fn ask_rewrites(
     }
 }
 
+/// Whether the filters restrict the search, ignoring blank strings the way
+/// `build_search_variables` does. `sort` alone does not.
+fn narrows_search(f: &SearchFilters) -> bool {
+    let set = |s: &Option<String>| s.as_deref().is_some_and(|s| !s.trim().is_empty());
+    set(&f.genre)
+        || f.year.is_some()
+        || set(&f.season)
+        || set(&f.format)
+        || f.min_score.is_some()
+        || set(&f.status)
+        || set(&f.country)
+}
+
 /// One page of AniList's title search, no cache and no rewriting.
 async fn search_page(
     anilist: &anilist::AniListClient,
@@ -5490,6 +5524,40 @@ fn summarize_cinema(m: &anilist::types::MediaItem) -> MediaSummary {
 #[cfg(test)]
 mod offline_live_tests {
     use super::*;
+
+    /// Live. `cargo test --lib live_outage -- --ignored --nocapture`
+    ///
+    /// A cold engine, no token and an empty cache, asked to search for and
+    /// open a title. It passes the same way with AniList up, so the log line
+    /// `[search]`/`serving` tells which path answered; its point is the
+    /// suspension, when this is the only thing between a new title and an
+    /// error page.
+    #[tokio::test]
+    #[ignore]
+    async fn live_outage_a_cold_engine_still_searches_and_opens_a_title() {
+        let dir = std::env::temp_dir().join("anicat-outage-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine = AnicatEngine::new(dir.to_string_lossy().to_string(), None, None, None).expect("engine");
+
+        let found = engine
+            .search_catalog(Some("sousou no frieren".to_string()), Some("ANIME".to_string()), None, None)
+            .await
+            .expect("search answers");
+        println!("search: {:?}", found.iter().map(|m| (m.catalog_id, m.title.clone())).collect::<Vec<_>>());
+        assert!(found.iter().any(|m| m.catalog_id == 154587));
+
+        let detail = engine.media_detail(154587, false).await.expect("detail answers");
+        println!(
+            "detail: title={:?} episodes={} first={:?} synopsis={}",
+            detail.title,
+            detail.episodes.len(),
+            detail.episodes.first().map(|e| e.title.clone()),
+            detail.synopsis.is_some()
+        );
+        assert_eq!(detail.catalog_id, 154587);
+        assert!(!detail.episodes.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Live. `cargo test --lib offline_live -- --ignored --nocapture`
     ///
@@ -6111,6 +6179,15 @@ mod tests {
         assert_eq!(vars.get("countryOfOrigin"), Some(&serde_json::json!("KR")));
         let vars = build_search_variables(None, Some("MANGA"), Some(&SearchFilters::default()), 1);
         assert_eq!(vars.get("countryOfOrigin"), None);
+    }
+
+    #[test]
+    fn a_blank_filter_does_not_narrow_the_search_but_a_set_one_does() {
+        assert!(!narrows_search(&SearchFilters::default()));
+        assert!(!narrows_search(&SearchFilters { genre: Some("  ".into()), sort: Some("SCORE_DESC".into()), ..Default::default() }));
+        assert!(narrows_search(&SearchFilters { year: Some(2024), ..Default::default() }));
+        assert!(narrows_search(&SearchFilters { country: Some("KR".into()), ..Default::default() }));
+        assert!(narrows_search(&SearchFilters { min_score: Some(70), ..Default::default() }));
     }
 
     #[test]

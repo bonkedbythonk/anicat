@@ -51,7 +51,7 @@ pub async fn fetch(http: &reqwest::Client, anilist_id: i64) -> HashMap<i32, AniZ
     parse(&data)
 }
 
-fn parse(data: &serde_json::Value) -> HashMap<i32, AniZipEpisode> {
+pub(super) fn parse(data: &serde_json::Value) -> HashMap<i32, AniZipEpisode> {
     let mut out = HashMap::new();
     let Some(episodes) = data.get("episodes").and_then(|v| v.as_object()) else {
         return out;

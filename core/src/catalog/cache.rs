@@ -10,7 +10,10 @@ const PRUNE_EVERY_N_INSERTS: usize = 100;
 /// How long an expired entry stays around as a stale fallback. When AniList
 /// is down or rate-limiting, serving yesterday's home rows beats a blank
 /// screen — `get` still never returns expired data on the happy path.
-const STALE_GRACE: Duration = Duration::from_secs(24 * 3600);
+/// Thirty days, not one: the 2026-10-21 suspension answered 403 to everyone,
+/// and a day's grace would have emptied the cache on the next launch after
+/// it, deleting the only copy of every title the viewer had opened.
+const STALE_GRACE: Duration = Duration::from_secs(30 * 24 * 3600);
 
 #[derive(Clone)]
 pub struct AniListCache {
@@ -750,7 +753,7 @@ mod tests {
         {
             let guard = third.disk.lock().unwrap();
             let conn = guard.as_ref().unwrap();
-            let ancient = unix_now() - (6 * 3600 + 24 * 3600 + 60);
+            let ancient = unix_now() - (6 * 3600 + 30 * 24 * 3600 + 60);
             let expired = unix_now() - (6 * 3600 + 60);
             conn.execute(
                 "UPDATE entries SET stored_at = ?1 WHERE key = ?2",

@@ -8,6 +8,7 @@ pub mod anilist;
 pub mod anizip;
 pub mod cache;
 pub mod cinema;
+pub mod fallback;
 pub mod franchise;
 pub mod fuzzy;
 pub mod jikan;

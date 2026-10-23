@@ -9,6 +9,9 @@ import SwiftUI
 struct PlaybackTabSection: View {
     @AppStorage("anicat_sub_dub") private var subDub: String = "Subtitled"
     @AppStorage("anicat_autoskip") private var autoSkipIntro: Bool = true
+    // `MpvSurface.Coordinator.normalizeFilter` owns the reader and the
+    // default; the literal here and the one there must agree.
+    @AppStorage("anicat_normalize_audio") private var normalizeAudio: Bool = true
     @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
@@ -91,6 +94,13 @@ struct PlaybackTabSection: View {
                     options: ["Subtitled", "Dubbed"],
                     selected: $subDub
                 )
+            }
+
+            SettingField(
+                label: "Normalize audio",
+                description: "Lifts quiet dialogue and caps loud scenes so an episode plays about as loud as music streaming. Applies from the next episode you start."
+            ) {
+                SumiSwitch(isOn: $normalizeAudio)
             }
 
             SettingField(

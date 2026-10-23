@@ -104,7 +104,10 @@ NATIVE = [
     {
         "name": "FFmpeg", "version": "8.1.2",
         "license": "GPL-3.0-or-later (built with --enable-gpl --enable-version3)",
-        "source": ["https://github.com/FFmpeg/FFmpeg/tree/n8.1.2"],
+        # Libavfilter is rebuilt in our MPVKit fork with five more audio
+        # filters (loudnorm, dynaudnorm, acompressor, alimiter, ebur128);
+        # the fork's build script is the source for that framework.
+        "source": ["https://github.com/FFmpeg/FFmpeg/tree/n8.1.2", "https://github.com/bonkedbythonk/MPVKit/tree/anicat-audio-filters"],
         "texts": ["FFmpeg-LICENSE.md"],
     },
     {

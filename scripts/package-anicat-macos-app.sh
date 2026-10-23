@@ -210,6 +210,20 @@ if [ "$LEFTOVER" -ne 0 ]; then
     exit 1
 fi
 
+# Stock MPVKit's libavfilter has no loudnorm. With it missing the player's
+# `af=lavfi=[loudnorm...]` fails to build the chain and every episode plays in
+# silence, with nothing in the UI saying why, so a bundle linked against the
+# stock framework must not ship. The filter's own name is a C string on a line
+# of its own; our Swift literal containing "loudnorm" is a longer string and
+# does not match -x. Counted rather than `grep -q`: -q quits at the first
+# match, `strings` takes SIGPIPE, and under pipefail that reads as a miss on a
+# binary that has the filter (the first version of this check refused exactly
+# that).
+if [ "$(strings -a "$APP/Contents/MacOS/Anicat" | grep -cx loudnorm || true)" -lt 1 ]; then
+    echo "package-anicat-macos-app: libavfilter in this build has no loudnorm; the normalize-audio filter would play silence. Use the MPVKit fork, not stock 1.0.0." >&2
+    exit 1
+fi
+
 echo "package-anicat-macos-app: built $APP, zero Homebrew references"
 
 # `zip` as the second argument writes the release archive next to the

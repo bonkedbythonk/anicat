@@ -38,7 +38,13 @@ let package = Package(
         // tied the macOS build to whatever `brew upgrade` last installed.
         // GPL variant: Anicat is GPL-3 already; the variant adds only
         // Samba, which we do not use, but it is the honest match.
-        .package(url: "https://github.com/mpvkit/MPVKit.git", exact: "1.0.0")
+        //
+        // Our fork of 1.0.0, not upstream: stock MPVKit builds FFmpeg
+        // without loudnorm, so the player's normalize-audio filter fails to
+        // build its chain and an episode plays in silence. The fork differs
+        // by the filter allow-list and a rebuilt Libavfilter-GPL; the
+        // packaging script refuses a bundle that has no loudnorm.
+        .package(url: "https://github.com/bonkedbythonk/MPVKit.git", exact: "1.0.0-anicat.1")
     ],
     targets: [
         .binaryTarget(

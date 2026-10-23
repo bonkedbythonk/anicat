@@ -1216,6 +1216,7 @@ public struct MpvSurface {
             // through `loadfile ... replace`, and `alang` is consumed at
             // load time.
             mpv_set_property_string(mpv, "alang", Coordinator.audioLanguages(preferDub: Coordinator.preferDubSetting()))
+            mpv_set_property_string(mpv, "af", Coordinator.normalizeFilter())
             // A torrent stream is a loopback URL, so mpv has no directory to
             // find an ordered-chapters release's OP/ED files in and played
             // episodes without them. The engine lists the torrent's other
@@ -1489,6 +1490,18 @@ public struct MpvSurface {
         /// stored in by both Settings and the detail page's AUDIO toggle.
         static func preferDubSetting() -> Bool {
             UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
+        }
+
+        /// Releases are mastered quiet and wide: two cached SubsPlease
+        /// episodes measured -24.4 and -22.0 LUFS against the -14 that
+        /// Spotify and YouTube sit at, with 3.8 dB of peak headroom, so
+        /// plain gain would clip. Single-pass `loudnorm` lifted the same
+        /// episode to -16.9 LUFS at a -1.5 dBFS true peak; `dynaudnorm`
+        /// overshot to -13.3 with peaks at -0.5. Absent key means on.
+        static func normalizeFilter() -> String {
+            let d = UserDefaults.standard
+            let on = d.object(forKey: "anicat_normalize_audio") == nil || d.bool(forKey: "anicat_normalize_audio")
+            return on ? "lavfi=[loudnorm=I=-16:TP=-1.5:LRA=11]" : ""
         }
 
         static func audioLanguages(preferDub: Bool) -> String {

@@ -564,3 +564,24 @@ fn a_standalone_ova_series_is_read_by_its_plain_numbering() {
         assert_eq!(choose(&files, release, entry(1), 1), Err(SelectError::NotFound), "{release}");
     }
 }
+
+/// SubsPlease's flat 01-26 batch of Genjitsu Shugi Yuusha names most files
+/// "NNv2" and a few bare "NN". The v2 ones did not read as naming the show, so
+/// the title pass kept only the bare ones and episode 2 (a v2 file) was refused.
+#[test]
+fn a_revised_episode_file_still_names_its_show() {
+    let name = |n: &str| format!("[SubsPlease] Genjitsu Shugi Yuusha no Oukoku Saikenki - {n} (1080p) [A1B2C3D4].mkv");
+    let files: Vec<(usize, String, u64)> =
+        ["01v2", "02v2", "03v2", "05"].iter().enumerate().map(|(i, n)| (i, name(n), 1_000_000_000)).collect();
+    let titles: Vec<String> = vec!["Genjitsu Shugi Yuusha no Oukoku Saikenki".into()];
+    let req = SelectRequest {
+        titles: &titles,
+        alts: &[],
+        hint: EntryHint { kind: EntryKind::Tv, season: None, season_at_least: None },
+        episode: 2,
+        episode_count: Some(13),
+        release_name: "[SubsPlease] Genjitsu Shugi Yuusha no Oukoku Saikenki - 01-26 (1080p)",
+        allow_episodeless: false,
+    };
+    assert_eq!(select(&files, &req), Ok(1));
+}

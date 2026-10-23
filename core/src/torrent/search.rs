@@ -289,7 +289,7 @@ fn is_title_material(chunk: &str) -> bool {
         return false;
     }
     let first = tokens[0];
-    if is_episode_marker(first) || first.chars().all(|c| c.is_ascii_digit()) {
+    if is_episode_marker(first) || first.chars().all(|c| c.is_ascii_digit()) || is_revised_number(first) {
         return false;
     }
     // Resolution reaches here on the rare unbracketed name.
@@ -297,6 +297,24 @@ fn is_title_material(chunk: &str) -> bool {
         return false;
     }
     tokens.iter().any(|t| !is_ignorable_suffix_token(t))
+}
+
+/// "02v2": an episode number with the release's revision glued on. Without
+/// this the dash chunk `02v2` counted as more title, was joined onto the
+/// show's name, and the whole segment then failed the suffix rule -- every
+/// `v2` file of SubsPlease's Genjitsu Shugi Yuusha batch read as not naming
+/// the show, so layout kept only the ten files without a revision and
+/// refused episode 2.
+fn is_revised_number(t: &str) -> bool {
+    match t.split_once('v') {
+        Some((n, rev)) => {
+            !n.is_empty()
+                && !rev.is_empty()
+                && n.chars().all(|c| c.is_ascii_digit())
+                && rev.chars().all(|c| c.is_ascii_digit())
+        }
+        None => false,
+    }
 }
 
 /// Tokens that may trail a title without changing which show it is: season and

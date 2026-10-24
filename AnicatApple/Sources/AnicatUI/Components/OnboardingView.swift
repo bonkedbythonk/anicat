@@ -872,51 +872,64 @@ private struct OnboardingThemeRow: View {
         // to the 460pt step, which fits five 72pt cells; three skins filled
         // the first three of them and `alignment: .center` centred the row
         // inside a grid that was already full width, so the swatches sat left
-        // of the paragraph under them. Every skin fits on one row -- if that
-        // stops being true, wrap this, do not go back to adaptive columns.
-        HStack(alignment: .top, spacing: 12) {
-            ForEach(SumiSkin.allCases) { skin in
-                let isSelected = store.skin == skin
-                Button {
-                    guard !isSelected else { return }
-                    SumiHaptics.selection()
-                    store.select(skin)
-                } label: {
-                    VStack(spacing: 7) {
-                        let palette = store.previewPalette(for: skin)
-                        ZStack(alignment: .topLeading) {
-                            RoundedRectangle(cornerRadius: 8).fill(palette.background)
-                            VStack(alignment: .leading, spacing: 5) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(palette.card)
-                                    .frame(width: 44, height: 12)
-                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(palette.border, lineWidth: 1))
-                                HStack(spacing: 4) {
-                                    Capsule().fill(palette.indigo).frame(width: 20, height: 5)
-                                    Capsule().fill(palette.muted).frame(width: 12, height: 5)
-                                }
-                            }
-                            .padding(8)
-                        }
-                        .frame(height: 52)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(isSelected ? SumiTheme.indigo : SumiTheme.border,
-                                        lineWidth: isSelected ? 2 : 1)
-                        )
-
-                        Text(skin.displayName)
-                            .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                            .foregroundColor(isSelected ? SumiTheme.foreground : SumiTheme.muted)
-                            .lineLimit(1)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-                .help(skin.caption)
-                .frame(width: 72)
-            }
+        // of the paragraph under them. Every skin fits on one row on the Mac --
+        // if that stops being true, wrap this, do not go back to adaptive columns.
+        #if os(iOS)
+        // Six 72pt swatches and five gaps are 492pt, wider than any phone, so
+        // the single row clipped Ink (the default) and OLED off the edges.
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(72), spacing: 12), count: 3),
+                  alignment: .center, spacing: 12) {
+            ForEach(SumiSkin.allCases) { skin in swatch(skin) }
         }
         .frame(maxWidth: .infinity)
+        #else
+        HStack(alignment: .top, spacing: 12) {
+            ForEach(SumiSkin.allCases) { skin in swatch(skin) }
+        }
+        .frame(maxWidth: .infinity)
+        #endif
+    }
+
+    @ViewBuilder
+    private func swatch(_ skin: SumiSkin) -> some View {
+        let isSelected = store.skin == skin
+        Button {
+            guard !isSelected else { return }
+            SumiHaptics.selection()
+            store.select(skin)
+        } label: {
+            VStack(spacing: 7) {
+                let palette = store.previewPalette(for: skin)
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 8).fill(palette.background)
+                    VStack(alignment: .leading, spacing: 5) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(palette.card)
+                            .frame(width: 44, height: 12)
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(palette.border, lineWidth: 1))
+                        HStack(spacing: 4) {
+                            Capsule().fill(palette.indigo).frame(width: 20, height: 5)
+                            Capsule().fill(palette.muted).frame(width: 12, height: 5)
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(height: 52)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isSelected ? SumiTheme.indigo : SumiTheme.border,
+                                lineWidth: isSelected ? 2 : 1)
+                )
+
+                Text(skin.displayName)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                    .foregroundColor(isSelected ? SumiTheme.foreground : SumiTheme.muted)
+                    .lineLimit(1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .help(skin.caption)
+        .frame(width: 72)
     }
 }

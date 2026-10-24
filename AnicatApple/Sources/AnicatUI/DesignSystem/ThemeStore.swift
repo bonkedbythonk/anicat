@@ -786,6 +786,20 @@ public final class ThemeStore: @unchecked Sendable {
         #if os(macOS)
         return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
         #elseif canImport(UIKit)
+        // `UITraitCollection.current` is only meaningful inside a trait
+        // callback; read from here it is `.unspecified`, so "Follow system"
+        // resolved to light on a phone set to dark. The scene's own traits
+        // carry the system setting (the app's `preferredColorScheme` override
+        // sits on the window, below the scene). Off the main thread, or before
+        // any scene is connected, there is nothing better to ask.
+        if Thread.isMainThread {
+            let style = MainActor.assumeIsolated { () -> UIUserInterfaceStyle in
+                let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+                return scene?.traitCollection.userInterfaceStyle ?? .unspecified
+            }
+            if style != .unspecified { return style == .dark }
+        }
         return UITraitCollection.current.userInterfaceStyle == .dark
         #else
         return true
@@ -796,6 +810,20 @@ public final class ThemeStore: @unchecked Sendable {
         #if os(macOS)
         DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.appearance == .system else { return }
+            MainActor.assumeIsolated {
+                self.animateToNewPalette()
+            }
+        }
+        #elseif canImport(UIKit)
+        // Nothing else tells the phone that Control Center or Settings flipped
+        // the system appearance while the app was open: the palette stayed on
+        // the side it resolved to at launch until the next manual pick.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in

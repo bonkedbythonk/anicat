@@ -24,6 +24,12 @@ struct PhoneRemoteView: View {
     private var client: RemoteClient { RemoteClient.shared }
     @State private var showingTracks = false
     @State private var showingBrowse = false
+    /// Thumb positions while a finger is down. Without them the sliders bound
+    /// straight to `state`, so every drag tick sent a command to the Mac and
+    /// the one-second state tick pulled the thumb back under the finger.
+    @State private var scrubValue: Double?
+    @State private var volumeValue: Double?
+    @State private var lastVolumeSend = Date.distantPast
 
     var body: some View {
         NavigationStack {
@@ -133,6 +139,15 @@ struct PhoneRemoteView: View {
     private var state: RemoteState { client.state }
 
     private var transport: some View {
+        // Scrolls: about 700pt of controls do not fit a 667pt phone, nor
+        // anything at a large text size, and the Stop button sat off screen.
+        ScrollView {
+            transportContent
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private var transportContent: some View {
         VStack(spacing: 28) {
             // The poster the Mac is playing, so the sheet says what is on
             // screen across the room without reading a word of it.
@@ -167,16 +182,17 @@ struct PhoneRemoteView: View {
             scrubber
 
             HStack(spacing: 28) {
-                transportButton("backward.end.fill", size: 22, enabled: state.hasPrevious) {
+                transportButton("backward.end.fill", label: "Previous episode", size: 22, enabled: state.hasPrevious) {
                     client.send(.previousEpisode)
                 }
-                transportButton("gobackward.5", size: 26) { client.send(.seekBy(-5)) }
+                transportButton("gobackward.5", label: "Back 5 seconds", size: 26) { client.send(.seekBy(-5)) }
                 transportButton(
                     state.isBuffering ? "hourglass" : (state.isPlaying ? "pause.fill" : "play.fill"),
+                    label: state.isBuffering ? "Buffering" : (state.isPlaying ? "Pause" : "Play"),
                     size: 40
                 ) { client.send(.playPause) }
-                transportButton("goforward.5", size: 26) { client.send(.seekBy(5)) }
-                transportButton("forward.end.fill", size: 22, enabled: state.hasNext) {
+                transportButton("goforward.5", label: "Forward 5 seconds", size: 26) { client.send(.seekBy(5)) }
+                transportButton("forward.end.fill", label: "Next episode", size: 22, enabled: state.hasNext) {
                     client.send(.nextEpisode)
                 }
             }
@@ -201,17 +217,20 @@ struct PhoneRemoteView: View {
         VStack(spacing: 6) {
             Slider(
                 value: Binding(
-                    get: { min(state.currentTime, max(state.duration, 1)) },
-                    set: { seconds in
-                        // Locally first: state arrives on a one-second tick,
-                        // so a released thumb would otherwise snap back to
-                        // where it started and read as a seek that failed.
-                        client.optimisticallySeek(to: seconds)
-                        client.send(.seek(to: seconds))
-                    }
+                    get: { scrubValue ?? min(state.currentTime, max(state.duration, 1)) },
+                    set: { scrubValue = $0 }
                 ),
                 in: 0...max(state.duration, 1)
-            )
+            ) { editing in
+                // One seek on release, not one per drag tick.
+                guard !editing, let seconds = scrubValue else { return }
+                // Locally first: state arrives on a one-second tick,
+                // so a released thumb would otherwise snap back to
+                // where it started and read as a seek that failed.
+                client.optimisticallySeek(to: seconds)
+                client.send(.seek(to: seconds))
+                scrubValue = nil
+            }
             .tint(SumiTheme.indigo)
             .disabled(state.duration <= 0)
 
@@ -403,19 +422,36 @@ struct PhoneRemoteView: View {
                     .font(.system(size: 15))
                     .foregroundStyle(SumiTheme.muted)
             }
+            .accessibilityLabel(state.isMuted ? "Unmute" : "Mute")
             Slider(
                 value: Binding(
-                    get: { state.isMuted ? 0 : state.volume },
-                    set: { client.send(.setVolume($0)) }
+                    get: { volumeValue ?? (state.isMuted ? 0 : state.volume) },
+                    set: { value in
+                        volumeValue = value
+                        // About 10 a second while dragging; each one is a
+                        // frame the Mac has to decode and answer.
+                        let now = Date()
+                        guard now.timeIntervalSince(lastVolumeSend) >= 0.1 else { return }
+                        lastVolumeSend = now
+                        client.send(.setVolume(value))
+                    }
                 ),
                 in: 0...1
-            )
+            ) { editing in
+                // The throttle can swallow the last tick, so the release
+                // always sends where the thumb actually stopped.
+                guard !editing, let value = volumeValue else { return }
+                client.send(.setVolume(value))
+                volumeValue = nil
+            }
+            .accessibilityLabel("Volume")
             .tint(SumiTheme.indigo)
         }
     }
 
     private func transportButton(
         _ symbol: String,
+        label: String,
         size: CGFloat,
         enabled: Bool = true,
         action: @escaping () -> Void
@@ -429,6 +465,7 @@ struct PhoneRemoteView: View {
                 .contentShape(Rectangle())
         }
         .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 
     private func message(

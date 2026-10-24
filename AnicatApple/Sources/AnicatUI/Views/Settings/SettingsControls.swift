@@ -201,6 +201,9 @@ struct ThemeSwatch: View {
 /// and did not look like Anicat next to the rest of the page.
 struct SumiSwitch: View {
     @Binding var isOn: Bool
+    /// The switch is drawn with no text, so VoiceOver reads only "On" with
+    /// nothing to say what is on. Call sites that have a row title pass it.
+    var label: String? = nil
 
     var body: some View {
         Button {
@@ -219,9 +222,16 @@ struct SumiSwitch: View {
                     .padding(2)
                     .shadow(color: Color.black.opacity(0.15), radius: 1, x: 0, y: 1)
             }
-            .contentShape(Capsule())
+            // The 38x22 track is under the 44pt minimum. The tap area grows
+            // to 44x44 and the negative padding keeps the row layout as it was.
+            .padding(.vertical, 11)
+            .padding(.horizontal, 3)
+            .contentShape(Rectangle())
+            .padding(.vertical, -11)
+            .padding(.horizontal, -3)
         }
         .buttonStyle(.sumiPressable)
+        .accessibilityLabel(label ?? "")
         .accessibilityAddTraits(.isToggle)
         .accessibilityValue(isOn ? "On" : "Off")
     }

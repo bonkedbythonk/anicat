@@ -301,6 +301,11 @@ struct PhoneHistoryView: View {
 
     private static let parser: DateFormatter = {
         let f = DateFormatter()
+        // POSIX locale and Gregorian calendar: under a 12-hour clock or a
+        // Buddhist/Japanese calendar the fixed format fails to parse and the
+        // row's time silently came back empty.
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
         f.timeZone = TimeZone(identifier: "UTC")
         return f

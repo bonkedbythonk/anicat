@@ -139,6 +139,14 @@ public struct SumiSlashToggle<Option: Hashable>: View {
         self.select = select
     }
 
+    private static var hitInset: CGFloat {
+        #if os(iOS)
+        15
+        #else
+        0
+        #endif
+    }
+
     public var body: some View {
         HStack(spacing: 6) {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
@@ -163,7 +171,13 @@ public struct SumiSlashToggle<Option: Hashable>: View {
                                 .fontWeight(isOn ? .semibold : .regular)
                                 .foregroundColor(isOn ? onColor : offColor)
                         }
+                        // The bare 12.5pt word is about 15pt tall, a third of
+                        // what a thumb needs. The tap area grows, and the
+                        // negative padding hands the layout its old height back
+                        // so the header does not move.
+                        .padding(.vertical, Self.hitInset)
                         .contentShape(Rectangle())
+                        .padding(.vertical, -Self.hitInset)
                 }
                 .buttonStyle(.sumiPressable)
                 .accessibilityAddTraits(isOn ? .isSelected : [])

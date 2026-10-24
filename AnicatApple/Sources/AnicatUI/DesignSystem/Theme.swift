@@ -134,12 +134,15 @@ public enum SumiTheme {
 // MARK: - Typography Manager & Extensions
 
 public enum SumiFontManager {
-    nonisolated(unsafe) private static var isRegistered = false
+    /// A `static let` rather than a flag set before the work: its initializer
+    /// runs once and every other caller waits for it. With a flag, a second
+    /// thread (parallel tests) saw "registered" while the first was still
+    /// registering and looked a font up too early.
+    private static let registered: Void = registerFiles()
 
-    public static func registerCustomFonts() {
-        guard !isRegistered else { return }
-        isRegistered = true
+    public static func registerCustomFonts() { _ = registered }
 
+    private static func registerFiles() {
         // Geist is only the reader's optional body face now; the app's own
         // text is all SF Pro. Rajdhani and Shippori Mincho are the headings
         // of Night City and Evangelion, Latin subsets of the OFL originals.

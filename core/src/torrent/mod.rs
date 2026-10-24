@@ -1427,6 +1427,9 @@ impl TorrentManager {
         }
         // A hand pick overrides an earlier rejection; nothing else does.
         candidates.retain(|c| !rejected.contains(&c.name) || chosen_name.as_deref() == Some(c.name.as_str()));
+        if plain_anime && chosen_name.is_none() {
+            search::prefer_healthy_swarm(&mut candidates);
+        }
         prefer_without_lacking(&mut candidates, lacking_audio, chosen_name.as_deref());
         if prefer_small && chosen_name.is_none() {
             search::prefer_smaller(&mut candidates);

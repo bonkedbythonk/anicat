@@ -2500,6 +2500,45 @@ pub(crate) fn prefer_smaller(candidates: &mut Vec<Candidate>) {
     *candidates = small;
 }
 
+/// A named episode on a thin swarm yields to a pack with a real one.
+///
+/// Ranking puts any release that names its episode far above any pack, and
+/// seeders only add a capped square-root bonus on top, so a single episode with
+/// 5 seeders beat a dual-audio BD pack with 73 (Genjitsu Shugi Yuusha ep 2,
+/// 2026-10-23: 2100 against 453). The 5-seeder swarm held one live peer that
+/// stalled for minutes at a time and the episode never buffered; picking the
+/// pack by hand loaded in 1.2s. Only swapped when the top pick is at or below
+/// the dead line and the alternative is four times past it, so a normal show
+/// keeps its order. The alternative still has to have scored as a plausible
+/// match (a wrong-audio or special release sits far below 300) and is not a
+/// remux, whose per-episode size a thin connection cannot stream. The pack is
+/// still checked for the episode by `try_candidate`, and the old top pick stays
+/// as the fallback behind it.
+pub(crate) fn prefer_healthy_swarm(candidates: &mut Vec<Candidate>) {
+    let thin = candidates
+        .first()
+        .is_some_and(|c| c.seeders_known && c.seeders <= LOW_SEEDER_THRESHOLD);
+    if !thin {
+        return;
+    }
+    let healthy = candidates
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, c)| {
+            c.seeders_known
+                && c.seeders >= 4 * LOW_SEEDER_THRESHOLD
+                && c.score >= 300
+                && !normalize(&c.name).split(' ').any(|t| t == "remux")
+        })
+        .max_by_key(|(_, c)| (c.seeders, c.score))
+        .map(|(i, _)| i);
+    if let Some(i) = healthy {
+        let pick = candidates.remove(i);
+        candidates.insert(0, pick);
+    }
+}
+
 /// A candidate `resolve` would actually be willing to spend startup budget
 /// on: its swarm is above the probably-dead line and it scored well enough to
 /// be a plausible match, without the stricter "names its own episode" bar
@@ -2573,6 +2612,44 @@ mod tests {
             seeders_known: true,
             size_bytes: None,
         }
+    }
+
+    fn named(name: &str, score: i64, seeders: u64) -> Candidate {
+        Candidate { name: name.into(), ..candidate(score, seeders, false) }
+    }
+
+    #[test]
+    fn a_thin_single_episode_yields_to_a_pack_with_a_real_swarm() {
+        let mut pool = vec![
+            named("[SubsPlease] Show - 02 (1080p)", 2100, 5),
+            named("[Erai-raws] Show - 02 [1080p]", 1140, 5),
+            named("[EMBER] Show (Season 1) [BDRip] [1080p Dual Audio HEVC 10 bits] (Batch)", 453, 73),
+            named("[neoHEVC] Show [BD 1080p x265 HEVC AAC] [Dual Audio]", 378, 19),
+        ];
+        prefer_healthy_swarm(&mut pool);
+        assert!(pool[0].name.starts_with("[EMBER]"));
+        assert!(pool[1].name.starts_with("[SubsPlease]"), "the old top pick stays as the fallback");
+    }
+
+    #[test]
+    fn a_healthy_top_pick_keeps_its_place() {
+        let mut pool = vec![
+            named("[SubsPlease] Show - 02 (1080p)", 2100, 40),
+            named("[EMBER] Show (Batch)", 453, 500),
+        ];
+        prefer_healthy_swarm(&mut pool);
+        assert!(pool[0].name.starts_with("[SubsPlease]"));
+    }
+
+    #[test]
+    fn a_remux_or_a_poor_match_is_never_the_healthy_alternative() {
+        let mut pool = vec![
+            named("[SubsPlease] Show - 02 (1080p)", 2100, 3),
+            named("[TTGA] Show [BD Remux] [1080p Dual Audio TrueHD AVC] (Batch)", 359, 90),
+            named("Show English Dub 1080p", -900, 200),
+        ];
+        prefer_healthy_swarm(&mut pool);
+        assert!(pool[0].name.starts_with("[SubsPlease]"));
     }
 
     /// The releases Nyaa carried for the fourth cour of Bleach: Thousand-Year

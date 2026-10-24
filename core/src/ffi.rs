@@ -356,6 +356,12 @@ pub struct EpisodeRow {
     pub synopsis: Option<String>,
     /// From AniZip, `YYYY-MM-DD`. Same caveat as `synopsis`.
     pub air_date: Option<String>,
+    /// Unix seconds the episode airs (or aired) in Japan, from AniList's
+    /// airing schedule. `air_date` is date-only; this is the one with a time.
+    /// `None` for a show AniList has no schedule for, and for episodes past
+    /// the first 50 of a long run.
+    #[uniffi(default = None)]
+    pub airing_at: Option<i64>,
     /// Whether this episode exists yet.
     ///
     /// AniList fills `episodes` with the whole announced run as soon as it is
@@ -2905,6 +2911,14 @@ impl AnicatEngine {
         // The first episode that has *not* aired. `None` once a show has
         // finished airing, which makes every episode of it aired.
         let next_airing = m.next_airing_episode.as_ref().and_then(|n| n.episode);
+        let airing_at: std::collections::HashMap<i32, i64> = m
+            .airing_schedule
+            .as_ref()
+            .and_then(|c| c.nodes.as_ref())
+            .into_iter()
+            .flatten()
+            .filter_map(|n| Some((n.episode?, n.airing_at?)))
+            .collect();
 
         // AniList streaming_episodes often lists episodes in reverse order (e.g. Ep 12 down to 1).
         // Map each streaming episode by parsing the episode number from its title:
@@ -2988,6 +3002,7 @@ impl AnicatEngine {
                 runtime_minutes,
                 synopsis: az.and_then(|a| a.overview.clone()),
                 air_date: az.and_then(|a| a.air_date.clone()),
+                airing_at: airing_at.get(&number).copied(),
                 is_aired: next_airing.is_none_or(|next| number < next),
             });
         }
@@ -4677,6 +4692,7 @@ impl AnicatEngine {
                     runtime_minutes: ep.runtime_minutes,
                     synopsis: ep.overview.clone(),
                     air_date: ep.air_date.clone(),
+                    airing_at: None,
                     // TMDB's season detail lists episodes that exist, so
                     // anything here has aired.
                     is_aired: true,
@@ -4700,6 +4716,7 @@ impl AnicatEngine {
                 runtime_minutes: item.duration,
                 synopsis: item.description.clone(),
                 air_date: detail.movie.as_ref().and_then(|m| m.release_date.clone()),
+                airing_at: None,
                 is_aired: true,
             });
         }

@@ -19,6 +19,7 @@ extension AppModel {
                 progressPercent: e.progressPercent,
                 synopsis: e.synopsis,
                 airDate: e.airDate,
+                airingAt: e.airingAt,
                 runtimeMinutes: e.runtimeMinutes.map(Int.init),
                 isAired: e.isAired
             )
@@ -772,6 +773,7 @@ extension AppModel {
                 progressPercent: ep.progressPercent,
                 synopsis: ep.synopsis,
                 airDate: ep.airDate,
+                airingAt: ep.airingAt,
                 runtimeMinutes: ep.runtimeMinutes,
                 isAired: ep.isAired
             )

@@ -30,6 +30,7 @@ query ($id: Int, $type: MediaType) {
     startDate { year month day }
     endDate { year month day }
     nextAiringEpisode { airingAt episode timeUntilAiring }
+    airingSchedule(perPage: 50) { nodes { episode airingAt } }
     streamingEpisodes { title thumbnail }
     trailer { id site thumbnail }
     siteUrl

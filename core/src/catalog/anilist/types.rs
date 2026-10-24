@@ -63,6 +63,20 @@ pub struct MediaNodeConnection {
     pub nodes: Option<Vec<MediaItem>>,
 }
 
+/// `Media.airingSchedule`, asked for on the detail page only: the per-episode
+/// broadcast time that AniZip's date-only `airdate` cannot give.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiringScheduleConnection {
+    pub nodes: Option<Vec<AiringScheduleNode>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiringScheduleNode {
+    pub episode: Option<i32>,
+    #[serde(rename = "airingAt")]
+    pub airing_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NextAiringEpisode {
     #[serde(rename = "airingAt")]
@@ -132,6 +146,8 @@ pub struct MediaItem {
     pub end_date: Option<FuzzyDate>,
     #[serde(rename = "nextAiringEpisode")]
     pub next_airing_episode: Option<NextAiringEpisode>,
+    #[serde(rename = "airingSchedule")]
+    pub airing_schedule: Option<AiringScheduleConnection>,
     pub synonyms: Option<Vec<String>>,
     #[serde(alias = "streamingEpisodes")]
     pub streaming_episodes: Option<Vec<StreamingEpisode>>,

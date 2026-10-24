@@ -77,6 +77,8 @@ public struct MediaDetailView: View {
         public let progressPercent: Double?
         public let synopsis: String?
         public let airDate: String?
+        /// Unix seconds of the broadcast, when AniList has a schedule for it.
+        public let airingAt: Int64?
         public let runtimeMinutes: Int?
         /// Whether the episode exists yet. An airing show lists its whole
         /// announced run, so the last few rows are a schedule, not something
@@ -98,11 +100,13 @@ public struct MediaDetailView: View {
             progressPercent: Double? = nil,
             synopsis: String? = nil,
             airDate: String? = nil,
+            airingAt: Int64? = nil,
             runtimeMinutes: Int? = nil,
             isAired: Bool = true
         ) {
             self.synopsis = synopsis
             self.airDate = airDate
+            self.airingAt = airingAt
             self.runtimeMinutes = runtimeMinutes
             self.isAiredRaw = isAired
             self.id = id
@@ -2654,6 +2658,15 @@ private struct EpisodeRow: View, Equatable {
         return f
     }()
 
+    /// Local date and time of a broadcast ("Oct 18, 3:30 PM"), in the
+    /// viewer's own zone: AniList gives an instant, and the Japanese
+    /// clock time would be wrong for everyone else.
+    private static let airingAtDisplay: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMM d jm")
+        return f
+    }()
+
     private static var airDateCache: [String: String] = [:]
     private static let airDateLock = NSLock()
 
@@ -2840,7 +2853,11 @@ private struct EpisodeRow: View, Equatable {
             Text("Ep \(episode.number)")
                 .foregroundColor(SumiTheme.indigo)
                 .fontWeight(.semibold)
-            if let airDate = episode.airDate {
+            if let airingAt = episode.airingAt {
+                Text("·").foregroundColor(SumiTheme.muted.opacity(0.5))
+                Text(Self.airingAtDisplay.string(from: Date(timeIntervalSince1970: TimeInterval(airingAt))))
+                    .foregroundColor(SumiTheme.muted)
+            } else if let airDate = episode.airDate {
                 Text("·").foregroundColor(SumiTheme.muted.opacity(0.5))
                 Text(Self.formatAirDate(airDate)).foregroundColor(SumiTheme.muted)
             }

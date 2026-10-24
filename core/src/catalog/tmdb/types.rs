@@ -388,6 +388,7 @@ fn blank_item(id: i64) -> MediaItem {
         start_date: None,
         end_date: None,
         next_airing_episode: None,
+        airing_schedule: None,
         synonyms: None,
         streaming_episodes: None,
         trailer: None,

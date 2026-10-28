@@ -377,8 +377,15 @@ struct GlobalKeyboardShortcutsModifier: ViewModifier {
                 return nil
             }
 
+            // Not while the full-size player is up: L navigated the hidden
+            // sidebar to Library behind the picture and swallowed the key
+            // the player's J/L seek monitor was waiting for, and a digit
+            // ended the episode the same way (`navigate(to:)` stops
+            // playback). The mini-player is browsing, so it keeps them.
+            let playerCoversScreen = model.activeStreamURL != nil && !model.isPlayerMinimized
+
             // Numbers 1-9: Switch views
-            if let num = Int(chars), let targetSection = SidebarView.NavSection.fromNumberKey(num, mode: model.appMode) {
+            if !playerCoversScreen, let num = Int(chars), let targetSection = SidebarView.NavSection.fromNumberKey(num, mode: model.appMode) {
                 withAnimation(.smooth) {
                     model.navigate(to: targetSection)
                 }
@@ -386,11 +393,6 @@ struct GlobalKeyboardShortcutsModifier: ViewModifier {
             }
 
             // Letter shortcuts: H (Home/Up Next), L (Library), M (Manga), N (Novels), T (Stats), D (Downloads)
-            // Not while the full-size player is up: L navigated the hidden
-            // sidebar to Library behind the picture and swallowed the key
-            // the player's J/L seek monitor was waiting for. The mini-player
-            // is browsing, so it keeps them.
-            let playerCoversScreen = model.activeStreamURL != nil && !model.isPlayerMinimized
             if !playerCoversScreen, let firstChar = chars.first, let targetSection = SidebarView.NavSection.fromLetterKey(firstChar, mode: model.appMode) {
                 withAnimation(.smooth) {
                     model.navigate(to: targetSection)

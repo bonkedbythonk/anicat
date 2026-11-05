@@ -1060,6 +1060,8 @@ public struct RootView: View {
                     Task { await model.clearWatchHistory() }
                 }
             )
+        case .study:
+            StudyHomeView()
         case .stats:
             StatsView(
                 stats: model.watchStatsSnapshot,

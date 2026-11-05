@@ -102,6 +102,9 @@ public struct MangaReaderView: View {
     @State private var syncToast = false
     @State private var swipeMonitor = TrackpadSwipeMonitor()
     @State private var study = StudySession()
+    /// The words just looked up, asked once the reader moves past their
+    /// page: looked up and read on from, they were gone by the next page.
+    @State private var quickCheck: [StudyCard]?
     /// The catalog id the per-title preferences are keyed on, read once at
     /// construction. `nil` for a title with no AniList entry behind it, which
     /// `ReaderPreferences` folds onto the global keys.
@@ -541,7 +544,8 @@ public struct MangaReaderView: View {
                     StudyTextPanel(
                         bubble: study.selected,
                         failure: failureText,
-                        context: study.selected.map(study.context(of:)) ?? ([], [])
+                        context: study.selected.map(study.context(of:)) ?? ([], []),
+                        source: "\(title), \(chapterTitle)"
                     ) {
                         if study.selected != nil { study.selected = nil } else { study.stop() }
                     }
@@ -552,6 +556,18 @@ public struct MangaReaderView: View {
                 .padding(.top, 80)
                 .padding(.bottom, 64)
                 .transition(.opacity)
+            }
+
+            if let quickCheck {
+                ZStack {
+                    Color.black.opacity(0.35)
+                        .ignoresSafeArea()
+                        .onTapGesture { self.quickCheck = nil }
+                    StudyReviewView(title: "Quick check", cards: quickCheck) { self.quickCheck = nil }
+                        .padding(SumiTheme.spaceLg)
+                }
+                .transition(.opacity)
+                .zIndex(2)
             }
 
             // Top Controls Bar
@@ -600,9 +616,13 @@ public struct MangaReaderView: View {
         // Scrolling puts the chrome away. In webtoon mode every row reports
         // itself as it appears, so this fires on the first page that scrolls
         // past -- which is exactly the moment the bars stop being wanted.
-        .onChange(of: currentPageIndex) { _, _ in
+        .onChange(of: currentPageIndex) { _, page in
             if showControls { withAnimation(.smooth) { showControls = false } }
             study.selected = nil
+            if study.isOn, quickCheck == nil {
+                let due = StudyDeck.shared.takeQuickCheck(before: page)
+                if !due.isEmpty { withAnimation(.smooth) { quickCheck = due } }
+            }
         }
         .focusable()
         .focused($isFocused)
@@ -638,6 +658,11 @@ public struct MangaReaderView: View {
             didFinishChapter = false
             syncToast = false
             noteReadingPosition(0)
+            // The last pages of a chapter have no page after them to move
+            // past, so their words are asked as the next chapter opens.
+            let rest = StudyDeck.shared.takeQuickCheck(before: .max)
+            StudyDeck.shared.chapterChanged()
+            if study.isOn, !rest.isEmpty { quickCheck = rest }
             study.chapterChanged(to: pageURLs)
         }
         .onChange(of: readingMode) { _, mode in
@@ -670,6 +695,7 @@ public struct MangaReaderView: View {
             prefetcher.cancel()
             swipeMonitor.stop()
             study.stop()
+            StudyDeck.shared.chapterChanged()
             #if os(macOS)
             if let window = NSApp.keyWindow ?? NSApp.mainWindow {
                 if window.styleMask.contains(.fullScreen) && !wasFullScreenBeforeOpen {

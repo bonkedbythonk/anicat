@@ -280,6 +280,7 @@ struct StudyTextPanel: View {
     let bubble: StudyBubble?
     let failure: String?
     var context: (before: [String], after: [String]) = ([], [])
+    var source: String = ""
     let onClose: () -> Void
 
     var body: some View {
@@ -302,7 +303,7 @@ struct StudyTextPanel: View {
                 // Long glosses run past any fixed height, and a panel that
                 // grew with them pushed its own close button off the page.
                 ScrollView {
-                    StudyWordsView(text: bubble.text, before: context.before, after: context.after)
+                    StudyWordsView(text: bubble.text, before: context.before, after: context.after, source: source, page: bubble.page)
                         .id(bubble.id)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

@@ -157,6 +157,9 @@ struct StudyWordsView: View {
     let text: String
     var before: [String] = []
     var after: [String] = []
+    /// Where the bubble is, for the card saved from it.
+    var source: String = ""
+    var page: Int = 0
     @State private var tokens: [StudyToken] = []
     @State private var selected: Int?
     @State private var explanation: StudyExplanation?
@@ -279,6 +282,37 @@ struct StudyWordsView: View {
         }
     }
 
+    /// A click on a word is the only signal that it was not known, so the
+    /// click saves it. The word picked by default when the panel opens is not
+    /// saved: nobody asked about it.
+    private func save(_ token: StudyToken) {
+        guard let entry = token.entries.first else { return }
+        let meaning = entry.senses.prefix(2).map { $0.glosses.prefix(3).joined(separator: "; ") }.joined(separator: " / ")
+        StudyDeck.shared.lookedUp(
+            word: entry.word, reading: entry.reading, meaning: meaning,
+            sentence: text, surface: token.surface, source: source, page: page
+        )
+    }
+
+    @ViewBuilder
+    private func deckLine(_ entry: StudyEntry) -> some View {
+        let deck = StudyDeck.shared
+        if deck.isSaved(entry.word, reading: entry.reading) {
+            HStack(spacing: 12) {
+                Text("Saved for review")
+                    .font(.system(size: 12))
+                    .foregroundColor(SumiTheme.success)
+                Button { deck.markKnown(word: entry.word, reading: entry.reading) } label: {
+                    Text("I know this")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(SumiTheme.indigo)
+                }
+                .buttonStyle(.sumiPressable)
+                .help("Remove it from the review deck and stop saving it")
+            }
+        }
+    }
+
     private func listenButton(_ label: String, text: String) -> some View {
         Button { StudySpeech.shared.speak(text) } label: {
             Label(label, systemImage: "speaker.wave.2")
@@ -297,7 +331,10 @@ struct StudyWordsView: View {
         let label = Text(token.surface)
             .font(.system(size: 24, weight: .medium))
         if token.isWord {
-            Button { selected = index } label: {
+            Button {
+                selected = index
+                save(token)
+            } label: {
                 label
                     .foregroundColor(token.entries.isEmpty ? SumiTheme.muted : (selected == index ? SumiTheme.indigo : SumiTheme.foreground))
                     .padding(.bottom, 2)
@@ -333,6 +370,7 @@ struct StudyWordsView: View {
                             .foregroundColor(SumiTheme.muted)
                     }
                 }
+                deckLine(entry)
                 if !token.steps.isEmpty {
                     Text(([entry.word] + token.steps).joined(separator: "  >  "))
                         .font(.system(size: 12))

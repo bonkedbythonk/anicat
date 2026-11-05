@@ -137,6 +137,7 @@ public enum DeepLink: Equatable, Sendable {
         case "stats": return .stats
         case "downloads": return .downloads
         case "settings": return .settings
+        case "study": return .study
         default: return nil
         }
     }
@@ -153,6 +154,7 @@ public enum DeepLink: Equatable, Sendable {
         case .stats: return "stats"
         case .downloads: return "downloads"
         case .settings: return "settings"
+        case .study: return "study"
         }
     }
 }

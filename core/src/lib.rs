@@ -12,6 +12,7 @@ pub mod discord;
 pub mod media;
 pub mod reader;
 pub mod skip;
+pub mod study;
 pub mod torrent;
 
 // Public for server/, which calls the engine as a Rust crate rather than

@@ -14,6 +14,9 @@ extension SearchFilters: @unchecked Sendable {}
 // (core/src/db/service.rs), reqwest::Client pools its own connections, and
 // TorrentManager synchronizes its own state internally.
 extension AnicatEngine: @unchecked Sendable {}
+// Same reason, for the study dictionary's build off the main actor; its one
+// SQLite connection sits behind a Mutex (core/src/study/mod.rs).
+extension StudyDictionary: @unchecked Sendable {}
 
 extension AnicatEngine {
     /// Fetches chapters for an AniList manga ID by resolving its MangaDex mapping.

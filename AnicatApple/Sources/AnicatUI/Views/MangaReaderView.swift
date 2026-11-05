@@ -542,7 +542,11 @@ public struct MangaReaderView: View {
                         if study.selected != nil { study.selected = nil } else { study.stop() }
                     }
                 }
-                .padding(SumiTheme.spaceLg)
+                // Clear of the top and bottom bars: at a plain 24pt inset the
+                // panel's first line sat under the reading-mode controls.
+                .padding(.horizontal, SumiTheme.spaceLg)
+                .padding(.top, 80)
+                .padding(.bottom, 64)
                 .transition(.opacity)
             }
 

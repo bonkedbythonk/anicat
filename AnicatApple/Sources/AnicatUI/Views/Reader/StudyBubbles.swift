@@ -103,6 +103,7 @@ final class StudySession {
     }
 
     func stop() {
+        StudySpeech.shared.stop()
         task?.cancel()
         task = nil
         state = .off
@@ -112,6 +113,7 @@ final class StudySession {
 
     private func start(_ pageURLs: [URL]) {
         state = .reading
+        StudyWords.shared.prepare()
         task = Task {
             do {
                 let data = try await Self.ocr(pageURLs)
@@ -193,6 +195,7 @@ final class StudySession {
                 .split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
             throw Failure(message: "mokuro stopped (exit \(status)). \(tail)")
         }
+        try? fm.removeItem(at: log)
         return data
         #else
         throw Failure(message: "Study mode needs the Mac app.")
@@ -273,12 +276,14 @@ struct StudyTextPanel: View {
                 .buttonStyle(.sumiPressable)
             }
             if let bubble {
-                Text(bubble.text)
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundColor(SumiTheme.foreground)
-                    .lineSpacing(6)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Long glosses run past any fixed height, and a panel that
+                // grew with them pushed its own close button off the page.
+                ScrollView {
+                    StudyWordsView(text: bubble.text)
+                        .id(bubble.id)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollIndicators(.never)
             } else if let failure {
                 Text(failure)
                     .font(.system(size: 13))
@@ -288,7 +293,8 @@ struct StudyTextPanel: View {
             }
         }
         .padding(SumiTheme.spaceMd)
-        .frame(width: 320, alignment: .leading)
+        .frame(width: 340, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: bubble == nil)
         .background(SumiTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusLg))
         .overlay(

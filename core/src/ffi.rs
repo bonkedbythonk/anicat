@@ -1462,6 +1462,10 @@ impl AnicatEngine {
         // lookups overlap the search instead of adding to it.
         let franchise = self.franchise_aids(req.catalog_id);
 
+        if !req.preload {
+            self.torrents.release_pin_for_evicted(media, req.episode).await;
+        }
+
         let url = self
             .torrents
             .resolve(
@@ -4430,6 +4434,10 @@ impl AnicatEngine {
             .ok()
             .flatten()
             .filter(|r| r.prefer_dub == req.prefer_dub);
+
+        if !req.preload {
+            self.torrents.release_pin_for_evicted(media, req.episode).await;
+        }
 
         let url = self
             .torrents

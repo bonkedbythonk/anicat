@@ -447,6 +447,12 @@ pub struct TorrentManager {
     /// across a binge, each one a permanent extra selected file — the exact
     /// bandwidth leak `SELECTED_FILES_KEPT` exists to stop.
     playing_file: std::sync::Mutex<Option<(usize, usize)>>,
+    /// Files the cache sweep truncated inside a torrent that stayed in the
+    /// session, by torrent. librqbit still counts their pieces as held, so
+    /// selecting one again would stream zeros; `try_candidate` reads this and
+    /// re-adds the torrent instead, which re-hashes and re-fetches the file.
+    /// An `Arc` because the sweep runs in a spawned task.
+    evicted_files: Arc<std::sync::Mutex<HashMap<usize, HashSet<usize>>>>,
     /// One in-flight or finished "Download Episode" per (torrent, file).
     /// Session-only — nothing here survives a relaunch, on purpose: there is
     /// no queue to resume, only a status the episode row polls while it's
@@ -476,6 +482,9 @@ pub enum EpisodeDownloadStatus {
 /// How many files stay selected inside one torrent: the one playing, and the
 /// one preloaded behind it.
 const SELECTED_FILES_KEPT: usize = 2;
+
+/// `try_candidate_inner`'s signal that it dropped a torrent to re-add it.
+const READD_EVICTED: &str = "re-adding a torrent whose file was evicted";
 
 /// Where finished downloads land: the Mac's own Downloads folder, where they
 /// are the viewer's files, and the app's Documents on a phone. On iOS
@@ -576,7 +585,7 @@ impl TorrentManager {
             tokio::runtime::Builder::new_current_thread()
                 .build()
                 .expect("tokio runtime for startup cache cleanup")
-                .block_on(cleanup_cache(&dir, None, &HashSet::new()));
+                .block_on(cleanup_cache(&dir, None, &HashSet::new(), None));
         });
         Self {
             session: tokio::sync::OnceCell::new(),
@@ -588,6 +597,7 @@ impl TorrentManager {
             release_aids: std::sync::Mutex::new(HashMap::new()),
             candidate_cache: tokio::sync::Mutex::new(HashMap::new()),
             selected_files: tokio::sync::Mutex::new(HashMap::new()),
+            evicted_files: Default::default(),
             playing_file: std::sync::Mutex::new(None),
             download_limit_bps: std::sync::atomic::AtomicU32::new(0),
             downloads: tokio::sync::Mutex::new(HashMap::new()),
@@ -787,6 +797,30 @@ impl TorrentManager {
         ids
     }
 
+    /// What the sweep may truncate inside the torrents it keeps. See
+    /// `PackEviction`.
+    async fn pack_eviction(&self) -> PackEviction {
+        let mut keep: HashMap<usize, HashSet<usize>> = self
+            .selected_files
+            .lock()
+            .await
+            .iter()
+            .map(|(t, files)| (*t, files.iter().copied().collect()))
+            .collect();
+        if let Some((t, f)) = *self.playing_file.lock().unwrap_or_else(|e| e.into_inner()) {
+            keep.entry(t).or_default().insert(f);
+        }
+        PackEviction { keep, skip: self.downloading_ids(), evicted: self.evicted_files.clone() }
+    }
+
+    fn is_evicted(&self, torrent_id: usize, file_id: usize) -> bool {
+        self.evicted_files
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&torrent_id)
+            .is_some_and(|files| files.contains(&file_id))
+    }
+
     fn downloading_ids(&self) -> HashSet<usize> {
         self.downloading.lock().unwrap_or_else(|e| e.into_inner()).keys().copied().collect()
     }
@@ -934,7 +968,8 @@ impl TorrentManager {
             .chain(self.downloading_ids())
             .collect();
         let session = self.session.get().cloned();
-        cleanup_cache_to(&self.cache_dir, session.as_ref(), &protected, 0, false).await;
+        let pack = self.pack_eviction().await;
+        cleanup_cache_to(&self.cache_dir, session.as_ref(), &protected, Some(pack), 0, false).await;
     }
 
     /// Bytes the stream cache is holding on disk right now.
@@ -1060,6 +1095,19 @@ impl TorrentManager {
         *self.playing_file.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
+    /// Before a real play's resolve: drop the pin when the episode asked for
+    /// was truncated by the sweep. Auto-next and the in-player episode list
+    /// resolve while the pin still names the episode being left, and
+    /// `try_candidate` refuses to re-add a pack whose pinned file differs, so
+    /// a remux pack's preload, truncated by a hover resolve in between, could
+    /// never play from the pack again. A preload must not get here.
+    pub async fn release_pin_for_evicted(&self, media: crate::media::MediaKey, episode: i64) {
+        let resolved = self.resolved.lock().await.get(&(media, episode)).copied();
+        if resolved.is_some_and(|r| self.is_evicted(r.torrent_id, r.file_id)) {
+            self.clear_playing();
+        }
+    }
+
     /// Select `file_id` inside `torrent_id` if this process hasn't already,
     /// recording it as the most recently wanted file.
     ///
@@ -1156,7 +1204,9 @@ impl TorrentManager {
                 .filter(|r| r.prefer_dub == prefer_dub)
                 .copied()
         };
-        if let Some(r) = reusable {
+        // An evicted file goes through the full path, where `try_candidate`
+        // re-adds its torrent.
+        if let Some(r) = reusable.filter(|r| !self.is_evicted(r.torrent_id, r.file_id)) {
             if let Some(handle) = session.get(r.torrent_id.into()) {
                 let _ = session.unpause(&handle).await;
                 // Being in the session is not the same as still being
@@ -1259,7 +1309,8 @@ impl TorrentManager {
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
                     let protected = self.cleanup_protected(Some(r.torrent_id));
-                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected).await });
+                    let pack = self.pack_eviction().await;
+                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected, Some(pack)).await });
                     log::info!(
                         "[resolve] torrent remembered release '{}' still good for media={} ep={} (torrent {}, file {}, session={}ms, total={}ms)",
                         cand.name, media, episode, r.torrent_id, r.file_id, session_ms, stage.elapsed().as_millis()
@@ -1532,7 +1583,8 @@ impl TorrentManager {
                 let dir = self.cache_dir.clone();
                 let session_for_cleanup = session.clone();
                 let protected = self.cleanup_protected(Some(r.torrent_id));
-                tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected).await });
+                let pack = self.pack_eviction().await;
+                tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected, Some(pack)).await });
                 log::info!(
                     "torrent: streaming '{}' (torrent {}, file {})",
                     cand.name, r.torrent_id, r.file_id
@@ -1568,7 +1620,8 @@ impl TorrentManager {
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
                     let protected = self.cleanup_protected(Some(r.torrent_id));
-                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected).await });
+                    let pack = self.pack_eviction().await;
+                    tokio::spawn(async move { cleanup_cache(&dir, Some(&session_for_cleanup), &protected, Some(pack)).await });
                     log::info!(
                         "torrent: streaming '{}' (torrent {}, file {}) from the extended fallback pool",
                         cand.name, r.torrent_id, r.file_id
@@ -1689,7 +1742,8 @@ impl TorrentManager {
                 let _ = session.pause(&h).await;
             }
         }
-        cleanup_cache(&self.cache_dir, Some(&session), &self.cleanup_protected(None)).await;
+        let pack = self.pack_eviction().await;
+        cleanup_cache(&self.cache_dir, Some(&session), &self.cleanup_protected(None), Some(pack)).await;
     }
 
     /// True while any torrent in the session is still downloading (live and
@@ -2447,9 +2501,16 @@ impl TorrentManager {
     ) -> Result<Resolved, String> {
         let started = std::time::Instant::now();
         let mut stages = CandidateStages::new();
-        let out = self
+        let mut out = self
             .try_candidate_inner(client, session, cand, ctx, &mut stages, added)
             .await;
+        // The inner attempt dropped a torrent whose wanted file had been
+        // truncated; the second one adds it fresh.
+        if out.as_ref().is_err_and(|e| e == READD_EVICTED) {
+            out = self
+                .try_candidate_inner(client, session, cand, ctx, &mut stages, added)
+                .await;
+        }
         stages.log(
             &cand.name,
             if out.is_ok() { "ok" } else { "failed" },
@@ -2692,6 +2753,22 @@ impl TorrentManager {
             return Err(format!("episode {} not found inside torrent", ctx.episode));
         };
 
+        // librqbit still counts a truncated file as complete, so the only way
+        // to fetch it again is a fresh add, whose initial check reads the
+        // short file as missing pieces. Dropping the torrent ends any stream
+        // from it, so not while a different file of it is playing: this
+        // candidate fails and the resolve moves on to the next release.
+        if already_managed && self.is_evicted(torrent_id, file_id) {
+            if self.pinned_file_in(torrent_id).is_some_and(|f| f != file_id) {
+                return Err("episode was evicted from a pack that is still playing".into());
+            }
+            log::info!("torrent: file {} of torrent {} was evicted; re-adding the torrent", file_id, torrent_id);
+            let _ = session.delete(torrent_id.into(), false).await;
+            self.selected_files.lock().await.remove(&torrent_id);
+            self.evicted_files.lock().unwrap_or_else(|e| e.into_inner()).remove(&torrent_id);
+            return Err(READD_EVICTED.into());
+        }
+
         // Select the wanted file alongside the one selected just before it,
         // and nothing older.
         //
@@ -2727,6 +2804,7 @@ impl TorrentManager {
             let recent = selected.entry(torrent_id).or_default();
             if !already_managed {
                 recent.clear();
+                self.evicted_files.lock().unwrap_or_else(|e| e.into_inner()).remove(&torrent_id);
             }
             retain_recent(recent, file_id, pinned);
             recent.iter().copied().collect()
@@ -2972,8 +3050,130 @@ pub async fn stream_cache_bytes(dir: &std::path::Path) -> u64 {
     .unwrap_or(0)
 }
 
-async fn cleanup_cache(dir: &std::path::Path, session: Option<&Arc<Session>>, protected: &HashSet<usize>) {
-    cleanup_cache_to(dir, session, protected, CACHE_CAP_BYTES, true).await
+async fn cleanup_cache(
+    dir: &std::path::Path,
+    session: Option<&Arc<Session>>,
+    protected: &HashSet<usize>,
+    pack: Option<PackEviction>,
+) {
+    cleanup_cache_to(dir, session, protected, pack, CACHE_CAP_BYTES, true).await
+}
+
+/// Lets the sweep reach inside a torrent it has to keep.
+///
+/// The sweep only ever deleted whole torrent folders, and it must step over
+/// the one being played. A season pack is one folder, so every episode
+/// watched from it stayed on disk until the viewer moved to another show:
+/// seven episodes of a BD remux pack reached 41 GB against the 3 GB cap in
+/// one evening, with the disk at 1.7 GB free.
+struct PackEviction {
+    /// Files that must stay, by torrent: the selection window and the pin.
+    /// A torrent missing here is never reached into.
+    keep: HashMap<usize, HashSet<usize>>,
+    /// Torrents a download is fetching, left whole.
+    skip: HashSet<usize>,
+    /// Where truncated files are recorded. See `TorrentManager::evicted_files`.
+    evicted: Arc<std::sync::Mutex<HashMap<usize, HashSet<usize>>>>,
+}
+
+/// Which files to truncate, oldest first, until `total` fits under `cap`.
+/// `files` is `(index, bytes on disk, mtime)`. Pure so it is tested without
+/// a session.
+fn pick_file_victims(
+    files: &[(usize, u64, std::time::SystemTime)],
+    keep: &HashSet<usize>,
+    mut total: u64,
+    cap: u64,
+) -> Vec<usize> {
+    let mut candidates: Vec<_> = files
+        .iter()
+        .filter(|(i, size, _)| *size > 0 && !keep.contains(i))
+        .collect();
+    candidates.sort_by_key(|(_, _, mtime)| *mtime);
+    let mut victims = vec![];
+    for (i, size, _) in candidates {
+        if total <= cap {
+            break;
+        }
+        victims.push(*i);
+        total = total.saturating_sub(*size);
+    }
+    victims
+}
+
+/// Truncates files outside the selection window inside the torrents the
+/// sweep kept, and returns the cache total afterwards.
+///
+/// `set_len(0)`, never unlink: librqbit holds every file of a torrent open,
+/// selected or not, and an unlinked open file frees nothing until the torrent
+/// leaves the session.
+async fn evict_unselected_files(
+    dir: &std::path::Path,
+    session: &Arc<Session>,
+    pack: &PackEviction,
+    total: u64,
+    cap: u64,
+) -> u64 {
+    // Single-file torrents are skipped: their one file is the one selected.
+    let torrents: Vec<(usize, Vec<(usize, PathBuf)>)> = session.with_torrents(|it| {
+        it.filter(|(id, _)| pack.keep.contains_key(id) && !pack.skip.contains(id))
+            .filter_map(|(id, h)| {
+                let folder = dir.join(h.name()?);
+                let files = h
+                    .with_metadata(|m| {
+                        m.file_infos
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, fi)| !fi.attrs.padding)
+                            .map(|(i, fi)| (i, folder.join(&fi.relative_filename)))
+                            .collect::<Vec<_>>()
+                    })
+                    .ok()?;
+                (files.len() > 1).then_some((id, files))
+            })
+            .collect()
+    });
+    let keep = pack.keep.clone();
+    let Ok((total, evicted)) = tokio::task::spawn_blocking(move || {
+        let mut total = total;
+        let mut evicted: Vec<(usize, usize)> = vec![];
+        for (id, files) in torrents {
+            if total <= cap {
+                break;
+            }
+            let stats: Vec<(usize, u64, std::time::SystemTime)> = files
+                .iter()
+                .filter_map(|(i, path)| {
+                    let md = path.metadata().ok()?;
+                    Some((*i, allocated_size(&md), md.modified().ok()?))
+                })
+                .collect();
+            let victims = pick_file_victims(&stats, &keep[&id], total, cap);
+            for i in victims {
+                let Some((_, path)) = files.iter().find(|(f, _)| *f == i) else { continue };
+                let size = stats.iter().find(|(f, _, _)| *f == i).map_or(0, |s| s.1);
+                let truncated = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .and_then(|f| f.set_len(0));
+                if truncated.is_ok() {
+                    log::info!("torrent: evicted file {} of torrent {} ({} MB)", i, id, size / (1024 * 1024));
+                    total = total.saturating_sub(size);
+                    evicted.push((id, i));
+                }
+            }
+        }
+        (total, evicted)
+    })
+    .await
+    else {
+        return total;
+    };
+    let mut record = pack.evicted.lock().unwrap_or_else(|e| e.into_inner());
+    for (id, i) in evicted {
+        record.entry(id).or_default().insert(i);
+    }
+    total
 }
 
 /// `cleanup_cache` with the cap made explicit, so a purge can ask for zero.
@@ -2988,6 +3188,7 @@ async fn cleanup_cache_to(
     dir: &std::path::Path,
     session: Option<&Arc<Session>>,
     protected: &HashSet<usize>,
+    pack: Option<PackEviction>,
     cap: u64,
     respect_grace: bool,
 ) {
@@ -3066,6 +3267,11 @@ async fn cleanup_cache_to(
         if ok {
             log::info!("torrent: evicted {} ({} MB)", path.display(), size / (1024 * 1024));
             total = total.saturating_sub(size);
+        }
+    }
+    if total > cap {
+        if let (Some(session), Some(pack)) = (session, pack.as_ref()) {
+            evict_unselected_files(dir, session, pack, total, cap).await;
         }
     }
 }
@@ -3557,6 +3763,29 @@ mod tests {
         assert_eq!(recent, vec![6, 7]);
         retain_recent(&mut recent, 8, Some(6));
         assert_eq!(recent, vec![6, 8], "episode 5 is no longer protected");
+    }
+
+    /// Regression: one remux pack held 41 GB of watched episodes because the
+    /// sweep could only delete the whole folder, and that folder was playing.
+    #[test]
+    fn a_playing_pack_sheds_watched_episodes_but_not_its_window() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let at = |s: u64| std::time::UNIX_EPOCH + std::time::Duration::from_secs(s);
+        // Episodes 0-6 at 6 GB each, watched in order; 5 plays, 6 is preloaded.
+        let files: Vec<_> = (0..7).map(|i| (i, 6 * GB, at(i as u64))).collect();
+        let keep: HashSet<usize> = [5, 6].into();
+        let victims = pick_file_victims(&files, &keep, 42 * GB, 3 * GB);
+        assert_eq!(victims, vec![0, 1, 2, 3, 4], "oldest first, window untouched");
+
+        // The window alone is over the cap: stop when nothing else is left.
+        let victims = pick_file_victims(&files[5..], &keep, 12 * GB, 3 * GB);
+        assert!(victims.is_empty());
+
+        // Stop as soon as the total fits, and skip files already empty.
+        let mut files = files;
+        files[0].1 = 0;
+        let victims = pick_file_victims(&files, &keep, 30 * GB, 20 * GB);
+        assert_eq!(victims, vec![1, 2]);
     }
 
     /// Regression: a 20GB pack whose files are laid down up front, holding

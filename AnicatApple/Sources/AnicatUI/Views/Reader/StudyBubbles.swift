@@ -102,6 +102,27 @@ final class StudySession {
         start(pageURLs)
     }
 
+    /// Up to two bubbles either side of `bubble` on its page, in reading
+    /// order: chapter 1 opens on one sentence split over two narration boxes,
+    /// and either box alone is half a sentence.
+    func context(of bubble: StudyBubble) -> (before: [String], after: [String]) {
+        let page = (bubbles[bubble.page] ?? []).sorted(by: Self.readsBefore)
+        guard let index = page.firstIndex(where: { $0.id == bubble.id }) else { return ([], []) }
+        return (
+            page[max(0, index - 2)..<index].map(\.text),
+            page[(index + 1)..<min(page.count, index + 3)].map(\.text)
+        )
+    }
+
+    /// Japanese pages read right to left, top to bottom. Bubbles are grouped
+    /// into horizontal bands first, because two boxes side by side in one
+    /// panel never start at exactly the same height.
+    nonisolated static func readsBefore(_ a: StudyBubble, _ b: StudyBubble) -> Bool {
+        let bandA = Int(a.rect.minY / 0.15), bandB = Int(b.rect.minY / 0.15)
+        if bandA != bandB { return bandA < bandB }
+        return a.rect.maxX > b.rect.maxX
+    }
+
     func stop() {
         StudySpeech.shared.stop()
         task?.cancel()
@@ -114,6 +135,7 @@ final class StudySession {
     private func start(_ pageURLs: [URL]) {
         state = .reading
         StudyWords.shared.prepare()
+        StudyExplainer.prewarm()
         task = Task {
             do {
                 let data = try await Self.ocr(pageURLs)
@@ -257,6 +279,7 @@ struct StudyBubbleOverlay: View {
 struct StudyTextPanel: View {
     let bubble: StudyBubble?
     let failure: String?
+    var context: (before: [String], after: [String]) = ([], [])
     let onClose: () -> Void
 
     var body: some View {
@@ -279,7 +302,7 @@ struct StudyTextPanel: View {
                 // Long glosses run past any fixed height, and a panel that
                 // grew with them pushed its own close button off the page.
                 ScrollView {
-                    StudyWordsView(text: bubble.text)
+                    StudyWordsView(text: bubble.text, before: context.before, after: context.after)
                         .id(bubble.id)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

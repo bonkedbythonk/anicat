@@ -27,6 +27,20 @@ struct StudyBubblesTests {
         #expect(bubbles[10]?.isEmpty == true)
     }
 
+    @Test("Bubbles read right to left within a band, then top to bottom")
+    func readingOrder() {
+        func bubble(_ id: String, x: Double, y: Double) -> StudyBubble {
+            StudyBubble(id: id, page: 0, rect: CGRect(x: x, y: y, width: 0.08, height: 0.2), text: id)
+        }
+        // Two boxes side by side in the top panel, one a little lower, then
+        // a box in the panel below.
+        let right = bubble("right", x: 0.8, y: 0.20)
+        let left = bubble("left", x: 0.2, y: 0.24)
+        let below = bubble("below", x: 0.9, y: 0.55)
+        let sorted = [below, left, right].sorted(by: StudySession.readsBefore)
+        #expect(sorted.map(\.id) == ["right", "left", "below"])
+    }
+
     @Test("Full-width full stops used as an ellipsis become one ellipsis")
     func cleansEllipses() {
         #expect(MokuroResult.clean(["待ってる．．"]) == "待ってる…")

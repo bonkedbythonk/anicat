@@ -538,7 +538,11 @@ public struct MangaReaderView: View {
             if study.selected != nil || failureText != nil {
                 HStack {
                     Spacer()
-                    StudyTextPanel(bubble: study.selected, failure: failureText) {
+                    StudyTextPanel(
+                        bubble: study.selected,
+                        failure: failureText,
+                        context: study.selected.map(study.context(of:)) ?? ([], [])
+                    ) {
                         if study.selected != nil { study.selected = nil } else { study.stop() }
                     }
                 }

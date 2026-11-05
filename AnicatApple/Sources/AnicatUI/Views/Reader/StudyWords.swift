@@ -155,8 +155,13 @@ enum StudyTags {
 /// word picked from it.
 struct StudyWordsView: View {
     let text: String
+    var before: [String] = []
+    var after: [String] = []
     @State private var tokens: [StudyToken] = []
     @State private var selected: Int?
+    @State private var explanation: StudyExplanation?
+    @State private var explaining = false
+    @State private var explainError: String?
     private var words: StudyWords { StudyWords.shared }
 
     var body: some View {
@@ -168,6 +173,7 @@ struct StudyWordsView: View {
                         tokenView(token, index: index)
                     }
                 }
+                explainSection
                 if let selected, tokens.indices.contains(selected) {
                     card(tokens[selected])
                 }
@@ -197,6 +203,79 @@ struct StudyWordsView: View {
         .task(id: StudyLookupKey(text: text, ready: words.state == .ready)) {
             tokens = words.lookup(text)
             selected = tokens.firstIndex { $0.isWord && !$0.entries.isEmpty }
+            explanation = StudyExplainer.cached(text)
+        }
+    }
+
+    @ViewBuilder
+    private var explainSection: some View {
+        if let explanation {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(explanation.translation)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if explanation.spansBubbles {
+                    Text("The sentence runs across more than one bubble.")
+                        .font(.system(size: 11.5))
+                        .foregroundColor(SumiTheme.muted)
+                }
+                Text("Literally: \(explanation.literal)")
+                    .font(.system(size: 12.5))
+                    .foregroundColor(SumiTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(Array(explanation.points.enumerated()), id: \.offset) { _, point in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(point.phrase)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(SumiTheme.indigo)
+                        Text(point.meaning)
+                            .font(.system(size: 12.5))
+                            .foregroundColor(SumiTheme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Text("Explained on this Mac by Apple Intelligence, from the dictionary breakdown. It can be wrong.")
+                    .font(.system(size: 10))
+                    .foregroundColor(SumiTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+        } else if let reason = StudyExplainer.unavailableReason {
+            Text("Sentence explanations: \(reason)")
+                .font(.system(size: 12))
+                .foregroundColor(SumiTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            HStack(spacing: 8) {
+                Button {
+                    explaining = true
+                    explainError = nil
+                    Task {
+                        do {
+                            explanation = try await StudyExplainer.explain(line: text, before: before, after: after, tokens: tokens)
+                        } catch {
+                            AppLog.write("[study] explain failed: \(error)")
+                            explainError = "Could not explain this line: \(error.localizedDescription)"
+                        }
+                        explaining = false
+                    }
+                } label: {
+                    Text("Explain this sentence")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(SumiTheme.indigo)
+                }
+                .buttonStyle(.sumiPressable)
+                .disabled(explaining)
+                if explaining { ProgressView().controlSize(.small) }
+            }
+            if let explainError {
+                Text(explainError)
+                    .font(.system(size: 12))
+                    .foregroundColor(SumiTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

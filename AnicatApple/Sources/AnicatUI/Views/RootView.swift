@@ -1173,6 +1173,9 @@ public struct RootView: View {
                             onDownloadVolume: { model.downloadNovelVolume($0) },
                             onDeleteVolumeDownload: { model.deleteNovelVolumeDownload($0) },
                             onExportVolume: { model.exportNovelVolume($0) },
+                            onToggleJapaneseManga: {
+                                Task { await model.loadDetail(id: details.id, isManga: true, forceRefresh: true) }
+                            },
                             onSetCinemaListStatus: { model.setCinemaListStatus($0) },
                             onPlayEpisode: { ep in
                                 playEpisode(

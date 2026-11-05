@@ -897,6 +897,16 @@ public final class AppModel {
         UserDefaults.standard.bool(forKey: lnoriKey)
     }
 
+    /// The "Japanese raws" switch (`AnicatEngine.japaneseMangaKey`). The
+    /// detail snapshot keeps one chapter list per title with no language on
+    /// it, so while this is on the snapshot's chapters are neither painted
+    /// nor written: painting an English list under a Japanese setting
+    /// flashed it for the length of the fetch, and writing a Japanese one
+    /// would show it once the switch was off.
+    static var isJapaneseManga: Bool {
+        UserDefaults.standard.bool(forKey: AnicatEngine.japaneseMangaKey)
+    }
+
     /// Settings > Sharing > "Allow other devices". Written by `@AppStorage`
     /// in `SettingsView`, read here and by the defaults observer below.
     public nonisolated static let lanSharingKey = "anicat_lan_sharing"

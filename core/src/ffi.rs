@@ -20,6 +20,7 @@ use crate::discord::{DiscordClient, DiscordPresence, DiscordPresenceDetail, Disc
 use crate::media::MediaKey;
 use crate::reader::mangadex::MangaDexClient;
 use crate::reader::mangakatana::MangaKatanaClient;
+use crate::reader::senmanga::{is_senmanga_id, SenMangaClient};
 use crate::reader::lnori::LnoriClient;
 use crate::reader::syosetu::SyosetuClient;
 use crate::torrent::{layout, ResolveTarget, TorrentManager};
@@ -1111,6 +1112,7 @@ pub struct AnicatEngine {
     torrents: Arc<TorrentManager>,
     mangadex: MangaDexClient,
     mangakatana: MangaKatanaClient,
+    senmanga: SenMangaClient,
     syosetu: SyosetuClient,
     lnori: LnoriClient,
     discord: DiscordClient,
@@ -1192,6 +1194,7 @@ impl AnicatEngine {
             torrents: Arc::new(TorrentManager::with_cache_dir(dir.join("torrent-streams"))),
             mangadex: MangaDexClient::new(http.clone()),
             mangakatana: MangaKatanaClient::new(http.clone()),
+            senmanga: SenMangaClient::new(http.clone()),
             syosetu: SyosetuClient::new(http.clone()),
             lnori: LnoriClient::new(http.clone()),
             discord: DiscordClient::new(),
@@ -3171,7 +3174,9 @@ impl AnicatEngine {
     }
 
     pub async fn get_manga_chapters(&self, manga_id: String) -> FfiResult<Vec<MangaChapter>> {
-        let detail = if is_mangakatana_id(&manga_id) {
+        let detail = if is_senmanga_id(&manga_id) {
+            self.senmanga.detail(&manga_id).await
+        } else if is_mangakatana_id(&manga_id) {
             self.mangakatana.detail(&manga_id).await
         } else {
             self.mangadex.detail(&manga_id).await
@@ -3191,7 +3196,9 @@ impl AnicatEngine {
     }
 
     pub async fn get_manga_pages(&self, chapter_id: String) -> FfiResult<Vec<String>> {
-        if is_mangakatana_id(&chapter_id) {
+        if is_senmanga_id(&chapter_id) {
+            self.senmanga.chapter_pages(&chapter_id).await
+        } else if is_mangakatana_id(&chapter_id) {
             self.mangakatana.chapter_pages(&chapter_id).await
         } else {
             self.mangadex.chapter_pages(&chapter_id).await
@@ -3207,6 +3214,25 @@ impl AnicatEngine {
     pub async fn search_manga_katana(&self, query: String) -> FfiResult<Vec<MangaSummary>> {
         let out = self
             .mangakatana
+            .search(&query)
+            .await
+            .map_err(|msg| AnicatError::Network { msg })?;
+        Ok(out
+            .into_iter()
+            .map(|m| MangaSummary {
+                id: m.id,
+                title: m.title,
+                cover_image: m.cover_image,
+                matches_anilist: m.matches_anilist,
+            })
+            .collect())
+    }
+
+    /// Japanese-language (raw) search against Sen Manga, for the reader's
+    /// Japanese setting. Title-matched only: `matches_anilist` is false.
+    pub async fn search_manga_japanese(&self, query: String) -> FfiResult<Vec<MangaSummary>> {
+        let out = self
+            .senmanga
             .search(&query)
             .await
             .map_err(|msg| AnicatError::Network { msg })?;

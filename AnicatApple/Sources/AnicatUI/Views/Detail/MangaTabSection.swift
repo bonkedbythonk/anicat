@@ -80,18 +80,8 @@ struct MangaTabSection: View {
         )
     }
 
-    @ViewBuilder
     private var lnoriSwitch: some View {
-        // `SwitchToggleStyle` is not in the tvOS SDK. Nothing mounts this tab
-        // on the TV; the default style only keeps it compiling there.
-        #if os(tvOS)
-        Toggle("Official volumes", isOn: $lnoriEnabled)
-            .labelsHidden()
-        #else
-        Toggle("Official volumes", isOn: $lnoriEnabled)
-            .labelsHidden()
-            .toggleStyle(.switch)
-        #endif
+        SumiSwitch(isOn: $lnoriEnabled)
     }
 
     @ViewBuilder
@@ -193,6 +183,9 @@ struct MangaTabSection: View {
     var onDownloadVolume: ((NovelChapterRef) -> Void)?
     var onDeleteVolumeDownload: ((NovelChapterRef) -> Void)?
     var onExportVolume: ((NovelChapterRef) -> Void)?
+    // `AppModel.isJapaneseManga` owns the reader and the default (off).
+    @AppStorage("anicat_manga_japanese") private var japaneseManga: Bool = false
+    var onToggleJapaneseManga: (() -> Void)?
     /// Which chapters are on disk, or on their way there. Keyed by chapter
     /// id because that is what the registry and the files are keyed on.
     var offlineStates: [String: MediaDetailView.ChapterOfflineState] = [:]
@@ -201,11 +194,48 @@ struct MangaTabSection: View {
     let onReadChapter: (MediaDetailView.MangaChapterItem) -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if format != "NOVEL" { languageRow }
+            list
+        }
+    }
+
+    /// The language the chapters are read in, on the page they are listed
+    /// on: the reason a list is Japanese or empty and the way to change it,
+    /// without a trip to Settings. Ruled like the chapter rows below it.
+    private var languageRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Language")
+                    .font(.sumiHeading(size: 13.5, weight: .medium))
+                    .foregroundColor(SumiTheme.foreground)
+                Text("Japanese raws come from Sen Manga, which has fewer titles than the English chapters.")
+                    .font(.system(size: 12))
+                    .foregroundColor(SumiTheme.muted)
+            }
+            Spacer(minLength: 12)
+            SumiSlashToggle([(true, "日本語"), (false, "English")], selection: japaneseManga) { japaneseManga = $0 }
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 12)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
+        }
+        .onChange(of: japaneseManga) { _, _ in onToggleJapaneseManga?() }
+    }
+
+    @ViewBuilder
+    private var list: some View {
         if chapters.isEmpty {
             if isLoading {
                 EpisodeListSkeleton(count: 6, isCompact: true)
             } else if format == "NOVEL" {
                 novelVolumeList
+            } else if japaneseManga {
+                SumiEmptyState(
+                    headline: "No Japanese chapters",
+                    detail: "Sen Manga does not carry this title under its romaji name. Switch to English to read the English chapters."
+                )
             } else {
                 SumiEmptyState(headline: "No chapters found", detail: "No chapters were found for this title.")
             }
@@ -253,6 +283,7 @@ struct MangaTabSection: View {
         ForEach(rows) { chapter in
             MediaDetailView.ChapterRowView(
                 chapter: chapter,
+                isRead: (Double(chapter.number) ?? .infinity) <= Double(readProgress ?? 0),
                 offline: offlineStates[chapter.id] ?? .none,
                 onDownload: onDownloadChapter.map { action in { action(chapter) } },
                 onDeleteDownload: onDeleteChapterDownload.map { action in { action(chapter) } }

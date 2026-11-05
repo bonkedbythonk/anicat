@@ -138,7 +138,7 @@ extension AppModel {
         if let cached = DetailCache.load(id: step.id, isManga: step.isManga) {
             withAnimation(.easeInOut(duration: 0.32)) {
                 selectedEpisodes = cached.episodes
-                selectedMangaChapters = cached.mangaChapters
+                selectedMangaChapters = Self.isJapaneseManga ? [] : cached.mangaChapters
                 selectedRelations = cached.relations
                 selectedRecommendations = cached.recommendations
                 selectedCharacters = cached.characters
@@ -232,7 +232,10 @@ extension AppModel {
         // ticked twice on its way to the state it already had.
         let alreadyShowing = selectedMediaDetails?.id == id
         if let cached, !alreadyShowing {
-            isDetailLoading = false
+            // Still loading under the Japanese setting: the snapshot's chapters
+            // are withheld, and an empty list with no skeleton read as "No
+            // Japanese chapters" for the length of the fetch.
+            isDetailLoading = isManga && Self.isJapaneseManga
             // Explicit for the same reason as `closeDetail()`: an
             // `.animation(value:)` modifier watching this `@Observable`
             // property doesn't reliably animate its insertion transition.
@@ -240,7 +243,7 @@ extension AppModel {
             // hand-off; the container no longer supplies one.
             withAnimation(.sumi(.morph)) {
                 selectedEpisodes = cached.episodes
-                selectedMangaChapters = cached.mangaChapters
+                selectedMangaChapters = Self.isJapaneseManga ? [] : cached.mangaChapters
                 selectedRelations = cached.relations
                 selectedRecommendations = cached.recommendations
                 selectedCharacters = cached.characters
@@ -270,7 +273,12 @@ extension AppModel {
 
         // Cache is recent enough to trust outright — skip the network round
         // trip entirely rather than "render cache, then sync anyway".
-        if !forceRefresh, cached != nil, let cacheAge, cacheAge < Self.detailFreshnessWindow {
+        // A manga snapshot's chapters are trusted only in English: under the
+        // Japanese setting they are never painted, and one saved while it was
+        // on holds none. Taking this path then left the list empty until the
+        // switch was flipped again, which forced a refresh.
+        let chaptersTrusted = !isManga || (!Self.isJapaneseManga && cached?.mangaChapters.isEmpty == false)
+        if !forceRefresh, cached != nil, chaptersTrusted, let cacheAge, cacheAge < Self.detailFreshnessWindow {
             loadingCatalogId = nil
             isDetailLoading = false
             // The volumes are not part of the snapshot, so this path has to
@@ -523,7 +531,7 @@ extension AppModel {
             DetailCache.Snapshot(
                 details: details,
                 episodes: selectedEpisodes,
-                mangaChapters: selectedMangaChapters,
+                mangaChapters: Self.isJapaneseManga ? [] : selectedMangaChapters,
                 relations: selectedRelations,
                 recommendations: selectedRecommendations,
                 characters: selectedCharacters,

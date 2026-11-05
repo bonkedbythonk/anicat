@@ -87,6 +87,25 @@ enum MangaMatching {
 }
 
 extension AnicatEngine {
+    /// Settings > Advanced > Manga language. Off reads the English chapters
+    /// (MangaDex, then MangaKatana); on reads Japanese raws from Sen Manga
+    /// instead, never both, since a list that mixed the two would put a
+    /// Japanese chapter between English ones.
+    public static let japaneseMangaKey = "anicat_manga_japanese"
+
+    /// Sen Manga has no search, only a lookup by the title's romaji slug, so
+    /// every title name AniList has is tried until one is on the site.
+    func japaneseMangaSource(titles: [String]) async -> MangaSource? {
+        for title in titles where !title.isEmpty {
+            let matches = (try? await self.searchMangaJapanese(query: title)) ?? []
+            for match in matches {
+                let chapters = (try? await self.getMangaChapters(mangaId: match.id)) ?? []
+                if !chapters.isEmpty { return MangaSource(match: match, chapters: chapters) }
+            }
+        }
+        return nil
+    }
+
     /// The chapters to read for a title, and where they came from. MangaDex
     /// first; a result carrying AniList's link to this title settles the
     /// search there unless its feed is only a fragment, in which case
@@ -94,6 +113,9 @@ extension AnicatEngine {
     /// only linked entry is the colored edition from chapter 140, and
     /// Komi's a fan-colored one of 9 chapters.
     public func mangaSource(catalogId: Int64, titles: [String], finishedChapters: Int?) async -> MangaSource? {
+        if UserDefaults.standard.bool(forKey: Self.japaneseMangaKey) {
+            return await japaneseMangaSource(titles: titles)
+        }
         var queries: [String] = []
         for title in titles where !title.isEmpty && !queries.contains(title) {
             queries.append(title)

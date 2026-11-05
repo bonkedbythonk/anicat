@@ -305,6 +305,9 @@ public struct MediaDetailView: View {
     public var onDownloadVolume: ((NovelChapterRef) -> Void)?
     public var onDeleteVolumeDownload: ((NovelChapterRef) -> Void)?
     public var onExportVolume: ((NovelChapterRef) -> Void)?
+    /// The manga tab's language switch changed; the chapters have to be
+    /// fetched again from the other source.
+    public var onToggleJapaneseManga: (() -> Void)?
     public var onSetCinemaListStatus: (String?) -> Void = { _ in }
     
     public let onPlayEpisode: (EpisodeItem) -> Void
@@ -432,6 +435,7 @@ public struct MediaDetailView: View {
         onDownloadVolume: ((NovelChapterRef) -> Void)? = nil,
         onDeleteVolumeDownload: ((NovelChapterRef) -> Void)? = nil,
         onExportVolume: ((NovelChapterRef) -> Void)? = nil,
+        onToggleJapaneseManga: (() -> Void)? = nil,
         onSetCinemaListStatus: @escaping (String?) -> Void = { _ in },
         onPlayEpisode: @escaping (EpisodeItem) -> Void = { _ in },
         onPlayEpisodeFromStart: @escaping (EpisodeItem) -> Void = { _ in },
@@ -483,6 +487,7 @@ public struct MediaDetailView: View {
         self.onDownloadVolume = onDownloadVolume
         self.onDeleteVolumeDownload = onDeleteVolumeDownload
         self.onExportVolume = onExportVolume
+        self.onToggleJapaneseManga = onToggleJapaneseManga
         self.onSetCinemaListStatus = onSetCinemaListStatus
         self.onPlayEpisode = onPlayEpisode
         self.onPlayEpisodeFromStart = onPlayEpisodeFromStart
@@ -1984,6 +1989,7 @@ public struct MediaDetailView: View {
                 onDownloadVolume: onDownloadVolume,
                 onDeleteVolumeDownload: onDeleteVolumeDownload,
                 onExportVolume: onExportVolume,
+                onToggleJapaneseManga: onToggleJapaneseManga,
                 offlineStates: chapterOfflineStates,
                 onDownloadChapter: onDownloadChapter,
                 onDeleteChapterDownload: onDeleteChapterDownload,
@@ -2025,6 +2031,9 @@ public struct MediaDetailView: View {
 
     struct ChapterRowView: View {
         let chapter: MediaDetailView.MangaChapterItem
+        /// At or below the chapter AniList says is read: dimmed and ticked
+        /// the way a watched episode is, so the list shows where you are.
+        var isRead: Bool = false
         var offline: ChapterOfflineState = .none
         var onDownload: (() -> Void)?
         var onDeleteDownload: (() -> Void)?
@@ -2037,12 +2046,16 @@ public struct MediaDetailView: View {
                 HStack(spacing: 12) {
                     Text("Ch \(chapter.number)")
                         .sumiTabularMono(size: 11.5)
-                        .foregroundColor(SumiTheme.indigo)
+                        .foregroundColor(isRead ? SumiTheme.muted.opacity(0.6) : SumiTheme.indigo)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(chapter.title)
-                            .font(.sumiHeading(size: 13.5, weight: .medium))
-                            .foregroundColor(SumiTheme.foreground)
-                            .lineLimit(1)
+                        // Sen Manga names a chapter "Chapter 12", which the
+                        // number beside it already says.
+                        if chapter.title.trimmingCharacters(in: .whitespaces).lowercased() != "chapter \(chapter.number)" {
+                            Text(chapter.title)
+                                .font(.sumiHeading(size: 13.5, weight: .medium))
+                                .foregroundColor(isRead ? SumiTheme.muted.opacity(0.6) : SumiTheme.foreground)
+                                .lineLimit(1)
+                        }
                         // MangaDex's API rules make crediting the scanlation
                         // group a condition of use. The phone row credited
                         // it from the start; this one listed the chapter as
@@ -2056,6 +2069,7 @@ public struct MediaDetailView: View {
                     }
                     Spacer()
                     offlineControl
+                    if isRead { WatchedTick(isWatched: true, diameter: 16) }
                 }
                 // Ruled rows like the episode list, not a box per chapter.
                 .padding(.horizontal, 4)

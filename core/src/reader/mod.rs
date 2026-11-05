@@ -8,6 +8,8 @@
 //! id names its source (UUID or page URL), which is how one list can hold
 //! both and the page fetch still reaches the right site.
 //!
+//! `senmanga` is the Japanese-language (raw) source, over its JSON API.
+//!
 //! Light novels sit alongside. `syosetu` reads Japanese web novels from a URL
 //! the viewer pastes; `lnori` is the first light-novel source that can be
 //! reached from a catalogue entry, matching AniList's title strings against
@@ -16,6 +18,7 @@
 pub mod offline;
 pub mod mangadex;
 pub mod mangakatana;
+pub mod senmanga;
 pub mod syosetu;
 pub mod lnori;
 pub mod epub;

@@ -35,6 +35,8 @@ struct MaintenanceTabSection: View {
     // Same literal-key constraint. `AppModel.isLnoriEnabled` owns the reader
     // and the default (off).
     @AppStorage("anicat_lnori_enabled") private var lnoriEnabled: Bool = false
+    // `AnicatEngine.japaneseMangaKey`, spelled out for the same reason.
+    @AppStorage("anicat_manga_japanese") private var japaneseManga: Bool = false
     @State private var cacheBytes: UInt64?
     /// Nil until a check has run; "Up to date" afterwards. A blank row would
     /// leave the button looking like it had done nothing.
@@ -59,6 +61,18 @@ struct MaintenanceTabSection: View {
                 description: "Official volumes come from a third-party site that hosts licensed light novels. It is off until you turn it on. Web novels from Syosetu are unaffected."
             ) {
                 SumiSwitch(isOn: $lnoriEnabled)
+            }
+        }
+
+        SettingsCard(
+            title: "Manga language",
+            description: "Which chapters the manga reader opens."
+        ) {
+            SettingField(
+                label: "Language",
+                description: "Japanese reads untranslated chapters from Sen Manga instead of the English ones. It carries a smaller catalogue, so a title it lacks shows no chapters while this is on."
+            ) {
+                SumiSlashToggle([(true, "日本語"), (false, "English")], selection: japaneseManga) { japaneseManga = $0 }
             }
         }
 

@@ -181,6 +181,7 @@ public struct SettingsView: View {
         .init(label: "Your own TMDB key", card: "Cinema (TMDB)", tab: .accounts),
 
         .init(label: "Official volumes", card: "Light novel sources", tab: .advanced),
+        .init(label: "Language", card: "Manga language", tab: .advanced),
         .init(label: "Offline manga limit", card: "Storage", tab: .advanced),
         .init(label: "Streamed video cache", card: "Storage", tab: .advanced),
         .init(label: "Current version", card: "Updates", tab: .advanced),

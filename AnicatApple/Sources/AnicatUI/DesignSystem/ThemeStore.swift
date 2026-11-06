@@ -59,6 +59,11 @@ public struct SumiPalette: Sendable {
     /// shapes and still differ in which they draw.
     public let isEva: Bool
 
+    /// A solid sidebar fill in place of the vibrancy material. Sakura Zen's
+    /// web skin had its own `--surface-color` for the rail; over the grey
+    /// system material even a 62% cherry wash read grey, not plum.
+    public let sidebar: Color?
+
     public let background: Color
     public let card: Color
     public let foreground: Color
@@ -97,6 +102,7 @@ public struct SumiPalette: Sendable {
         isNeon: Bool = false,
         isCyber: Bool = false,
         isEva: Bool = false,
+        sidebarHex: String? = nil,
         dangerHex: String,
         dangerLightHex: String,
         successHex: String,
@@ -118,6 +124,7 @@ public struct SumiPalette: Sendable {
         self.isNeon = isNeon
         self.isCyber = isCyber
         self.isEva = isEva
+        self.sidebar = sidebarHex.map { Color(hex: $0) }
 
         self.background = Color(hex: backgroundHex)
         self.card = Color(hex: cardHex)
@@ -238,10 +245,8 @@ public extension SumiPalette {
     /// the suite's floors unchanged (foreground 18.54:1, accent 5.64:1).
     ///
     /// The CSS's separate `--surface-color` (`#2A151D` dark, `#FAEBEF` light)
-    /// is dropped rather than ported: in the Swift app the sidebar is a
-    /// vibrancy material tinted with the *ground*, so nothing would have read
-    /// it. The alpha-derived hairline also loses the CSS's `#422534`, which is
-    /// plummier than the near-white foreground it is now derived from; 0.16
+    /// is the sidebar's solid fill (`sidebarHex`). The alpha-derived hairline
+    /// also loses the CSS's `#422534`, which is plummier than the near-white foreground it is now derived from; 0.16
     /// matches its lightness (1.53:1) and the tint is the part that does not
     /// survive a single-foreground palette. The CSS's `letter-spacing:
     /// -0.01em` on headings has no equivalent either: tracking is a view
@@ -260,6 +265,7 @@ public extension SumiPalette {
         mutedAlpha: 0.55,
         borderAlpha: 0.16,
         usesSerifHeadings: true,
+        sidebarHex: "#2A151D",
         dangerHex: SumiPalette.darkStatus.danger,
         dangerLightHex: SumiPalette.darkStatus.dangerLight,
         successHex: SumiPalette.darkStatus.success,
@@ -285,6 +291,7 @@ public extension SumiPalette {
         mutedAlpha: 0.65,
         borderAlpha: 0.12,
         usesSerifHeadings: true,
+        sidebarHex: "#FAEBEF",
         dangerHex: SumiPalette.lightStatus.danger,
         dangerLightHex: SumiPalette.lightStatus.dangerLight,
         successHex: SumiPalette.lightStatus.success,

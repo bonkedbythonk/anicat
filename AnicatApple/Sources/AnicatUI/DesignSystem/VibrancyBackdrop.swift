@@ -24,6 +24,14 @@ public struct VibrancyBackdrop: View {
     public init() {}
 
     public var body: some View {
+        if let sidebar = ThemeStore.shared.palette.sidebar {
+            sidebar
+        } else {
+            material
+        }
+    }
+
+    private var material: some View {
         ZStack {
             #if os(macOS)
             VisualEffectView(material: .sidebar, blending: .behindWindow)

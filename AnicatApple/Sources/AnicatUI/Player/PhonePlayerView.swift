@@ -191,18 +191,19 @@ struct PhonePlayerView: View {
                     .foregroundStyle(SumiTheme.foreground)
                     .lineLimit(1)
                 Text("Ep \(controller.episodeNumber) \u{00B7} -\(Self.timestamp(max(0, controller.duration - controller.currentTime)))")
-                    .sumiTabularMono(size: 10.5)
+                    .sumiTabularMono(size: 12)
                     .foregroundStyle(SumiTheme.muted)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 controller.togglePlayPause()
+                AppHaptics.play(.transport)
             } label: {
                 Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(SumiTheme.foreground)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -210,7 +211,7 @@ struct PhonePlayerView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(SumiTheme.muted)
-                    .frame(width: 36, height: 40)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -604,7 +605,7 @@ struct PhonePlayerView: View {
                                         .font(.system(size: 13))
                                         .lineLimit(2)
                                     Text(Self.releaseDetail(release))
-                                        .sumiTabularMono(size: 11)
+                                        .sumiTabularMono(size: 12)
                                         .foregroundStyle(.secondary)
                                     // The engine tries this one first on
                                     // every play and never said so; a
@@ -612,7 +613,7 @@ struct PhonePlayerView: View {
                                     // know which one already worked.
                                     if release.name == controller.rememberedReleaseName {
                                         Text("Played last time")
-                                            .sumiTabularMono(size: 10)
+                                            .sumiTabularMono(size: 12)
                                             .foregroundStyle(.secondary)
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 1)
@@ -711,7 +712,7 @@ struct PhonePlayerView: View {
                         .frame(width: 34, height: 34)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Up next")
-                                .sumiTabularMono(size: 10, weight: .semibold)
+                                .sumiTabularMono(size: 12, weight: .semibold)
                                 .foregroundStyle(.white.opacity(0.7))
                             Text(next.map { "Episode \($0.number)\($0.title.isEmpty ? "" : " \u{00B7} \($0.title)")" } ?? "Next episode")
                                 .font(.system(size: 13, weight: .semibold))
@@ -728,6 +729,9 @@ struct PhonePlayerView: View {
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
                                 .background(.white, in: Capsule())
+                                // Hit area to 44pt without growing the capsule.
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         Button {
@@ -736,7 +740,7 @@ struct PhonePlayerView: View {
                             Image(systemName: "xmark")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 30, height: 30)
+                                .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -829,6 +833,7 @@ struct PhonePlayerView: View {
             }
             Button {
                 controller.togglePlayPause()
+                AppHaptics.play(.transport)
                 controller.showControlsBriefly()
             } label: {
                 Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
@@ -915,6 +920,7 @@ struct PhonePlayerView: View {
                     Spacer()
                     Button {
                         withAnimation(.snappy) { controller.skipPendingWindow() }
+                        AppHaptics.play(.transport)
                     } label: {
                         Text(window.label)
                             .font(.system(size: 13, weight: .semibold))
@@ -992,6 +998,7 @@ struct PhonePlayerView: View {
                                     guard !Task.isCancelled, dragAxis == nil else { return }
                                     heldSpeed = true
                                     controller.setPlaybackRate(2.0)
+                                    AppHaptics.play(.speedHold)
                                     withAnimation(.easeOut(duration: 0.12)) {
                                         hud = Hud(symbol: "forward.fill", text: "2x")
                                     }
@@ -1076,6 +1083,7 @@ struct PhonePlayerView: View {
                                         case .rewind?: seek(by: -5)
                                         case .playPause?:
                                             controller.togglePlayPause()
+                                            AppHaptics.play(.transport)
                                             controller.showControlsBriefly()
                                         case .forward?: seek(by: 5)
                                         case nil: toggleControls()
@@ -1135,6 +1143,7 @@ struct PhonePlayerView: View {
     }
 
     private func seek(by delta: Double) {
+        AppHaptics.play(.transport)
         controller.seekRelative(by: delta)
         controller.showControlsBriefly()
     }
@@ -1205,7 +1214,7 @@ struct PhonePlayerView: View {
             // longer than that reads as frozen.
             if let status = controller.resolveStatus {
                 Text(PlayerController.withElapsed(status, controller.resolveElapsedSeconds))
-                    .sumiTabularMono(size: 11)
+                    .sumiTabularMono(size: 12)
                     .foregroundStyle(.white.opacity(0.8))
                 Button {
                     AppModel.shared?.cancelResolve()
@@ -1220,11 +1229,11 @@ struct PhonePlayerView: View {
                 .buttonStyle(.plain)
             } else if let percent = controller.bufferingPercent {
                 Text("\(percent)%")
-                    .sumiTabularMono(size: 11)
+                    .sumiTabularMono(size: 12)
                     .foregroundStyle(.white.opacity(0.8))
             } else if let seconds = controller.resolveElapsedSeconds {
                 Text(PlayerController.withElapsed("Searching indexers", seconds))
-                    .sumiTabularMono(size: 11)
+                    .sumiTabularMono(size: 12)
                     .foregroundStyle(.white.opacity(0.8))
             }
             // Not during a resolve: the engine may still hold the torrent
@@ -1243,7 +1252,7 @@ struct PhonePlayerView: View {
                     if stalled >= Self.stallNudgeSeconds {
                         VStack(spacing: 8) {
                             Text("Stalled for \(stalled)s")
-                                .sumiTabularMono(size: 11)
+                                .sumiTabularMono(size: 12)
                                 .foregroundStyle(.white.opacity(0.8))
                             Button {
                                 showReleases = true
@@ -1291,7 +1300,7 @@ private struct SwarmLine: View {
         // Always a `Text`, never an empty branch: the `task` below needs a
         // view to hang on from the first frame.
         Text(line ?? " ")
-            .sumiTabularMono(size: 11)
+            .sumiTabularMono(size: 12)
             .foregroundStyle(.white.opacity(0.65))
             .task {
                 while !Task.isCancelled {
@@ -1341,8 +1350,8 @@ private struct PlayerEpisodeRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(isCurrent ? "EPISODE \(episode.number) \u{00B7} NOW PLAYING" : "EPISODE \(episode.number)")
-                    .sumiTabularMono(size: 10, weight: .semibold)
+                Text(isCurrent ? "Episode \(episode.number) \u{00B7} Now playing" : "Episode \(episode.number)")
+                    .sumiTabularMono(size: 12, weight: .semibold)
                     .foregroundStyle(isCurrent ? SumiTheme.indigo : SumiTheme.muted)
                 if !episode.title.isEmpty {
                     Text(episode.title)
@@ -1352,11 +1361,11 @@ private struct PlayerEpisodeRow: View {
                 }
                 if !episode.isAired {
                     Text(Self.airDate(episode.airDate).map { "Airs \($0)" } ?? "Not aired yet")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(SumiTheme.muted)
                 } else if let synopsis = episode.synopsis, !synopsis.isEmpty {
                     Text(synopsis)
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(SumiTheme.muted)
                         .lineLimit(2)
                 }

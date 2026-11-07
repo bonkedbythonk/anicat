@@ -130,7 +130,7 @@ struct PhoneScheduleView: View {
                             Text(day.formatted(.dateTime.day()))
                                 .font(.system(size: 15, weight: .bold))
                             Text(count == 0 ? " " : "\(count)")
-                                .font(.system(size: 10)).monospacedDigit()
+                                .font(.system(size: 12)).monospacedDigit()
                                 .opacity(0.8)
                         }
                         .foregroundStyle(selected ? SumiTheme.background : SumiTheme.foreground)
@@ -170,7 +170,7 @@ private struct ScheduleRow: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 Text("Ep \(item.episodeNumber) \u{00B7} \(item.airingTimeText) \u{00B7} \(item.countdownText)")
-                    .font(.system(size: 10.5)).monospacedDigit()
+                    .font(.system(size: 12)).monospacedDigit()
                     .foregroundStyle(item.isWatching ? SumiTheme.indigo : SumiTheme.muted)
                     .lineLimit(1)
             }
@@ -314,7 +314,7 @@ private struct HistoryRowView: View {
                     .foregroundStyle(SumiTheme.foreground)
                     .lineLimit(2)
                 Text("\(row.catalog == .tmdbMovie ? "Film" : "Ep \(row.episodeNumber)") \u{00B7} \(time)")
-                    .font(.system(size: 10.5)).monospacedDigit()
+                    .font(.system(size: 12)).monospacedDigit()
                     .foregroundStyle(SumiTheme.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

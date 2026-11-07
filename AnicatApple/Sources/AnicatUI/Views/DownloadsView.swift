@@ -374,25 +374,36 @@ private struct DownloadRow: View {
                     Image(systemName: "trash")
                         .font(.system(size: 11.5))
                         .foregroundColor(SumiTheme.muted)
-                        .frame(width: 24, height: 24)
+                        .frame(width: Self.iconHit, height: Self.iconHit)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
                 .help("Remove from the list")
+                .accessibilityLabel("Remove from the list")
             }
         }
     }
+
+    /// A click target on the Mac, a thumb target on the phone, where 24pt
+    /// rows of icons were hit by the row beside them.
+    #if os(iOS)
+    private static let iconHit: CGFloat = 44
+    #else
+    private static let iconHit: CGFloat = 24
+    #endif
 
     private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 11.5))
                 .foregroundColor(SumiTheme.muted)
-                .frame(width: 24, height: 24)
+                .frame(width: Self.iconHit, height: Self.iconHit)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)
         .help(help)
+        // `.help` is a hover tooltip, so on the phone it named nothing.
+        .accessibilityLabel(help)
     }
 
     @ViewBuilder

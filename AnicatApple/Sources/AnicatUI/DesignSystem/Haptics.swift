@@ -28,12 +28,19 @@ public enum FeedbackDefaults {
 public enum AppHaptics {
     public static var isEnabled: Bool { FeedbackDefaults.hapticsEnabled }
 
-    /// The three app events a phone makes felt. Nothing on the Mac: its
+    /// The app events a phone makes felt. Nothing on the Mac: its
     /// trackpad only ticks under a finger, and these fire after the click.
     public enum Moment: Sendable {
         case watchedTick
         case error
         case playerOpen
+        /// Play, pause, a seek or a skip in the phone player. The picture
+        /// is the only feedback otherwise, and a tap on a bare picture
+        /// left the finger unsure it had landed.
+        case transport
+        /// Hold-for-2x engaging, half a second after touch-down with
+        /// nothing on screen yet under the finger.
+        case speedHold
     }
 
     /// A phone in a pocket shows nothing, so the watched mark and the error
@@ -50,6 +57,10 @@ public enum AppHaptics {
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         case .playerOpen:
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        case .transport:
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .speedHold:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
         #endif
     }

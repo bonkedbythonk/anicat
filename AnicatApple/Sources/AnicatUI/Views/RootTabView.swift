@@ -535,7 +535,10 @@ private struct UpNextTab: View {
                 Image(systemName: "macbook.and.iphone")
                     .font(.system(size: 21))
                     .foregroundStyle(SumiTheme.muted)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel("Mac remote")
         }
     }
 
@@ -565,6 +568,10 @@ private struct UpNextTab: View {
                     .foregroundStyle(SumiTheme.muted)
             }
         }
+        // The 30pt avatar is the picture; the target around it is 44.
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .accessibilityLabel("Settings")
     }
 
 
@@ -671,7 +678,7 @@ struct AiringTodayStrip: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 Text("Ep \(item.episodeNumber) \u{00B7} \(item.airingTimeText)")
-                    .font(.system(size: 10.5)).monospacedDigit()
+                    .font(.system(size: 12)).monospacedDigit()
                     .foregroundStyle(item.isWatching ? SumiTheme.indigo : SumiTheme.muted)
                     .lineLimit(1)
             }
@@ -787,13 +794,20 @@ struct ContinueWatchingCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottom) {
-                CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 480) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    SumiTheme.card
-                }
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                .clipped()
+                // The image fills a fixed 16:9 box rather than carrying the
+                // ratio itself: a fill image proposes its own size, so a
+                // poster thumbnail made its card taller than its neighbours
+                // and the titles under the row stopped lining up.
+                Color.clear
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .overlay {
+                        CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 480) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            SumiTheme.card
+                        }
+                    }
+                    .clipped()
 
                 GeometryReader { geo in
                     Rectangle()
@@ -809,8 +823,12 @@ struct ContinueWatchingCard: View {
                 .font(.sumiHeading(size: 13, weight: .medium))
                 .foregroundStyle(SumiTheme.foreground)
                 .lineLimit(1)
-            Text("\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter) · \(Int(100 - entry.progressPercent))% left")
-                .font(.system(size: 10.5)).monospacedDigit()
+            // The remainder only once there is a started episode to resume:
+            // a not-yet-started one read "100% left" on every card.
+            Text(entry.progressPercent > 0 && entry.progressPercent < 100
+                 ? "\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter) · \(Int(100 - entry.progressPercent))% left"
+                 : "\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter)")
+                .font(.system(size: 12)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
                 .lineLimit(1)
         }
@@ -846,7 +864,7 @@ struct NewEpisodeRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Text("\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter) out\(entry.watchedTimeAgo.map { " · \($0)" } ?? "")")
-                        .font(.system(size: 10.5)).monospacedDigit()
+                        .font(.system(size: 12)).monospacedDigit()
                         .foregroundStyle(SumiTheme.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -969,7 +987,7 @@ private struct LibraryTab: View {
                             )
                         } else {
                             Text("\(model.cinemaWatchlist.count) title\(model.cinemaWatchlist.count == 1 ? "" : "s")")
-                                .font(.system(size: 10, weight: .semibold)).monospacedDigit()
+                                .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.muted)
                                 .padding(.horizontal, 16)
                             PosterGrid(items: model.cinemaWatchlist, onOpen: openCinema)
@@ -994,7 +1012,7 @@ private struct LibraryTab: View {
                         }
                         HStack {
                             Text("\(shownItems.count) title\(shownItems.count == 1 ? "" : "s")")
-                                .font(.system(size: 10, weight: .semibold)).monospacedDigit()
+                                .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.muted)
                             Spacer()
                             sortMenu
@@ -1002,8 +1020,10 @@ private struct LibraryTab: View {
                                 layoutRaw = isGrid ? "list" : "grid"
                             } label: {
                                 Image(systemName: isGrid ? "list.bullet" : "square.grid.2x2")
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(SumiTheme.muted)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
                             }
                             .accessibilityLabel(isGrid ? "Show as list" : "Show as grid")
                         }
@@ -1059,7 +1079,7 @@ private struct LibraryTab: View {
             Spacer(minLength: 4)
             if count > 0 {
                 Text("\(count)")
-                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(SumiTheme.muted)
             }
             Image(systemName: "chevron.right")
@@ -1116,13 +1136,17 @@ private struct LibraryTab: View {
                 }
             }
         } label: {
-            HStack(spacing: 3) {
+            HStack(spacing: 4) {
                 Text(sort.label)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
             }
             .foregroundStyle(SumiTheme.muted)
+            // 12pt text with no padding was a target a thumb missed.
+            .padding(.horizontal, 8)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
     }
 
@@ -1219,7 +1243,7 @@ struct PosterList: View {
                                     Text(meta)
                                 }
                             }
-                            .font(.system(size: 10.5)).monospacedDigit()
+                            .font(.system(size: 12)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1276,6 +1300,8 @@ private struct SearchTab: View {
                                       : "line.3.horizontal.decrease.circle")
                                     .font(.system(size: 24))
                                     .foregroundStyle(filters.isActive ? SumiTheme.indigo : SumiTheme.muted)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
                             }
                             .accessibilityLabel("Filters")
                         }
@@ -1462,7 +1488,7 @@ private struct SearchTab: View {
     private var genreChips: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Genres")
-                .font(.system(size: 10.5, weight: .semibold)).monospacedDigit()
+                .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
                 .padding(.horizontal, 16)
             // Setting the filter is the search: `onChange(of: filters)` runs
@@ -1485,7 +1511,7 @@ private struct SearchTab: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Recent")
-                    .font(.system(size: 10.5, weight: .semibold)).monospacedDigit()
+                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(SumiTheme.muted)
                 Spacer()
                 Button("Clear") { recentsRaw = "" }
@@ -1601,7 +1627,7 @@ private struct ResolvingCard: View {
                     .animation(.smooth, value: status)
                 TimelineView(.periodic(from: startedAt, by: 1)) { context in
                     Text("\(max(0, Int(context.date.timeIntervalSince(startedAt))))s")
-                        .font(.system(size: 10.5)).monospacedDigit()
+                        .font(.system(size: 12)).monospacedDigit()
                         .foregroundStyle(SumiTheme.muted)
                 }
             }
@@ -1693,7 +1719,7 @@ struct PosterGrid: View {
 
                         if let meta = Self.meta(for: item) {
                             Text(meta)
-                                .font(.system(size: 10)).monospacedDigit()
+                                .font(.system(size: 12)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.muted)
                                 .lineLimit(1)
                         }
@@ -1767,6 +1793,8 @@ private struct PhoneErrorToast: View {
                             .padding(.vertical, 6)
                             .background(SumiTheme.indigo.opacity(0.12))
                             .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.sumiPressable)
                 }
@@ -1777,7 +1805,7 @@ private struct PhoneErrorToast: View {
                         .foregroundStyle(SumiTheme.muted)
                         // 44pt target: the Mac's 4pt padding is a click
                         // size, not a thumb size.
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
@@ -1798,6 +1826,14 @@ private struct PhoneErrorToast: View {
             Spacer()
         }
         .transition(.move(edge: .top).combined(with: .opacity))
+        // A toast with nothing to act on hid nothing and stayed until its
+        // 44pt corner was found. One with Retry waits for an answer.
+        .task(id: message) {
+            guard retry == nil else { return }
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            dismiss()
+        }
     }
 }
 #endif

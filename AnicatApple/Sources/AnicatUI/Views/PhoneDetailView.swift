@@ -133,7 +133,7 @@ struct PhoneDetailView: View {
                     Task { await model.updateListEntry(status: status) }
                 }
             )) {
-                Text("Watching").tag("CURRENT")
+                Text(isManga || isNovel ? "Reading" : "Watching").tag("CURRENT")
                 Text("Planning").tag("PLANNING")
                 Text("Completed").tag("COMPLETED")
                 Text("Paused").tag("PAUSED")
@@ -184,7 +184,7 @@ struct PhoneDetailView: View {
                     } label: {
                         HStack(spacing: 12) {
                             Text("Ch \(chapter.number)")
-                                .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                                .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.indigo)
                                 .frame(width: 64, alignment: .leading)
                             VStack(alignment: .leading, spacing: 2) {
@@ -194,7 +194,7 @@ struct PhoneDetailView: View {
                                     .lineLimit(1)
                                 if let group = chapter.scanlationGroup, !group.isEmpty {
                                     Text(group)
-                                        .font(.system(size: 10.5)).monospacedDigit()
+                                        .font(.system(size: 12)).monospacedDigit()
                                         .foregroundStyle(SumiTheme.muted)
                                         .lineLimit(1)
                                 }
@@ -202,25 +202,12 @@ struct PhoneDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             offlineGlyph(offline)
                         }
-                        .padding(.horizontal, 16)
+                        .padding(.leading, 16)
                         .padding(.vertical, 10)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .contextMenu {
-                        switch offline {
-                        case .stored:
-                            Button(role: .destructive) { model.deleteChapterDownload(chapter) } label: {
-                                Label("Remove Download", systemImage: "trash")
-                            }
-                        case .downloading, .exporting:
-                            EmptyView()
-                        default:
-                            Button { model.downloadChapter(chapter) } label: {
-                                Label("Download", systemImage: "arrow.down.circle")
-                            }
-                        }
-                    }
+                    .rowActions { chapterActions(chapter, offline: offline) }
                     Divider().overlay(SumiTheme.border)
                 }
             }
@@ -287,7 +274,7 @@ struct PhoneDetailView: View {
                         // `index` is already 1-based from the engine; +1 showed
                         // "Vol 2" beside "Volume 1".
                         Text("Vol \(volume.index)")
-                            .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                            .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                             .foregroundStyle(SumiTheme.indigo)
                             .frame(width: 64, alignment: .leading)
                         Text(volume.volumeName ?? volume.title)
@@ -297,12 +284,12 @@ struct PhoneDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         offlineGlyph(offline)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.leading, 16)
                     .padding(.vertical, 10)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .contextMenu {
+                .rowActions {
                     switch offline {
                     case .stored:
                         Button(role: .destructive) { model.deleteNovelVolumeDownload(volume) } label: {
@@ -348,7 +335,7 @@ struct PhoneDetailView: View {
                 .foregroundStyle(SumiTheme.indigo)
         case .downloading(let percent)?:
             Text("\(Int(percent))%")
-                .font(.system(size: 10.5)).monospacedDigit()
+                .font(.system(size: 12)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
         case .failed?:
             Image(systemName: "exclamationmark.circle")
@@ -383,37 +370,55 @@ struct PhoneDetailView: View {
                         HStack(spacing: 0) {
                             EpisodeRow(episode: episode)
                             downloadGlyph(model.downloadStates[episode.number])
-                                .padding(.trailing, 16)
                         }
                     }
                     .buttonStyle(.plain)
-                    .contextMenu {
-                        playOnMac(episode.number)
-                        // Same engine path as the Mac's per-row button; the
-                        // Downloads page under More lists the result.
-                        switch model.downloadStates[episode.number] {
-                        case .downloading?, .done?:
-                            EmptyView()
-                        default:
-                            Button {
-                                Task { await model.startDownload(episode: episode.number) }
-                            } label: {
-                                Label("Download", systemImage: "arrow.down.circle")
-                            }
-                        }
-                        // The phone had no way to take a watch back. A
-                        // stream that failed on open still recorded one, and
-                        // the only undo lived in the Mac's History view.
-                        Button {
-                            Task { await model.setEpisodeWatched(episode.number, watched: !episode.isWatched) }
-                        } label: {
-                            episode.isWatched
-                                ? Label("Mark as Unwatched", systemImage: "minus.circle")
-                                : Label("Mark as Watched", systemImage: "checkmark.circle")
-                        }
-                    }
+                    .rowActions { episodeActions(episode) }
                     Divider().overlay(SumiTheme.border)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func episodeActions(_ episode: MediaDetailView.EpisodeItem) -> some View {
+        playOnMac(episode.number)
+        // Same engine path as the Mac's per-row button; the
+        // Downloads page under More lists the result.
+        switch model.downloadStates[episode.number] {
+        case .downloading?, .done?:
+            EmptyView()
+        default:
+            Button {
+                Task { await model.startDownload(episode: episode.number) }
+            } label: {
+                Label("Download", systemImage: "arrow.down.circle")
+            }
+        }
+        // The phone had no way to take a watch back. A
+        // stream that failed on open still recorded one, and
+        // the only undo lived in the Mac's History view.
+        Button {
+            Task { await model.setEpisodeWatched(episode.number, watched: !episode.isWatched) }
+        } label: {
+            episode.isWatched
+                ? Label("Mark as Unwatched", systemImage: "minus.circle")
+                : Label("Mark as Watched", systemImage: "checkmark.circle")
+        }
+    }
+
+    @ViewBuilder
+    private func chapterActions(_ chapter: MediaDetailView.MangaChapterItem, offline: MediaDetailView.ChapterOfflineState) -> some View {
+        switch offline {
+        case .stored:
+            Button(role: .destructive) { model.deleteChapterDownload(chapter) } label: {
+                Label("Remove Download", systemImage: "trash")
+            }
+        case .downloading, .exporting:
+            EmptyView()
+        default:
+            Button { model.downloadChapter(chapter) } label: {
+                Label("Download", systemImage: "arrow.down.circle")
             }
         }
     }
@@ -520,7 +525,7 @@ struct PhoneDetailView: View {
                 studioLine(details)
                 ForEach(factLines(details), id: \.self) { line in
                     Text(line)
-                        .sumiTabularMono(size: 11.5)
+                        .sumiTabularMono(size: 12)
                         .foregroundStyle(SumiTheme.muted)
                 }
             }
@@ -566,7 +571,7 @@ struct PhoneDetailView: View {
             details.averageScore.map { "Score " + String(format: "%.1f", Double($0) / 10) }
         ].compactMap { $0 }
         let mine = [
-            details.listStatus.map(Self.listStatus),
+            details.listStatus.map { Self.listStatus($0, reading: isManga || isNovel) },
             details.userScore.flatMap { $0 > 0 ? "Your score " + String(format: "%.1f", $0) : nil }
         ].compactMap { $0 }
         return [what, standing, mine].filter { !$0.isEmpty }.map { $0.joined(separator: " · ") }
@@ -633,7 +638,7 @@ struct PhoneDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             if let next = details.nextEpisodeText, !next.isEmpty {
                 Text(next)
-                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(SumiTheme.indigo)
             }
 
@@ -759,7 +764,7 @@ struct PhoneDetailView: View {
                                         .lineLimit(2)
                                         .multilineTextAlignment(.leading)
                                     Text("\(thread.authorName ?? "AniList") \u{00B7} \(thread.replyCount) \(thread.replyCount == 1 ? "reply" : "replies")")
-                                        .font(.system(size: 10)).monospacedDigit()
+                                        .font(.system(size: 12)).monospacedDigit()
                                         .foregroundStyle(SumiTheme.muted)
                                         .lineLimit(1)
                                 }
@@ -840,7 +845,7 @@ struct PhoneDetailView: View {
                 .foregroundStyle(SumiTheme.foreground)
                 .lineLimit(1)
             Text(character.voiceActorName ?? character.role.capitalized)
-                .font(.system(size: 10)).monospacedDigit()
+                .font(.system(size: 12)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
                 .lineLimit(1)
         }
@@ -874,12 +879,12 @@ struct PhoneDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 if let caption {
                     Text(caption)
-                        .font(.system(size: 9, weight: .semibold)).monospacedDigit()
+                        .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(SumiTheme.indigo)
                         .lineLimit(1)
                 }
                 Text(title)
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 12))
                     .foregroundStyle(SumiTheme.foreground)
                     .lineLimit(2, reservesSpace: true)
                     .multilineTextAlignment(.leading)
@@ -912,14 +917,16 @@ struct PhoneDetailView: View {
     }
 
     /// Where the title sits on the viewer's own list.
-    static func listStatus(_ raw: String) -> String {
+    /// `reading` for manga and novels: AniList's CURRENT and REPEATING are
+    /// one status for both, and a manga on the list read "Watching".
+    static func listStatus(_ raw: String, reading: Bool = false) -> String {
         switch raw {
-        case "CURRENT": return "Watching"
+        case "CURRENT": return reading ? "Reading" : "Watching"
         case "PLANNING": return "Planning"
         case "COMPLETED": return "Completed"
         case "PAUSED": return "Paused"
         case "DROPPED": return "Dropped"
-        case "REPEATING": return "Rewatching"
+        case "REPEATING": return reading ? "Rereading" : "Rewatching"
         default: return raw.capitalized
         }
     }
@@ -960,7 +967,7 @@ struct PhoneDetailView: View {
                         .truncationMode(.tail)
                     if let runtime = episode.runtimeMinutes {
                         Text("\(runtime) min")
-                            .font(.system(size: 10)).monospacedDigit()
+                            .font(.system(size: 12)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                     }
                 }
@@ -970,6 +977,28 @@ struct PhoneDetailView: View {
             .padding(.vertical, 9)
             .contentShape(Rectangle())
         }
+    }
+}
+/// A row's actions, reachable two ways: the long press it always had, and a
+/// "..." button at the trailing edge. Behind long press alone, download,
+/// mark watched and play on Mac existed only for whoever already knew.
+private extension View {
+    func rowActions<Actions: View>(@ViewBuilder _ actions: @escaping () -> Actions) -> some View {
+        HStack(spacing: 0) {
+            self
+            Menu {
+                actions()
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(SumiTheme.muted)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("More actions")
+            .padding(.trailing, 6)
+        }
+        .contextMenu { actions() }
     }
 }
 #endif

@@ -163,7 +163,7 @@ struct PhoneSearchFilterSheet: View {
                             .disabled(filters.year.isEmpty)
                         if filters.year.isEmpty {
                             Text("Pick a year to filter by season.")
-                                .font(.system(size: 11.5))
+                                .font(.system(size: 12))
                                 .foregroundStyle(SumiTheme.muted)
                         }
                     }

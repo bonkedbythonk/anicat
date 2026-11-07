@@ -40,12 +40,15 @@ struct PhoneReadTab: View {
                     // pulled up into the header's bottom padding.
                     VStack(alignment: .leading, spacing: 0) {
                         TabHeader(title: "Read", model: nil) { EmptyView() }
-                        Picker("", selection: $kindRaw) {
-                            ForEach(Kind.allCases) { Text($0.rawValue).tag($0.rawValue) }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 240)
+                        // The slash toggle every other tab uses for its
+                        // mode; a stock segmented control here was the one
+                        // tab that looked like a different app.
+                        SumiSlashToggle(
+                            Kind.allCases.map { ($0.rawValue, $0.rawValue) },
+                            selection: kindRaw
+                        ) { kindRaw = $0 }
                         .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
                     }
 
                     if kind == .novels {
@@ -163,7 +166,7 @@ private struct ContinueReadingRow: View {
                                     .foregroundStyle(SumiTheme.foreground)
                                     .lineLimit(1)
                                 Text("Ch \((item.progress ?? 0) + 1)\(item.totalEpisodesOrChapters.map { " of \($0)" } ?? "")")
-                                    .font(.system(size: 10.5)).monospacedDigit()
+                                    .font(.system(size: 12)).monospacedDigit()
                                     .foregroundStyle(SumiTheme.muted)
                             }
                             .containerRelativeFrame(.horizontal, count: 3, span: 1, spacing: 12)

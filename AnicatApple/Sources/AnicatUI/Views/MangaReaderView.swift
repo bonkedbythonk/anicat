@@ -896,9 +896,17 @@ public struct MangaReaderView: View {
         Image(systemName: systemName)
             .font(.system(size: 13, weight: .medium))
             .foregroundColor(isOn ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
-            .frame(width: 28, height: 28)
+            .frame(width: Self.glyphHit, height: Self.glyphHit)
             .contentShape(Rectangle())
     }
+
+    /// 28pt is a pointer target; on the phone the reader's close button
+    /// needs a thumb's 44.
+    #if os(iOS)
+    private static let glyphHit: CGFloat = 44
+    #else
+    private static let glyphHit: CGFloat = 28
+    #endif
 
     /// Names both pages of a spread rather than only its first: "Page 11 / 40"
     /// while pages 11 and 12 are on screen is a readout that disagrees with

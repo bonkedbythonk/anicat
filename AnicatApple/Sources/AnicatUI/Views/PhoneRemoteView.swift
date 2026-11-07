@@ -424,7 +424,9 @@ struct PhoneRemoteView: View {
             Image(systemName: symbol)
                 .font(.system(size: size))
                 .foregroundStyle(enabled ? SumiTheme.foreground : SumiTheme.muted.opacity(0.4))
-                .frame(width: size + 14, height: size + 14)
+                // At least 44: a 22pt glyph plus 14 made a 36pt target.
+                .frame(width: max(44, size + 14), height: max(44, size + 14))
+                .contentShape(Rectangle())
         }
         .disabled(!enabled)
     }

@@ -106,7 +106,7 @@ struct PhoneSettingsView: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(SumiTheme.foreground)
                         Text("Signed in")
-                            .font(.system(size: 11.5, design: .monospaced))
+                            .font(.system(size: 13))
                             .foregroundStyle(SumiTheme.muted)
                     }
                 }
@@ -214,7 +214,7 @@ struct PhoneSettingsView: View {
             Text(autoSkip
                  ? "Intros are skipped without asking."
                  : "A Skip Intro button appears instead.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
             Toggle("Play next episode", isOn: $autoPlayNext)
             if autoPlayNext {
@@ -239,7 +239,7 @@ struct PhoneSettingsView: View {
             }
             Toggle("Warn on cellular", isOn: $warnOnCellular)
             Text("Asked before each episode you start off Wi-Fi. Personal hotspots count.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
         }
     }
@@ -321,7 +321,7 @@ struct PhoneSettingsView: View {
                 .buttonBorderShape(.capsule)
             }
             Text("Takes effect as you type it.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
         }
     }
@@ -334,7 +334,7 @@ struct PhoneSettingsView: View {
         Section("Light Novel Sources") {
             Toggle("Official volumes", isOn: $lnoriEnabled)
             Text("Official volumes come from a third-party site that hosts licensed light novels. It is off until you turn it on. Web novels from Syosetu are unaffected.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
         }
     }
@@ -367,19 +367,19 @@ struct PhoneSettingsView: View {
             }
             .disabled(isPurging || (cacheBytes ?? 0) == 0)
             Text("Cleared automatically when you leave the app. Whatever is playing is kept.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
             Toggle("Smaller downloads", isOn: $smallerDownloads)
             Text("Downloads pick a 720p or HEVC release when one is as good a match: about half to a sixth of the size, and hard to tell apart on a phone.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
             Toggle("Keep downloading in the background", isOn: $backgroundDownloads)
             Text("Keeps a download going after you leave the app, by holding a silent audio session. Uses some battery while it runs.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
             Toggle("Delete watched downloads", isOn: $deleteWatchedDownloads)
             Text("A downloaded episode is removed once you have watched it.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
         }
         .task { cacheBytes = await model.streamCacheBytes() }
@@ -439,7 +439,7 @@ struct PhoneSettingsView: View {
                 }
             }
             Text("The log holds the last three launches, engine and player lines included. Attach it to a bug report.")
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
         }
     }

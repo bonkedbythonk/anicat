@@ -126,8 +126,10 @@ public struct StatsView: View {
             }
             // The page gutters and column every other section uses; at 24pt
             // and pinned left, Stats started to the left of its neighbours.
-            .padding(.horizontal, 40)
-            .padding(.top, 40)
+            // 16 on the phone: 40 took a fifth of a 402pt screen, and the
+            // pushed page's nav bar already sits above the content.
+            .padding(.horizontal, Self.gutter)
+            .padding(.top, Self.topInset)
             .padding(.bottom, 32)
             .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
@@ -137,11 +139,23 @@ public struct StatsView: View {
         .onAppear(perform: onLoad)
     }
 
+    #if os(iOS)
+    private static let gutter: CGFloat = 16
+    private static let topInset: CGFloat = 12
+    #else
+    private static let gutter: CGFloat = 40
+    private static let topInset: CGFloat = 40
+    #endif
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // The phone pushes this page under a "Stats" nav title, so the
+            // heading here printed the word twice.
+            #if !os(iOS)
             Text("Stats")
                 .font(.sumiHeading(size: 28, weight: .bold))
                 .foregroundColor(SumiTheme.foreground)
+            #endif
             Text("The last 365 days, from this device's own watch log.")
                 .font(.system(size: 14))
                 .foregroundColor(SumiTheme.muted)
@@ -243,12 +257,16 @@ public struct StatsView: View {
                         .help("\(count) episode\(count == 1 ? "" : "s") started at \(String(format: "%02d:00", hour))")
                 }
             }
+            // One label per six-hour group, not one cell per hour: a 24th of
+            // a phone's width is narrower than "00", and each label wrapped
+            // into a column of single digits.
             HStack(spacing: 3) {
-                ForEach(0..<24, id: \.self) { hour in
-                    Text(hour % 6 == 0 ? String(format: "%02d", hour) : " ")
-                        .sumiTabularMono(size: 9)
-                        .foregroundColor(hour == busiest ? SumiTheme.indigo : SumiTheme.muted)
-                        .frame(maxWidth: .infinity)
+                ForEach(0..<4, id: \.self) { quarter in
+                    Text(String(format: "%02d", quarter * 6))
+                        .sumiTabularMono(size: 11)
+                        .foregroundColor(SumiTheme.muted)
+                        .fixedSize()
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }

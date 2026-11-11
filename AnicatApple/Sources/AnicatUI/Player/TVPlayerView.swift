@@ -30,9 +30,13 @@ struct TVPlayerView: View {
     @State private var releaseFailure: String?
     @State private var isLoadingReleases = false
     @State private var showReleases = false
+    // Same keys as the phone's menu, so a speed or size picked on one
+    // device's player is the one the other starts at.
+    @AppStorage("anicat_playback_speed") private var storedSpeed: Double = 1.0
+    @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
 
     private enum Focus: Hashable {
-        case surface, back, playPause, forward, timeline, tracks, next
+        case surface, back, playPause, forward, timeline, tracks, next, playNextNow, cancelNext
     }
     @FocusState private var focus: Focus?
 
@@ -86,6 +90,11 @@ struct TVPlayerView: View {
                 controls
                     .transition(.opacity)
             }
+
+            if controller.nextEpisodeCountdown.isVisible {
+                nextEpisodeCard
+                    .transition(.opacity)
+            }
         }
         .accessibilityIdentifier("tv.player")
         .onPlayPauseCommand {
@@ -96,7 +105,9 @@ struct TVPlayerView: View {
         // wired to `onClose` directly, which would drop a viewer out of the
         // episode when all they wanted was the timeline gone.
         .onExitCommand {
-            if controller.areControlsVisible {
+            if controller.nextEpisodeCountdown.isVisible {
+                withAnimation(.smooth) { controller.cancelNextEpisodeCountdown() }
+            } else if controller.areControlsVisible {
                 hideControls()
             } else {
                 onClose()
@@ -107,6 +118,7 @@ struct TVPlayerView: View {
             controller.showControlsBriefly()
             focus = .playPause
             fetchTracks()
+            if controller.playbackRate != storedSpeed { controller.setPlaybackRate(storedSpeed) }
         }
         // The `task` above runs before mpv has opened the file, when the
         // track list is empty. A duration means the file is loaded.
@@ -117,8 +129,53 @@ struct TVPlayerView: View {
         // onto the surface as it goes, since the button it sat on is gone.
         .onChange(of: controller.areControlsVisible) { _, visible in
             focus = visible ? .playPause : .surface
+            // The bottom fifth is the transport and timeline; the dialogue
+            // goes above it while they are up.
+            controller.liftSubtitles(by: visible ? 0.2 : 0)
         }
-        .onDisappear { controller.cancelAutohide() }
+        // The card takes the remote: Play now is one press away, Back
+        // dismisses it. Left on the surface, a press would only have
+        // brought the controls up under it.
+        .onChange(of: controller.nextEpisodeCountdown.isVisible) { _, visible in
+            focus = visible ? .playNextNow : (controller.areControlsVisible ? .playPause : .surface)
+        }
+        .onDisappear {
+            controller.cancelAutohide()
+            controller.liftSubtitles(by: 0)
+        }
+    }
+
+    // MARK: Next episode
+
+    /// The Mac's "next episode in 8" card, in the bottom right where the
+    /// TV app puts its own. Without it the TV ran the countdown with
+    /// nothing on screen: the next episode simply started, with no way to
+    /// stay on the credits.
+    private var nextEpisodeCard: some View {
+        let remaining = Int(controller.nextEpisodeCountdown.remaining(at: controller.currentTime).rounded(.up))
+        return VStack(alignment: .leading, spacing: 20) {
+            Text("Next episode in \(remaining)")
+                .font(.system(size: 30, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(.white)
+            HStack(spacing: 24) {
+                Button {
+                    withAnimation(.smooth) { controller.playNextEpisodeNow() }
+                } label: {
+                    Label("Play now", systemImage: "play.fill")
+                }
+                .focused($focus, equals: .playNextNow)
+                Button("Cancel") {
+                    withAnimation(.smooth) { controller.cancelNextEpisodeCountdown() }
+                }
+                .focused($focus, equals: .cancelNext)
+            }
+        }
+        .padding(40)
+        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.horizontal, TVMetrics.gutter)
+        .padding(.vertical, 60)
+        .focusSection()
     }
 
     // MARK: Controls
@@ -198,7 +255,7 @@ struct TVPlayerView: View {
     private var timeline: some View {
         HStack(spacing: 24) {
             Text(PlayerController.formatTimestamp(controller.currentTime))
-                .font(.system(size: 22, design: .monospaced))
+                .font(.system(size: 22)).monospacedDigit()
                 .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 130, alignment: .leading)
 
@@ -216,7 +273,7 @@ struct TVPlayerView: View {
                 }
 
             Text("-" + PlayerController.formatTimestamp(max(0, controller.duration - controller.currentTime)))
-                .font(.system(size: 22, design: .monospaced))
+                .font(.system(size: 22)).monospacedDigit()
                 .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 140, alignment: .trailing)
         }
@@ -270,6 +327,9 @@ struct TVPlayerView: View {
                         Text(track.label).tag(track.id)
                     }
                 }
+                // A submenu with its name and current value: inline, tvOS
+                // listed every choice under one another with no heading.
+                .pickerStyle(.menu)
             }
             if !subtitleTracks.isEmpty {
                 Picker("Subtitles", selection: subtitleSelection) {
@@ -277,6 +337,50 @@ struct TVPlayerView: View {
                     ForEach(subtitleTracks) { track in
                         Text(track.label).tag(track.id)
                     }
+                }
+                // A submenu with its name and current value: inline, tvOS
+                // listed every choice under one another with no heading.
+                .pickerStyle(.menu)
+            }
+            Picker("Speed", selection: Binding(
+                get: { controller.playbackRate },
+                set: { rate in
+                    storedSpeed = rate
+                    controller.setPlaybackRate(rate)
+                }
+            )) {
+                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                    Text(rate == 1 ? "Normal" : "\(rate.formatted())x").tag(rate)
+                }
+            }
+            // A submenu with its name and current value: inline, tvOS
+            // listed every choice under one another with no heading.
+            .pickerStyle(.menu)
+            Picker("Subtitle size", selection: Binding(
+                get: { subtitleScale },
+                set: { scale in
+                    subtitleScale = scale
+                    controller.setSubtitleScale(scale)
+                }
+            )) {
+                Text("Small").tag(0.8)
+                Text("Normal").tag(1.0)
+                Text("Large").tag(1.25)
+                Text("Huge").tag(1.5)
+            }
+            // A submenu with its name and current value: inline, tvOS
+            // listed every choice under one another with no heading.
+            .pickerStyle(.menu)
+            if !controller.chapters.isEmpty {
+                Menu {
+                    ForEach(controller.chapters) { chapter in
+                        Button("\(PlayerController.formatTimestamp(chapter.time))  \(chapter.title)") {
+                            controller.seek(to: chapter.time)
+                            controller.showControlsBriefly()
+                        }
+                    }
+                } label: {
+                    Label("Chapters", systemImage: "list.number")
                 }
             }
             Button {
@@ -322,11 +426,11 @@ struct TVPlayerView: View {
                                         .font(.system(size: 24))
                                         .lineLimit(2)
                                     Text(Self.releaseDetail(release))
-                                        .font(.system(size: 20, design: .monospaced))
+                                        .font(.system(size: 20)).monospacedDigit()
                                         .foregroundStyle(.secondary)
                                     if release.name == controller.rememberedReleaseName {
                                         Text("Played last time")
-                                            .font(.system(size: 18, design: .monospaced))
+                                            .font(.system(size: 18)).monospacedDigit()
                                             .foregroundStyle(.secondary)
                                     }
                                 }
@@ -432,15 +536,15 @@ struct TVPlayerView: View {
                 .tint(.white)
             if let status = controller.resolveStatus {
                 Text(PlayerController.withElapsed(status, controller.resolveElapsedSeconds))
-                    .font(.system(size: 22, design: .monospaced))
+                    .font(.system(size: 22)).monospacedDigit()
                     .foregroundStyle(.white.opacity(0.8))
             } else if let percent = controller.bufferingPercent {
                 Text("\(percent)%")
-                    .font(.system(size: 22, design: .monospaced))
+                    .font(.system(size: 22)).monospacedDigit()
                     .foregroundStyle(.white.opacity(0.8))
             } else if let seconds = controller.resolveElapsedSeconds {
                 Text(PlayerController.withElapsed("Searching indexers", seconds))
-                    .font(.system(size: 22, design: .monospaced))
+                    .font(.system(size: 22)).monospacedDigit()
                     .foregroundStyle(.white.opacity(0.8))
             }
         }

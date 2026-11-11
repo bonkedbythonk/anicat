@@ -330,6 +330,14 @@ public final class PlayerController {
         UserDefaults.standard.set(scale, forKey: Self.subtitleScaleKey)
         onSetSubtitleScale?(scale)
     }
+    /// Raises the dialogue by `share` of the picture's height, 0 to put it
+    /// back. The TV's controls cover the bottom fifth of the screen, and the
+    /// subtitle line was drawn straight across the transport buttons.
+    /// Wired by the coordinator, which redraws the current style with it.
+    public var onLiftSubtitles: (@Sendable (_ share: Double) -> Void)?
+    public func liftSubtitles(by share: Double) {
+        onLiftSubtitles?(share)
+    }
     /// The look picked in Settings > Playback (`SubtitleStyle`). Wired by the
     /// coordinator; applied on every new file too, from the stored value.
     public var onSetSubtitleStyle: (@Sendable (_ style: SubtitleStyle) -> Void)?

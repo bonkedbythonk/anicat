@@ -637,6 +637,14 @@ public final class ThemeStore: @unchecked Sendable {
     }
     #endif
 
+    /// True black on the TV: the showcase Up Next was drawn for it, and on
+    /// an OLED panel those pixels are simply off. Ink everywhere else.
+    #if os(tvOS)
+    private static let freshInstallSkin = SumiSkin.oled
+    #else
+    private static let freshInstallSkin = SumiSkin.ink
+    #endif
+
     private init() {
         let defaults = UserDefaults.standard
         let storedSkin = defaults.string(forKey: Self.skinKey).flatMap(SumiSkin.init(rawValue:))
@@ -652,7 +660,7 @@ public final class ThemeStore: @unchecked Sendable {
             // key held both halves in one value; an unreadable one lands on
             // the same Ink/Follow-system a fresh install gets.
             let legacy = defaults.string(forKey: Self.legacyKey).flatMap(LegacyAnicatTheme.init(rawValue:))
-            let migrated = legacy?.migrated ?? (skin: SumiSkin.ink, appearance: AnicatAppearance.system)
+            let migrated = legacy?.migrated ?? (skin: Self.freshInstallSkin, appearance: AnicatAppearance.system)
             skin = migrated.skin
             appearance = migrated.appearance
             defaults.set(migrated.skin.rawValue, forKey: Self.skinKey)

@@ -44,23 +44,50 @@ struct TVSettingsView: View {
 
     private static let authorizeURL = "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token"
 
+    // Two columns, the way tvOS's own Settings is laid out: who and what
+    // this is on the left, held still, and the list scrolling on the right.
+    // One full-width form under a faded centred title read as a stock
+    // screen nobody had designed.
     var body: some View {
-        Form {
-            account
-            playback
-            remote
-            appearance
-            cinema
-            storage
-            Section("About") {
-                AcknowledgementsButton {
-                    Text("Acknowledgements")
+        HStack(alignment: .top, spacing: 80) {
+            identity
+                .frame(width: 560)
+                .padding(.top, 140)
+            Form {
+                account
+                playback
+                remote
+                appearance
+                cinema
+                storage
+                TVSection("About") {
+                    AcknowledgementsButton {
+                        Text("Acknowledgements")
+                    }
                 }
-                LabeledContent("Version", value: Self.version)
             }
         }
-        .background(SumiTheme.background)
-        .navigationTitle("Settings")
+        .padding(.horizontal, TVMetrics.gutter)
+        .background(SumiTheme.background.ignoresSafeArea())
+    }
+
+    private var identity: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "pawprint.fill")
+                .font(.system(size: 160))
+                .foregroundStyle(SumiTheme.foreground.opacity(0.12))
+                .padding(.bottom, 20)
+            Text("Anicat")
+                .font(.sumiHeading(size: 52, weight: .bold))
+                .foregroundStyle(SumiTheme.foreground)
+            Text(model.isSignedIn ? "Signed in as \(model.viewer?.name ?? "AniList user")" : "Not signed in")
+                .font(.system(size: 24))
+                .foregroundStyle(SumiTheme.muted)
+            Text("Version \(Self.version)")
+                .font(.system(size: 22)).monospacedDigit()
+                .foregroundStyle(SumiTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private static var version: String {
@@ -71,7 +98,7 @@ struct TVSettingsView: View {
 
     @ViewBuilder
     private var account: some View {
-        Section("AniList") {
+        TVSection("AniList") {
             if model.isSignedIn {
                 HStack(spacing: 20) {
                     avatar
@@ -184,7 +211,7 @@ struct TVSettingsView: View {
 
     @ViewBuilder
     private var playback: some View {
-        Section("Playback") {
+        TVSection("Playback") {
             Picker("Audio", selection: $subDub) {
                 Text("Subbed").tag("Subbed")
                 Text("Dubbed").tag("Dubbed")
@@ -201,7 +228,7 @@ struct TVSettingsView: View {
 
     @ViewBuilder
     private var remote: some View {
-        Section("iPhone remote") {
+        TVSection("iPhone remote") {
             Toggle("Allow iPhones to find this Apple TV", isOn: $lanSharing)
             Text(lanSharing
                  ? "Anicat on an iPhone on this network can control playback here and send episodes to it. The first time one asks, this Apple TV asks you first. Only while Anicat is open."
@@ -226,7 +253,7 @@ struct TVSettingsView: View {
 
     @ViewBuilder
     private var appearance: some View {
-        Section("Appearance") {
+        TVSection("Appearance") {
             Picker("Theme", selection: Binding(
                 get: { store.skin },
                 set: { store.select($0) }
@@ -256,7 +283,7 @@ struct TVSettingsView: View {
 
     @ViewBuilder
     private var cinema: some View {
-        Section("Films & TV") {
+        TVSection("Films & TV") {
             if model.cinemaAvailable {
                 Label("TMDB connected", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
@@ -282,7 +309,7 @@ struct TVSettingsView: View {
     /// cache lives where it does; see `AppModel.makeEngineDataDirectory`.
     @ViewBuilder
     private var storage: some View {
-        Section("Storage") {
+        TVSection("Storage") {
             LabeledContent("Stream cache", value: cacheBytes.map(Self.formatted) ?? "—")
             Button(isPurging ? "Clearing…" : "Clear now") {
                 isPurging = true
@@ -306,6 +333,27 @@ struct TVSettingsView: View {
         formatter.countStyle = .file
         formatter.allowedUnits = [.useMB, .useGB]
         return formatter.string(fromByteCount: Int64(bytes))
+    }
+}
+/// A form section whose header keeps its own case. tvOS sets section
+/// headers in tracked capitals, which the house style retired, and
+/// `.textCase(nil)` on the form does not reach them: each header has to say
+/// it itself.
+private struct TVSection<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        Section {
+            content
+        } header: {
+            Text(title).textCase(nil)
+        }
     }
 }
 #endif

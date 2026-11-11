@@ -21,6 +21,9 @@ public struct TVRootView: View {
 
     public init(model: AppModel) {
         self.model = model
+        // Before the TabView exists: the appearance proxy styles bars made
+        // after it is set, not the one already on screen.
+        TVTabBarStyle.apply()
     }
 
     enum Tab: Hashable {
@@ -59,8 +62,17 @@ public struct TVRootView: View {
             // tab bar sits at the top of the screen and a stray swipe up
             // would land on it, behind the picture, and start switching
             // tabs under a playing episode.
-            .disabled(model.activeStreamURL != nil)
+            .disabled(model.activeStreamURL != nil || model.isPersonPageOpen)
             .opacity(model.activeStreamURL != nil ? 0 : 1)
+
+            // A character, voice actor or studio, over whatever page opened
+            // it and under the player. Outside the TabView for the same
+            // reason the player is: one mount, not one per tab.
+            if model.isPersonPageOpen {
+                TVPersonView(model: model)
+                    .transition(.opacity)
+                    .zIndex(20)
+            }
 
             // One call site, outside the TabView, and not inside an `if` per
             // tab: `MpvSurface`'s dismantle path stops playback, so a player
@@ -119,6 +131,7 @@ public struct TVRootView: View {
         .animation(.snappy, value: model.resolveStartedAt)
         .animation(.snappy, value: model.errorMessage != nil)
         .animation(.smooth, value: model.activeStreamURL)
+        .animation(.sumi(.page), value: model.personPageStack.count)
         .background(SumiTheme.background.ignoresSafeArea())
         // A deep link straight to `openDetail` has no tab that claimed it;
         // the visible one takes the page. `detailOwner == nil` so it does
@@ -200,16 +213,25 @@ private struct ModeToggle: View {
 
     var body: some View {
         if model.cinemaAvailable {
-            Picker("", selection: Binding(
-                get: { model.appMode },
-                set: { model.setAppMode($0) }
-            )) {
-                Text("Anime").tag(AppModel.AppMode.anime)
-                Text("Films & TV").tag(AppModel.AppMode.cinema)
+            // Words, as on the Mac and the phone: the chosen one in the
+            // foreground colour, the other muted. The stock segmented
+            // control read as a box floating over the hero.
+            HStack(spacing: 8) {
+                word("Anime", .anime)
+                Text("/")
+                    .font(.system(size: 28))
+                    .foregroundStyle(SumiTheme.muted)
+                word("Films & TV", .cinema)
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 420)
         }
+    }
+
+    private func word(_ title: String, _ mode: AppModel.AppMode) -> some View {
+        let isOn = model.appMode == mode
+        return Button(title) { model.setAppMode(mode) }
+            .buttonStyle(.borderless)
+            .font(.system(size: 28, weight: isOn ? .semibold : .regular))
+            .foregroundStyle(isOn ? SumiTheme.foreground : SumiTheme.muted)
     }
 }
 
@@ -257,52 +279,170 @@ private struct DetailPush: ViewModifier {
 private struct UpNextTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
+    /// What focus last rested on below the hero; nil puts the hero's own
+    /// picture back.
+    @State private var focusedBackdrop: TVBackdropSource?
+    /// Banners fetched for the hero's title. The queue only knows a banner
+    /// for a title this TV has opened before, so on a fresh install every
+    /// hero was a blurred cover.
+    @State private var heroBanners: [Int64: URL] = [:]
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: TVMetrics.rowSpacing) {
-                    TabHeader(title: "Up Next", model: model)
-
-                    if model.appMode == .cinema {
-                        cinemaBody
-                    } else {
-                        if !model.upNextItems.isEmpty {
-                            ContinueWatchingShelf(model: model, onOpen: open)
-                        }
-
-                        let newEpisodes = model.upNextItems.filter(\.hasNewEpisode)
-                        if !newEpisodes.isEmpty {
-                            NewEpisodesShelf(entries: newEpisodes) { entry in
-                                open(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH")
-                            }
-                        }
-
-                        TVPosterShelf(title: "Because You Watched", items: model.becauseYouWatched, onOpen: open)
-                        TVPosterShelf(title: "This Season", items: model.seasonalItems, onOpen: open)
-                        TVPosterShelf(title: "Trending", items: model.trendingItems, onOpen: open)
-                        TVPosterShelf(title: "Planning", items: model.planningItems, onOpen: open)
-
-                        if model.upNextItems.isEmpty && model.trendingItems.isEmpty {
-                            if model.isLoading {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.top, 120)
-                            } else {
-                                TVEmptyHint(
-                                    title: "Nothing in progress",
-                                    detail: "Titles you are watching on AniList show up here."
-                                )
-                            }
+            ZStack {
+                TVBackdrop(source: model.appMode == .cinema ? nil : (focusedBackdrop ?? heroBackdrop))
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: TVMetrics.rowSpacing) {
+                        if model.appMode == .cinema {
+                            TabHeader(title: "Up Next", model: model)
+                            cinemaBody
+                        } else {
+                            animeBody
                         }
                     }
+                    .padding(.vertical, 24)
                 }
-                .padding(.vertical, 24)
+                .scrollClipDisabled()
             }
-            .scrollClipDisabled()
-            .background(SumiTheme.background)
             .modifier(DetailPush(model: model, isPresented: $showDetail))
+            .task(id: hero?.id) { await fetchHeroBanner() }
         }
+    }
+
+    // MARK: Showcase
+
+    private var heroBackdrop: TVBackdropSource? {
+        guard let hero else { return nil }
+        return TVBackdropSource(banner: hero.banner ?? heroBanners[hero.id], cover: hero.cover)
+    }
+
+    private func fetchHeroBanner() async {
+        guard let hero, hero.banner == nil, heroBanners[hero.id] == nil else { return }
+        if let cached = DetailCache.peekBanner(id: hero.id, isManga: false) {
+            heroBanners[hero.id] = cached
+            return
+        }
+        guard let engine = model.engine,
+              let detail = try? await engine.mediaDetail(catalogId: hero.id, isManga: false),
+              let banner = detail.bannerImage.flatMap(URL.init(string:)) else { return }
+        heroBanners[hero.id] = banner
+    }
+
+    /// The title the hero offers: the first queue entry with an episode to
+    /// play, else, signed out or caught up, the top of Trending.
+    private struct Hero {
+        let id: Int64
+        let banner: URL?
+        let cover: URL?
+        let eyebrow: String
+        let title: String
+        let meta: String
+        let primaryLabel: String
+        let play: () -> Void
+        let details: () -> Void
+    }
+
+    private var hero: Hero? {
+        if let entry = model.upNextItems.first(where: { $0.unit == "EP" && !$0.isAwaitingEpisode }) {
+            var meta = entry.countLabel
+            if let ago = entry.watchedTimeAgo { meta += " \u{00B7} \(ago)" }
+            return Hero(
+                id: entry.id,
+                banner: entry.bannerURL,
+                cover: entry.thumbnailURL,
+                eyebrow: "Continue watching",
+                title: entry.title,
+                meta: meta,
+                primaryLabel: entry.progressPercent > 0 ? "Resume" : "Play episode \(entry.nextEpisodeOrChapter)",
+                play: {
+                    playFromShelf(
+                        model: model,
+                        catalogId: entry.id,
+                        episode: entry.nextEpisodeOrChapter,
+                        title: entry.title,
+                        coverURL: entry.thumbnailURL
+                    )
+                },
+                details: { open(entry.id, entry.title, entry.thumbnailURL, false) }
+            )
+        }
+        if let item = model.trendingItems.first(where: { !$0.isManga }) {
+            return Hero(
+                id: item.id,
+                banner: nil,
+                cover: item.coverImageURL,
+                eyebrow: "Trending",
+                title: item.title,
+                meta: TVPosterCard.meta(for: item) ?? "",
+                primaryLabel: "Play episode 1",
+                play: {
+                    playFromShelf(model: model, catalogId: item.id, episode: 1, title: item.title, coverURL: item.coverImageURL)
+                },
+                details: { open(item) }
+            )
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var animeBody: some View {
+        if let hero {
+            TVShowcaseHero(
+                eyebrow: hero.eyebrow,
+                title: hero.title,
+                meta: hero.meta,
+                primaryLabel: hero.primaryLabel,
+                primary: hero.play,
+                details: hero.details,
+                onFocus: { focusedBackdrop = nil }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Top left, over the side of the backdrop the gradient darkens:
+            // top right it sat on the brightest part of the banner, where
+            // the muted word could not be read.
+            .overlay(alignment: .topLeading) {
+                ModeToggle(model: model).padding(.horizontal, TVMetrics.gutter)
+            }
+        } else {
+            TabHeader(title: "Up Next", model: model)
+        }
+
+        if !model.upNextItems.isEmpty {
+            ContinueWatchingShelf(model: model, onOpen: open, onFocus: focusQueueEntry)
+        }
+
+        let newEpisodes = model.upNextItems.filter(\.hasNewEpisode)
+        if !newEpisodes.isEmpty {
+            NewEpisodesShelf(entries: newEpisodes, onOpen: { entry in
+                open(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH")
+            }, onFocus: focusQueueEntry)
+        }
+
+        TVPosterShelf(title: "Because You Watched", items: model.becauseYouWatched, onOpen: open, onFocus: focusItem)
+        TVPosterShelf(title: "This Season", items: model.seasonalItems, onOpen: open, onFocus: focusItem)
+        TVPosterShelf(title: "Trending", items: model.trendingItems, onOpen: open, onFocus: focusItem)
+        TVPosterShelf(title: "Planning", items: model.planningItems, onOpen: open, onFocus: focusItem)
+
+        if model.upNextItems.isEmpty && model.trendingItems.isEmpty {
+            if model.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 120)
+            } else {
+                TVEmptyHint(
+                    title: "Nothing in progress",
+                    detail: "Titles you are watching on AniList show up here."
+                )
+            }
+        }
+    }
+
+    private func focusQueueEntry(_ entry: UpNextQueueView.QueueEntry) {
+        focusedBackdrop = TVBackdropSource(banner: entry.bannerURL, cover: entry.thumbnailURL)
+    }
+
+    private func focusItem(_ item: MediaCard.Item) {
+        focusedBackdrop = TVBackdropSource(banner: nil, cover: item.coverImageURL)
     }
 
     @ViewBuilder
@@ -364,6 +504,7 @@ enum TVCinema {
 private struct ContinueWatchingShelf: View {
     @Bindable var model: AppModel
     let onOpen: (Int64, String, URL?, Bool) -> Void
+    let onFocus: (UpNextQueueView.QueueEntry) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -405,6 +546,7 @@ private struct ContinueWatchingShelf: View {
                                 .frame(width: TVMetrics.thumbWidth, height: TVMetrics.thumbHeight)
                             }
                             .buttonStyle(.card)
+                            .tvOnFocus { onFocus(entry) }
 
                             Text(entry.title)
                                 .font(.sumiHeading(size: 24, weight: .medium))
@@ -432,6 +574,7 @@ private struct ContinueWatchingShelf: View {
 private struct NewEpisodesShelf: View {
     let entries: [UpNextQueueView.QueueEntry]
     let onOpen: (UpNextQueueView.QueueEntry) -> Void
+    let onFocus: (UpNextQueueView.QueueEntry) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -450,6 +593,7 @@ private struct NewEpisodesShelf: View {
                                 .clipped()
                             }
                             .buttonStyle(.card)
+                            .tvOnFocus { onFocus(entry) }
 
                             Text(entry.title)
                                 .font(.system(size: 22))
@@ -481,6 +625,8 @@ struct TVPosterShelf: View {
     let title: String
     let items: [MediaCard.Item]
     let onOpen: (MediaCard.Item) -> Void
+    /// Up Next's backdrop follows focus; the other tabs pass nothing.
+    var onFocus: ((MediaCard.Item) -> Void)? = nil
 
     var body: some View {
         if !items.isEmpty {
@@ -489,7 +635,7 @@ struct TVPosterShelf: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: TVMetrics.shelfSpacing) {
                         ForEach(items) { item in
-                            TVPosterCard(item: item, onOpen: onOpen)
+                            TVPosterCard(item: item, onOpen: onOpen, onFocus: onFocus)
                         }
                     }
                     .padding(.horizontal, TVMetrics.gutter)
@@ -505,6 +651,7 @@ struct TVPosterShelf: View {
 struct TVPosterCard: View {
     let item: MediaCard.Item
     let onOpen: (MediaCard.Item) -> Void
+    var onFocus: ((MediaCard.Item) -> Void)? = nil
 
     /// AniList scores are 0-100; the sheet shows them out of ten.
     static func meta(for item: MediaCard.Item) -> String? {
@@ -530,6 +677,7 @@ struct TVPosterCard: View {
                 .clipped()
             }
             .buttonStyle(.card)
+            .tvOnFocus { onFocus?(item) }
             // The button's label is a picture; VoiceOver (and the UI
             // tests) need the title on it.
             .accessibilityLabel(item.title)

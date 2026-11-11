@@ -21,6 +21,7 @@ struct TVDetailView: View {
                     Hero(details: details)
                     actions(details)
                     episodeList
+                    cast
                     about(details)
                 } else if let message = model.errorMessage {
                     // Without this the page spun forever on a failed fetch:
@@ -37,8 +38,43 @@ struct TVDetailView: View {
             .padding(.bottom, 80)
         }
         .scrollClipDisabled()
-        .background(SumiTheme.background)
+        .background {
+            // The cover's colour, low behind the episodes and cast, as on
+            // the Up Next backdrop. `indigo` is the cover's hue here: the
+            // task below sets it, as the Mac's detail page does.
+            ZStack {
+                SumiTheme.background
+                RadialGradient(
+                    colors: [SumiTheme.indigo.opacity(0.22), .clear],
+                    center: .bottom,
+                    startRadius: 0,
+                    endRadius: 1400
+                )
+            }
+            .ignoresSafeArea()
+        }
         .ignoresSafeArea(edges: .top)
+        .task(id: model.selectedMediaDetails?.coverURL) { await followCoverAccent() }
+        .onDisappear {
+            ThemeStore.shared.releaseAccentOverride(owner: model.selectedMediaDetails?.coverURL?.absoluteString ?? "")
+        }
+    }
+
+    @AppStorage(ThemeStore.posterAccentKey) private var posterAccentEnabled = true
+
+    /// The page's accent from its cover, through the same store and owner
+    /// rule as `MediaDetailView.followPosterAccent`, so Play, the progress
+    /// bars and the glow take the show's colour.
+    private func followCoverAccent() async {
+        let cover = model.selectedMediaDetails?.coverURL
+        let owner = cover?.absoluteString ?? ""
+        guard posterAccentEnabled, let cover,
+              let image = await ImageDecodeCache.shared.image(for: cover, maxPixelSize: 600),
+              !Task.isCancelled else {
+            ThemeStore.shared.setAccentOverride(nil, owner: owner)
+            return
+        }
+        ThemeStore.shared.setAccentOverride(PosterAccent.accent(for: image, isLight: ThemeStore.shared.palette.isLight), owner: owner)
     }
 
     // MARK: Actions
@@ -153,6 +189,36 @@ struct TVDetailView: View {
         }
     }
 
+    // MARK: Cast
+
+    /// Characters with their voice actors under them. Each opens the
+    /// character's page, which leads on to the actor and their other roles.
+    @ViewBuilder
+    private var cast: some View {
+        if !model.selectedCharacters.isEmpty {
+            VStack(alignment: .leading, spacing: 18) {
+                TVSectionHeader("Cast")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: TVMetrics.shelfSpacing) {
+                        ForEach(model.selectedCharacters) { character in
+                            TVPersonCard(
+                                imageURL: character.imageURL?.absoluteString,
+                                title: character.name,
+                                subtitle: character.voiceActorName ?? MediaCard.displayRelation(character.role)
+                            ) {
+                                model.openCharacter(id: character.id)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, TVMetrics.gutter)
+                    .padding(.vertical, 30)
+                }
+                .scrollClipDisabled()
+            }
+            .focusSection()
+        }
+    }
+
     // MARK: About
 
     @ViewBuilder
@@ -190,12 +256,16 @@ struct TVDetailView: View {
                 }
             }
 
-            if let studios = details.studios, !studios.isEmpty {
+            if let studios = details.studios?.filter(\.isMain), !studios.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     metaLabel("Studio")
-                    Text(studios.filter(\.isMain).map(\.name).joined(separator: ", "))
-                        .font(.system(size: 24))
-                        .foregroundStyle(SumiTheme.foreground)
+                    // Each opens the studio's other work.
+                    HStack(spacing: 20) {
+                        ForEach(studios) { studio in
+                            Button(studio.name) { model.openStudio(id: studio.id) }
+                                .font(.system(size: 24))
+                        }
+                    }
                 }
             } else if let studio = details.studio {
                 VStack(alignment: .leading, spacing: 10) {
@@ -312,6 +382,14 @@ struct TVDetailView: View {
                         }
                     }
                     .clipped()
+                    // Out past tvOS's side safe area, which is 80pt on a
+                    // 1920pt screen: inside it the banner stopped short of
+                    // both edges. `ignoresSafeArea` does nothing inside the
+                    // scroll view, which does not clip
+                    // (`scrollClipDisabled`), so a box 160pt wider than its
+                    // slot draws to both edges. After `.clipped()`, or only
+                    // the empty box widens.
+                    .padding(.horizontal, -80)
 
                 LinearGradient(
                     colors: [.clear, SumiTheme.background.opacity(0.85), SumiTheme.background],
@@ -319,6 +397,8 @@ struct TVDetailView: View {
                     endPoint: .bottom
                 )
                 .frame(height: 400)
+                // As wide as the banner, or its edges show undarkened.
+                .padding(.horizontal, -80)
 
                 HStack(alignment: .bottom, spacing: 40) {
                     CachedAsyncImage(url: details.coverURL, maxPixelSize: 600) { image in

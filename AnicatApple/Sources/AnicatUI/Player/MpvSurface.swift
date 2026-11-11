@@ -827,6 +827,9 @@ public struct MpvSurface {
             controller.onSetFillScreen = { [weak self] fill, crop in
                 self?.setFillScreen(fill, crop: crop)
             }
+            controller.onLiftSubtitles = { [weak self] share in
+                self?.setSubtitleLift(share)
+            }
 
             mpv_observe_property(handle, 1, "time-pos", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 2, "duration", MPV_FORMAT_DOUBLE)
@@ -1291,10 +1294,22 @@ public struct MpvSurface {
         /// error in the middle of an episode.
         func setSubtitleStyle(_ style: SubtitleStyle) {
             guard let mpv = mpv else { return }
-            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides(playResY: scriptHeight, styles: dialogueStyles, liftingBy: fillCrop))
+            let lift = fillCrop + subtitleLift
+            mpv_set_property_string(mpv, "sub-ass-style-overrides", style.assOverrides(playResY: scriptHeight, styles: dialogueStyles, liftingBy: lift))
             for (name, value) in style.textOptions {
                 mpv_set_property_string(mpv, name, value)
             }
+            // Text subtitles do not go through the ASS styles; their bottom
+            // margin is in 720-line units, and 22 is mpv's own default.
+            mpv_set_property_string(mpv, "sub-margin-y", "\(Int(22 + lift * 720))")
+        }
+
+        /// The TV's controls lifting the dialogue clear of them; see
+        /// `PlayerController.liftSubtitles`. Same route as the fill crop.
+        func setSubtitleLift(_ share: Double) {
+            guard mpv != nil else { return }
+            subtitleLift = share
+            setSubtitleStyle(SubtitleStyle.current)
         }
 
         /// Cycles off / 90 CW / 90 CCW, same three states and same reasoning
@@ -1594,6 +1609,12 @@ public struct MpvSurface {
         var fillCrop: Double {
             get { scriptHeightLock.lock(); defer { scriptHeightLock.unlock() }; return _fillCrop }
             set { scriptHeightLock.lock(); _fillCrop = newValue; scriptHeightLock.unlock() }
+        }
+        /// Same reader and lock as `fillCrop`.
+        private var _subtitleLift: Double = 0
+        var subtitleLift: Double {
+            get { scriptHeightLock.lock(); defer { scriptHeightLock.unlock() }; return _subtitleLift }
+            set { scriptHeightLock.lock(); _subtitleLift = newValue; scriptHeightLock.unlock() }
         }
 
         /// mpv's `demuxer-cache-state/seekable-ranges` as spans in seconds.
@@ -2144,6 +2165,7 @@ public struct MpvSurface {
             controller.onCycleSideways = nil
             controller.sidewaysState = 0
             controller.onSetFillScreen = nil
+            controller.onLiftSubtitles = nil
             controller.isFillingScreen = false
             sidewaysSavedHwdec = nil
             lastLoadedURL = nil

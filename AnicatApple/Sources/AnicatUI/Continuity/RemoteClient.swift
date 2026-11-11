@@ -73,7 +73,7 @@ public final class RemoteClient {
 
     private init() {}
 
-    static let hostSecretsKey = "anicat_remote_host_secrets"
+    nonisolated static let hostSecretsKey = "anicat_remote_host_secrets"
 
     /// The pairing secret for a Mac, by the name Bonjour knows it under.
     /// Never sent anywhere: both ends derive it during pairing.
@@ -98,6 +98,12 @@ public final class RemoteClient {
     }
 
     public func connect(to node: BonjourDiscovery.DiscoveredNode) {
+        // Any dial ends a quiet sync in flight: its `syncReply` hangs up and
+        // its timeout disconnects, and with a Mac and an Apple TV both on the
+        // network the dial may be the viewer switching to the other host.
+        quietSyncTimeout?.cancel()
+        quietSyncTimeout = nil
+        isQuietSync = false
         // Not `disconnect()`: it empties the queue, and `send(_:to:)` fills
         // the queue and then calls this.
         connection?.cancel()
@@ -167,8 +173,12 @@ public final class RemoteClient {
     /// connection's own state is the truth.
     public func ensureConnected(to node: BonjourDiscovery.DiscoveredNode) {
         guard Self.knownHosts().contains(node.id) else { return }
-        if status == .connected, connection?.state == .ready { return }
-        if case .connecting = status, connection?.state == .preparing { return }
+        // Same host only: with a Mac and an Apple TV both on the network, a
+        // live connection to the other one is not this one.
+        if hostNodeId == node.id {
+            if status == .connected, connection?.state == .ready { return }
+            if case .connecting = status, connection?.state == .preparing { return }
+        }
         connect(to: node)
     }
 
@@ -177,8 +187,8 @@ public final class RemoteClient {
     /// at all for a Mac this phone has never been paired with.
     public func syncQuietly(with node: BonjourDiscovery.DiscoveredNode) {
         guard status == .idle, Self.knownHosts().contains(node.id) else { return }
-        isQuietSync = true
         connect(to: node)
+        isQuietSync = true
         // A stale mDNS record from a Mac that has since quit still accepts a
         // connection long enough to reach `.ready`, and then nobody ever
         // answers the hello. Without this the phone would sit in
@@ -229,7 +239,12 @@ public final class RemoteClient {
     /// Sends a command to the Mac, dialling it up first if this is the first
     /// thing the phone has asked of it.
     public func send(_ command: RemoteCommand, to node: BonjourDiscovery.DiscoveredNode) {
-        if status == .connected {
+        if hostNodeId != node.id {
+            // Connected to the other host: "Play on" the TV must not land on
+            // the Mac. Queued before the dial, which keeps the queue.
+            queued = [command]
+            connect(to: node)
+        } else if status == .connected {
             send(command)
         } else {
             queued.append(command)

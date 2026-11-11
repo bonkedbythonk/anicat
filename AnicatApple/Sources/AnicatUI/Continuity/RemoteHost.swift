@@ -54,14 +54,21 @@ public final class RemoteHost {
     /// The optional verbs this build serves, announced in `hostInfo`. A verb
     /// goes in here in the same commit that teaches `apply` to honour it, so
     /// the two cannot drift.
-    static let features: Set<String> = [
-        RemoteFeature.speed,
-        RemoteFeature.skip,
-        RemoteFeature.autoNext,
-        RemoteFeature.tracks,
-        RemoteFeature.fling,
-        RemoteFeature.upscale,
-    ]
+    static let features: Set<String> = {
+        var features: Set<String> = [
+            RemoteFeature.speed,
+            RemoteFeature.skip,
+            RemoteFeature.autoNext,
+            RemoteFeature.tracks,
+            RemoteFeature.fling,
+        ]
+        // Anime4K runs only on the Mac (see `TVSettingsView`), so the TV
+        // does not offer the phone a switch for it.
+        #if os(macOS)
+        features.insert(RemoteFeature.upscale)
+        #endif
+        return features
+    }()
 
     private init() {
         UserDefaults.standard.removeObject(forKey: Self.legacyPairedDevicesKey)
@@ -356,8 +363,8 @@ public final class RemoteHost {
     /// cursor sitting on the picture. Nobody is at this keyboard -- the
     /// request came from a phone -- so there is no work here to steal focus
     /// from.
-    /// Nothing to do on iOS, where this type exists only because the file
-    /// compiles for both: a phone is never the host.
+    /// Nothing to do on tvOS, where the app is in front whenever it can
+    /// answer at all, nor on iOS, where a phone is never the host.
     private static func comeForward() {
         #if os(macOS)
         NSApp.activate(ignoringOtherApps: true)

@@ -32,6 +32,7 @@ public struct TVRootView: View {
     /// `RootTabView.detailOwner` for why this is an owner and not a flag:
     /// switching tabs must not read as a dismissal on the tab being left.
     @State private var detailOwner: Tab?
+    @Environment(\.scenePhase) private var scenePhase
 
     public var body: some View {
         ZStack {
@@ -123,7 +124,40 @@ public struct TVRootView: View {
         // the visible one takes the page. `detailOwner == nil` so it does
         // not steal a page a press has already opened elsewhere.
         .onChange(of: model.selectedMediaDetails?.id) { _, id in
-            if id != nil, detailOwner == nil { detailOwner = tab }
+            guard id != nil, detailOwner == nil else { return }
+            // Settings has no detail page to show it on, and it is where the
+            // TV sits right after pairing a phone, so a title sent from that
+            // phone landed nowhere.
+            if tab == .settings { tab = .upNext }
+            detailOwner = tab
+        }
+        // On the root rather than on a tab: a phone asking to pair while an
+        // episode plays has to be answered over the player. Dismissing is a
+        // refusal, as on the Mac, so the phone is not left waiting.
+        .alert(
+            "Allow \(RemoteHost.shared.pendingPairing?.deviceName ?? "this iPhone") to control Anicat?",
+            isPresented: Binding(
+                get: { RemoteHost.shared.pendingPairing != nil },
+                set: { presented in
+                    if !presented { RemoteHost.shared.answerPairing(approved: false) }
+                }
+            )
+        ) {
+            Button("Allow") { RemoteHost.shared.answerPairing(approved: true) }
+            Button("Don't Allow", role: .cancel) { RemoteHost.shared.answerPairing(approved: false) }
+        } message: {
+            Text("It can play, pause, seek, change episodes and send titles to this Apple TV. Asked once per iPhone; forget them in Settings.")
+        }
+        // tvOS suspends the app soon after it leaves the screen, and a
+        // listener held across that is not one to trust, so the TV stops
+        // announcing itself on the way out and starts again on the way back.
+        // A suspended TV cannot be reached either way.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: BonjourDiscovery.shared.stopAdvertising()
+            case .active: model.applyLanSharingSetting(AppModel.isLanSharingEnabled)
+            default: break
+            }
         }
     }
 

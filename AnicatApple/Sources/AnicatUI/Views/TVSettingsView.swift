@@ -13,7 +13,8 @@ import SwiftUI
 /// Every other row is a key something on the TV actually reads. Absent on
 /// purpose: GPU upscaling (the shader chain never runs off a Mac), the
 /// keyboard dimmer, Discord presence, the cellular warning, streaming from
-/// a Mac (a phone feature).
+/// a Mac (a phone feature). The phone remote is here because the TV is a
+/// host the phone drives, the same as the Mac.
 struct TVSettingsView: View {
     @Bindable var model: AppModel
 
@@ -22,6 +23,13 @@ struct TVSettingsView: View {
     @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @AppStorage(TmdbCredential.userKeyDefaultsKey) private var tmdbKey: String = ""
+    // `@AppStorage` needs a literal key; `AppModel.isLanSharingEnabled`
+    // reads it and its defaults observer starts or stops the listener.
+    @AppStorage("anicat_lan_sharing") private var lanSharing: Bool = false
+    // Read into state rather than off `UserDefaults` in the body: the paired
+    // list is written by `RemoteHost` from a socket callback, which no
+    // `@AppStorage` binding observes.
+    @State private var pairedCount = RemoteHost.pairedDevices().count
 
     // The theme controls gate view structure on `skin.hasLight`, so the
     // reads have to be observed ones. See `PhoneSettingsView`.
@@ -40,6 +48,7 @@ struct TVSettingsView: View {
         Form {
             account
             playback
+            remote
             appearance
             cinema
             storage
@@ -186,6 +195,31 @@ struct TVSettingsView: View {
                 }
             Toggle("Play the next episode automatically", isOn: $autoPlayNext)
         }
+    }
+
+    // MARK: Remote
+
+    @ViewBuilder
+    private var remote: some View {
+        Section("iPhone remote") {
+            Toggle("Allow iPhones to find this Apple TV", isOn: $lanSharing)
+            Text(lanSharing
+                 ? "Anicat on an iPhone on this network can control playback here and send episodes to it. The first time one asks, this Apple TV asks you first. Only while Anicat is open."
+                 : "Off, nothing on the network can tell Anicat is running.")
+                .font(.system(size: 20))
+                .foregroundStyle(.secondary)
+            if let name = RemoteHost.shared.attachedRemoteName {
+                Label("\(name) connected", systemImage: "iphone")
+                    .foregroundStyle(.secondary)
+            }
+            if pairedCount > 0 {
+                Button("Forget \(pairedCount) paired iPhone\(pairedCount == 1 ? "" : "s")", role: .destructive) {
+                    RemoteHost.shared.unpairAll()
+                    pairedCount = 0
+                }
+            }
+        }
+        .onAppear { pairedCount = RemoteHost.pairedDevices().count }
     }
 
     // MARK: Appearance

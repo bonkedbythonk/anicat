@@ -986,8 +986,8 @@ public final class AppModel {
     /// Starts or stops the Bonjour advertisement to match the setting. A
     /// paired phone mid-session loses its connection when the listener is
     /// cancelled, which is what turning sharing off should mean.
-    private func applyLanSharingSetting(_ enabled: Bool) {
-        #if os(macOS)
+    func applyLanSharingSetting(_ enabled: Bool) {
+        #if os(macOS) || os(tvOS)
         if enabled {
             guard let port = streamServerPort else { return }
             BonjourDiscovery.shared.startAdvertising(port: port)
@@ -1127,9 +1127,10 @@ public final class AppModel {
                 coreEngine.discordConnect()
             }
 
-            // Bonjour Local Swarm Offload: advertise on macOS, browse on iOS.
-            // The Mac side only when Settings > Sharing allows it.
-            #if os(macOS)
+            // The Mac and the TV are hosts a phone drives; they advertise,
+            // only when their sharing switch allows it. The phone browses.
+            // The TV used to browse too, and found nothing it could use.
+            #if os(macOS) || os(tvOS)
             streamServerPort = port
             lastLanSharingEnabled = Self.isLanSharingEnabled
             if lastLanSharingEnabled {

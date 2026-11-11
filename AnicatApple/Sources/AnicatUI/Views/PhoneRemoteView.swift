@@ -1,14 +1,24 @@
 #if os(iOS)
 import SwiftUI
 
-/// The phone as a remote for a Mac running Anicat on the same Wi-Fi.
+/// The phone as a remote for a Mac or an Apple TV running Anicat on the
+/// same Wi-Fi.
 ///
 /// A sheet rather than a tab or a page: it is only reachable while a Mac is
 /// actually advertising, and a permanent control that is dead most of the
 /// time is the thing the Films & TV segment is already hidden to avoid.
 struct PhoneRemoteView: View {
-    let node: BonjourDiscovery.DiscoveredNode
+    /// The host being driven. State, not a `let`: the title menu switches
+    /// between hosts without closing the sheet.
+    @State private var node: BonjourDiscovery.DiscoveredNode
     let model: AppModel
+
+    init(node: BonjourDiscovery.DiscoveredNode, model: AppModel) {
+        _node = State(initialValue: node)
+        self.model = model
+    }
+
+    private var discovery: BonjourDiscovery { BonjourDiscovery.shared }
     @Environment(\.dismiss) private var dismiss
 
     private var client: RemoteClient { RemoteClient.shared }
@@ -34,13 +44,13 @@ struct PhoneRemoteView: View {
                 case .awaitingApproval:
                     message(
                         "Waiting for \(node.name)",
-                        detail: "Approve this iPhone in Anicat on the Mac. It is asked once.",
+                        detail: "Approve this iPhone in Anicat on \(node.name). It is asked once.",
                         symbol: "hand.raised"
                     )
                 case .denied:
                     message(
                         "Not allowed",
-                        detail: "\(node.name) refused this iPhone. Approve it there, or clear paired remotes in the Mac's settings and try again.",
+                        detail: "\(node.name) refused this iPhone. Approve it there, or clear paired remotes in its settings and try again.",
                         symbol: "xmark.shield",
                         showsRetry: true
                     )
@@ -61,8 +71,27 @@ struct PhoneRemoteView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(SumiTheme.background)
-            .navigationTitle("Remote")
+            .navigationTitle(discovery.discoveredNodes.count > 1 ? node.name : "Remote")
             .navigationBarTitleDisplayMode(.inline)
+            // The Mac and the Apple TV both advertise; the title is where
+            // the sheet says which one it drives and switches to the other.
+            .toolbarTitleMenu {
+                if discovery.discoveredNodes.count > 1 {
+                    ForEach(discovery.discoveredNodes) { host in
+                        Button {
+                            guard host.id != node.id else { return }
+                            discovery.select(host)
+                            node = host
+                        } label: {
+                            if host.id == node.id {
+                                Label(host.name, systemImage: "checkmark")
+                            } else {
+                                Text(host.name)
+                            }
+                        }
+                    }
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if client.status == .connected {
@@ -84,7 +113,8 @@ struct PhoneRemoteView: View {
         .sheet(isPresented: $showingTracks) {
             trackPicker
         }
-        .task {
+        // Keyed on the host so a switch from the title menu dials the new one.
+        .task(id: node.id) {
             // Dialled from here and nowhere else. The first hello raises an
             // approval alert on the Mac, so connecting on discovery would
             // interrupt whoever is sitting at it with nobody having asked

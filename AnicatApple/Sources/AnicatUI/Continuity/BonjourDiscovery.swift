@@ -9,9 +9,44 @@ public final class BonjourDiscovery: @unchecked Sendable {
     public static let serviceType = "_anicat-stream._tcp"
     public static let serviceDomain = "local."
 
-    // Published State
-    public var discoveredMacNode: DiscoveredNode?
+    /// Every Anicat host advertising on this network, one per Bonjour name:
+    /// the Mac and the Apple TV both, when both are on.
+    public private(set) var discoveredNodes: [DiscoveredNode] = []
     public var isAdvertising: Bool = false
+
+    /// The host the phone's remote, "Play on" and the quiet sync talk to.
+    /// The name is from when a Mac was the only host there was; it is kept
+    /// because every caller wants exactly one host and gets it here.
+    ///
+    /// The one last picked, else one this phone is paired with, else the
+    /// first found. Discovery used to keep only the first candidate to
+    /// resolve, so with the Mac and the TV both advertising the phone saw
+    /// whichever answered mDNS faster, and could go a whole session without
+    /// ever seeing the other.
+    public var discoveredMacNode: DiscoveredNode? {
+        if let picked = selectedNodeId, let node = discoveredNodes.first(where: { $0.id == picked }) {
+            return node
+        }
+        let paired = Self.pairedHostIds()
+        return discoveredNodes.first { paired.contains($0.id) } ?? discoveredNodes.first
+    }
+
+    private static let selectedNodeKey = "anicat_remote_selected_host"
+    private var selectedNodeId: String? = UserDefaults.standard.string(forKey: selectedNodeKey)
+
+    /// Makes `node` the host everything on this phone talks to, and keeps
+    /// that choice across launches.
+    public func select(_ node: DiscoveredNode) {
+        selectedNodeId = node.id
+        UserDefaults.standard.set(node.id, forKey: Self.selectedNodeKey)
+    }
+
+    /// `RemoteClient.knownHosts()` without the main actor: this is read from
+    /// a computed property any thread may touch. Same defaults key.
+    private static func pairedHostIds() -> Set<String> {
+        let secrets = UserDefaults.standard.dictionary(forKey: RemoteClient.hostSecretsKey) as? [String: String] ?? [:]
+        return Set(secrets.keys)
+    }
 
     public struct DiscoveredNode: Identifiable, Sendable {
         public let id: String
@@ -86,14 +121,18 @@ public final class BonjourDiscovery: @unchecked Sendable {
                 Task { @MainActor in RemoteHost.shared.accept(connection) }
             }
 
-            listener.stateUpdateHandler = { [weak self] state in
+            listener.stateUpdateHandler = { [weak self, weak listener] state in
                 Task { @MainActor in
                     switch state {
                     case .ready:
                         self?.isAdvertising = true
                         print("[Bonjour] Advertising Anicat local stream node, stream port \(port)")
                     case .failed(let error):
-                        self?.isAdvertising = false
+                        // Dropped, not just flagged: `startAdvertising`
+                        // refuses while a listener is held, so a failed one
+                        // kept here could never be replaced. Only if it is
+                        // still the one held: a restart may have replaced it.
+                        if let self, self.listener === listener { self.stopAdvertising() }
                         print("[Bonjour] Advertising failed: \(error)")
                     default:
                         break
@@ -136,17 +175,22 @@ public final class BonjourDiscovery: @unchecked Sendable {
             // A fresh result set replaces the candidates being tried, not
             // adds to them — cancel whatever the previous batch still had in
             // flight so a peer dropped from this update can't keep resolving
-            // in the background.
+            // in the background — and a host missing from it is gone.
             self.pendingResolves.forEach { $0.cancel() }
             self.pendingResolves.removeAll()
+            let names = Set(results.compactMap { result -> String? in
+                guard case .service(let name, _, _, _) = result.endpoint else { return nil }
+                return name
+            })
+            Task { @MainActor in
+                self.discoveredNodes.removeAll { !names.contains($0.id) }
+            }
 
             // `NWBrowser` hands back unresolved `.service` endpoints — no
-            // host or port yet, just enough to name each peer. Try every
-            // candidate concurrently rather than committing to the first:
-            // mDNS can list a stale/unreachable Mac (asleep, off the LAN
-            // segment, firewalled) before a perfectly reachable one, and that
-            // candidate would otherwise never reach `.ready` while blocking
-            // every other candidate from ever being attempted.
+            // host or port yet, just enough to name each peer. Every one is
+            // resolved and kept: mDNS can list a stale/unreachable host
+            // (asleep, off the LAN segment, firewalled) that never reaches
+            // `.ready`, and it must not hold up the others.
             for result in results {
                 guard case .service(let name, _, _, _) = result.endpoint else { continue }
                 // The peer's stream port comes from the TXT record, not from
@@ -160,11 +204,7 @@ public final class BonjourDiscovery: @unchecked Sendable {
                     guard let self, let connection else { return }
                     switch state {
                     case .ready:
-                        // First candidate to resolve wins; tear down every
-                        // other in-flight attempt from this batch.
                         self.pendingResolves.removeAll { $0 === connection }
-                        self.pendingResolves.forEach { $0.cancel() }
-                        self.pendingResolves.removeAll()
                         defer { connection.cancel() }
                         guard case .hostPort(let host, let port) = connection.currentPath?.remoteEndpoint else { return }
                         let hostString: String
@@ -180,14 +220,19 @@ public final class BonjourDiscovery: @unchecked Sendable {
                         let streamPort = advertisedPort ?? port.rawValue
                         let controlPort = port.rawValue
                         Task { @MainActor in
-                            self.discoveredMacNode = DiscoveredNode(
+                            let node = DiscoveredNode(
                                 id: name,
                                 name: name,
                                 host: hostString,
                                 controlPort: controlPort,
                                 streamPort: streamPort
                             )
-                            print("[Bonjour] Discovered Mac \(name) at \(hostString), control \(controlPort), stream \(streamPort)")
+                            if let index = self.discoveredNodes.firstIndex(where: { $0.id == name }) {
+                                self.discoveredNodes[index] = node
+                            } else {
+                                self.discoveredNodes.append(node)
+                            }
+                            print("[Bonjour] Discovered \(name) at \(hostString), control \(controlPort), stream \(streamPort)")
                         }
                     case .failed, .cancelled:
                         self.pendingResolves.removeAll { $0 === connection }
@@ -217,6 +262,6 @@ public final class BonjourDiscovery: @unchecked Sendable {
     public func stopBrowsing() {
         browser?.cancel()
         browser = nil
-        discoveredMacNode = nil
+        discoveredNodes = []
     }
 }

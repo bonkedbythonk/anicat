@@ -132,7 +132,7 @@ public struct RootView: View {
                     switchModeLocked: !model.cinemaAvailable,
                     // Signed out there is no Watching list to judge by, and
                     // the calendar's global view is the whole point of it.
-                    showsSchedule: !model.isSignedIn || model.watchingItems.contains { $0.isAiring },
+                    showsSchedule: !model.isSignedIn || model.scheduleItems.contains(where: \.isWatching),
                     onSwitchMode: {
                         guard model.cinemaAvailable else {
                             model.clearPersonPages()

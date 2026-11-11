@@ -819,11 +819,16 @@ extension AppModel {
         async let trendingTask = engine.trending(mediaType: "ANIME", format: nil, limit: 24)
         async let watchingTask = engine.userList(status: "CURRENT", mediaType: "ANIME")
         async let rewatchingTask = engine.userList(status: "REPEATING", mediaType: "ANIME")
+        // A planned show that starts airing showed up nowhere until it was
+        // moved to Watching by hand. `loadHomeDiscoverRows` asks for the
+        // same list right after; the engine's list cache answers it.
+        async let planningTask = engine.userList(status: "PLANNING", mediaType: "ANIME")
         async let profileTask = engine.viewerProfile()
 
         let trending = (try? await trendingTask) ?? []
         var watching = (try? await watchingTask) ?? []
         let rewatching = (try? await rewatchingTask) ?? []
+        let planning = (try? await planningTask) ?? []
         var profile = try? await profileTask
         if ScreenshotFixtures.isEnabled {
             watching = ScreenshotFixtures.watching(from: trending)
@@ -849,11 +854,13 @@ extension AppModel {
         let formatter = SumiTheme.timeFormatter()
         let dayFormatter = DateFormatter()
         dayFormatter.dateFormat = "EEEE, MMMM d"
-        let watchingIds = Set(watching.map(\.catalogId))
+        // Planning counts as the viewer's own, like the month calendar's
+        // `onUserList`; otherwise the default "Watching" filter hid it.
+        let watchingIds = Set((watching + planning).map(\.catalogId))
         var seenIds = Set<Int64>()
         var combinedAiring: [ScheduleView.ScheduleItem] = []
 
-        for s in (watching + trending) {
+        for s in (watching + planning + trending) {
             guard !seenIds.contains(s.catalogId),
                   let at = s.nextAiringAt,
                   let ep = s.nextEpisode else { continue }

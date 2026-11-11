@@ -815,6 +815,9 @@ public struct MpvSurface {
             controller.onSetVideoEnabled = { [weak self] enabled in
                 self?.setVideoEnabled(enabled)
             }
+            controller.onReadProperty = { [weak self] name in
+                self.flatMap { s in s.withHandle { _ in s.stringProperty(name) } } ?? nil
+            }
             controller.onSetSubtitleScale = { [weak self] scale in
                 self?.setSubtitleScale(scale)
             }
@@ -2161,6 +2164,7 @@ public struct MpvSurface {
             controller.onSetMuted = nil
             controller.onSetSpeed = nil
             controller.onSetVideoEnabled = nil
+            controller.onReadProperty = nil
             controller.onSetSubtitleScale = nil
             controller.onCycleSideways = nil
             controller.sidewaysState = 0

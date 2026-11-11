@@ -95,6 +95,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>${ANICAT_TMDB_PROXY:-https://anicat-tmdb.anicat.workers.dev}</string>
     <key>ANICATTMDBKey</key>
     <string>${ANICAT_TMDB_KEY:-}</string>
+    <!-- Play on TV browses for Chromecasts and serves the stream to one.
+         Without these macOS's local network check fails both silently:
+         the TV list stays empty and nothing logs why. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Anicat finds TVs and other Anicat instances on your network, and streams to the TV you pick.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_googlecast._tcp</string>
+        <string>_anicat-stream._tcp</string>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
     <key>NSHighResolutionCapable</key>

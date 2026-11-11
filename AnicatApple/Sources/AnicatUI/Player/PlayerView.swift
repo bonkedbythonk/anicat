@@ -61,6 +61,7 @@ public struct PlayerView: View {
     @State private var mpvDetails: [StreamDetailRow] = []
     @State private var torrentDetails: [StreamDetailRow] = []
     @State private var showEpisodeList = false
+    @State private var showCastMenu = false
     @State private var audioTracks: [PlayerTrack] = []
     @State private var subtitleTracks: [PlayerTrack] = []
     /// Which of the two track lists is unfolded in the popover, at most one
@@ -554,6 +555,19 @@ public struct PlayerView: View {
                 // chrome that shares them draws over it.
                 ambientGlowLayer(geometry: geometry, windowSize: windowSize)
 
+                #if os(macOS)
+                // An overlay beside the surface, never a branch around it:
+                // see the `MpvSurface` call site above.
+                // Opaque: with `vid=no` mpv leaves the last frame up, which
+                // read as a frozen picture behind the label.
+                if controller.cast.isActive {
+                    CastRemoteView(cast: controller.cast, controller: controller)
+                        .frame(width: windowSize.width, height: windowSize.height)
+                        .background(Color.black)
+                        .position(x: windowSize.width / 2, y: windowSize.height / 2)
+                }
+                #endif
+
                 // "Click outside cancels" for the next-episode card. Over the
                 // video and under the chrome, so pausing or scrubbing while
                 // the card is up still reaches the controls that do it —
@@ -956,7 +970,7 @@ public struct PlayerView: View {
         // opening the card while the layout is still the old size is the
         // mid-screen hang all over again.
         .onChange(of: stageReady) { _, _ in advanceOpeningIfReady() }
-        .onChange(of: showEpisodeList || showInfoMenu) { _, isOpen in
+        .onChange(of: showEpisodeList || showInfoMenu || showCastMenu) { _, isOpen in
             controller.isMenuOpen = isOpen
             if isOpen {
                 controller.areControlsVisible = true
@@ -1397,6 +1411,23 @@ public struct PlayerView: View {
                         episodeListMenu
                     }
                 }
+
+                #if os(macOS)
+                // Play on TV
+                Button(action: { showCastMenu = true }) {
+                    Image(systemName: "tv")
+                        .font(.system(size: 13))
+                        .foregroundColor(controller.cast.isActive ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .help("Play on TV")
+                .accessibilityLabel("Play on TV")
+                .sumiPopover(isPresented: $showCastMenu, arrowEdge: .bottom) {
+                    CastMenu(cast: controller.cast)
+                }
+                #endif
 
                 // Info / More Options
                 Button(action: {

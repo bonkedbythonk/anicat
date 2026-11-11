@@ -124,10 +124,18 @@ public struct SumiSlashToggle<Option: Hashable>: View {
     let options: [(Option, String)]
     let selection: Option
     let select: (Option) -> Void
+    let onColor: Color
+    let offColor: Color
 
-    public init(_ options: [(Option, String)], selection: Option, select: @escaping (Option) -> Void) {
+    /// The colours default to the theme's, which are for the light app
+    /// surface; on the black player both words read as near-black.
+    public init(_ options: [(Option, String)], selection: Option,
+                onColor: Color = SumiTheme.foreground, offColor: Color = SumiTheme.muted,
+                select: @escaping (Option) -> Void) {
         self.options = options
         self.selection = selection
+        self.onColor = onColor
+        self.offColor = offColor
         self.select = select
     }
 
@@ -135,7 +143,7 @@ public struct SumiSlashToggle<Option: Hashable>: View {
         HStack(spacing: 6) {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                 if index > 0 {
-                    Text("/").foregroundColor(SumiTheme.muted.opacity(0.6))
+                    Text("/").foregroundColor(offColor.opacity(0.6))
                 }
                 let isOn = option.0 == selection
                 Button {
@@ -153,7 +161,7 @@ public struct SumiSlashToggle<Option: Hashable>: View {
                         .overlay {
                             Text(option.1)
                                 .fontWeight(isOn ? .semibold : .regular)
-                                .foregroundColor(isOn ? SumiTheme.foreground : SumiTheme.muted)
+                                .foregroundColor(isOn ? onColor : offColor)
                         }
                         .contentShape(Rectangle())
                 }

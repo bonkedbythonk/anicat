@@ -171,9 +171,31 @@ public final class PlayerController {
     /// value a transport method just set.
     public var isPlaying: Bool = true {
         didSet {
-            if oldValue != isPlaying { onPlayingStateChange?(isPlaying) }
+            guard oldValue != isPlaying else { return }
+            onPlayingStateChange?(isPlaying)
+            #if os(macOS)
+            cast.playingChanged(isPlaying)
+            #endif
         }
     }
+    #if os(macOS)
+    /// Play on TV. Lives as long as this controller, which is the app.
+    let cast = CastSession()
+    #endif
+    /// While casting the window is a remote, not a picture: hiding its
+    /// controls hid the remote.
+    var isCasting: Bool {
+        #if os(macOS)
+        cast.isActive
+        #else
+        false
+        #endif
+    }
+    /// A blocking read of one mpv property, for code outside the surface
+    /// that needs live values the controller does not mirror (the cast
+    /// encoder's source URL, subtitle track and exact `time-pos`). Wired by
+    /// the coordinator; nil while no player is running.
+    public var onReadProperty: (@Sendable (_ name: String) -> String?)?
     public var onPlayingStateChange: (@MainActor (_ isPlaying: Bool) -> Void)?
     public var currentTime: Double = 0.0 // seconds
     /// The last chapter of a file has no next chapter to end at, so its
@@ -189,6 +211,9 @@ public final class PlayerController {
         }
     }
     public var title: String = ""
+    /// The show's cover, set with the Now Playing tile; the cast remote
+    /// view shows it while the picture is on the TV.
+    public var coverURL: URL?
     public var episodeNumber: Int = 1
     /// The episode's own title (AniZip's, same source `EpisodeItem.title`
     /// reads elsewhere) — separate from `title`, which is the show's.
@@ -852,6 +877,9 @@ public final class PlayerController {
     public init(title: String = "", episodeNumber: Int = 1) {
         self.title = title
         self.episodeNumber = episodeNumber
+        #if os(macOS)
+        cast.controller = self
+        #endif
         if UserDefaults.standard.object(forKey: "anicat_gpu_upscaling") != nil {
             self.isAnime4KEnabled = UserDefaults.standard.bool(forKey: "anicat_gpu_upscaling")
         }
@@ -947,6 +975,9 @@ public final class PlayerController {
         checkIntroStatus()
         showControlsBriefly()
         onSeek?(currentTime)
+        #if os(macOS)
+        cast.viewerSeeked(to: currentTime)
+        #endif
         onPositionChange?(currentTime, duration)
     }
 
@@ -1353,7 +1384,7 @@ public final class PlayerController {
             #else
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s
             #endif
-            guard !Task.isCancelled, !isScrubbing, !isMenuOpen, !isPointerOverChrome else { return }
+            guard !Task.isCancelled, !isScrubbing, !isMenuOpen, !isPointerOverChrome, !isCasting else { return }
             await MainActor.run {
                 // The chrome only goes while something is playing: a paused
                 // player is usually paused *at* something, and hiding the

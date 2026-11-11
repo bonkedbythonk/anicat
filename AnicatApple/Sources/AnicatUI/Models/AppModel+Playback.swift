@@ -721,12 +721,14 @@ extension AppModel {
             episodeNumber: Int(episode),
             episodeTitle: playbackEpisodes.first(where: { $0.number == Int(episode) })?.title ?? ""
         )
+        let coverURL = currentPlaybackCoverURL(catalogId: catalogId)
+        playerController.coverURL = coverURL
         nowPlaying.setTrack(
             track,
             elapsed: playerController.currentTime,
             duration: playerController.duration,
             rate: playerController.isPlaying ? playerController.playbackRate : 0,
-            coverURL: currentPlaybackCoverURL(catalogId: catalogId)
+            coverURL: coverURL
         )
         nowPlaying.setNavigation(
             hasNext: playerController.hasNextEpisode,

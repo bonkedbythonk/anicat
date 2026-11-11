@@ -15,6 +15,11 @@ struct PlayerBottomBar: View {
 
     private var volumeIcon: String {
         if controller.isMuted || controller.volume == 0 { return "speaker.slash.fill" }
+        #if os(macOS)
+        // The cast mutes the Mac underneath this control while the TV plays
+        // the sound; an unmuted icon over a silent Mac read as broken.
+        if controller.cast.isActive && controller.cast.soundOnTV { return "speaker.slash.fill" }
+        #endif
         if controller.volume < 0.5 { return "speaker.wave.1.fill" }
         return "speaker.wave.2.fill"
     }

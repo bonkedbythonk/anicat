@@ -69,6 +69,12 @@ public final class AppModel {
     public var castSettledId: Int64?
     var activeLibraryTask: Task<Void, Never>?
     var activeSearchTask: Task<Void, Never>?
+    /// A search is in flight, for the phone's Search tab. Not `isLoading`:
+    /// a cancelled search's `defer` cleared that while the search that
+    /// replaced it was still running, so the indicator went out mid-request.
+    /// Only the newest search (`searchGeneration`) may clear this one.
+    public internal(set) var isSearching = false
+    var searchGeneration = 0
     public internal(set) var loadingCatalogId: Int64?
     /// Bumped by every `loadDetail`/`openCinemaDetail` call. A deferred
     /// extras task captures the value at its own start and checks it before

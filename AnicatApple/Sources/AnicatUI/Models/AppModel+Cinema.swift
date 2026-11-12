@@ -196,7 +196,15 @@ extension AppModel {
         guard let engine, cinemaAvailable else { return }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if append { isLoadingMoreCinema = true }
-        defer { isLoadingMoreCinema = false }
+        if !append {
+            searchGeneration += 1
+            isSearching = true
+        }
+        let generation = searchGeneration
+        defer {
+            isLoadingMoreCinema = false
+            if !append, generation == searchGeneration { isSearching = false }
+        }
 
         let results: [MediaSummary]
         if trimmed.isEmpty {

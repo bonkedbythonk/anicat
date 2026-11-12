@@ -1315,6 +1315,9 @@ private struct SearchTab: View {
     @AppStorage("anicat_recent_searches") private var recentsRaw = ""
     @State private var filters = PhoneSearchFilters()
     @State private var showFilters = false
+    /// The text the last finished search was for. An empty answer fell
+    /// through to the shelves exactly like no search at all.
+    @State private var searchedQuery: String?
 
     /// The Mac searches on a 350ms debounce; the phone searched on submit
     /// only, on the theory that per-keystroke searches burn AniList's
@@ -1355,7 +1358,16 @@ private struct SearchTab: View {
                         activeFilterChips
                     }
 
-                    if model.appMode == .cinema {
+                    if model.isSearching, model.appMode == .cinema
+                        ? model.cinemaSearchResults.isEmpty : model.searchResults.isEmpty {
+                        // A search clears the grid as it starts, and an empty
+                        // grid used to fall through to the shelves below: the
+                        // page jumped back to Trending, which read as the
+                        // search having done nothing.
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
+                    } else if model.appMode == .cinema {
                         if model.cinemaSearchResults.isEmpty {
                             if !recents.isEmpty { recentChips }
                             ForEach(model.cinemaShelves.prefix(2)) { shelf in
@@ -1365,6 +1377,13 @@ private struct SearchTab: View {
                             PosterGrid(items: model.cinemaSearchResults, onOpen: openCinema)
                         }
                     } else if model.searchResults.isEmpty {
+                        if let searchedQuery, !searchedQuery.isEmpty,
+                           searchedQuery == query.trimmingCharacters(in: .whitespacesAndNewlines) {
+                            Text("No results for \u{201C}\(searchedQuery)\u{201D}")
+                                .font(.system(size: 15))
+                                .foregroundStyle(SumiTheme.muted)
+                                .padding(.horizontal, 16)
+                        }
                         if !recents.isEmpty {
                             recentChips
                         }
@@ -1416,19 +1435,26 @@ private struct SearchTab: View {
     @ViewBuilder
     private var searchField: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(SumiTheme.muted)
+            if model.isSearching {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 18)
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(SumiTheme.muted)
+                    .frame(width: 18)
+            }
             TextField(filters.placeholder, text: $query)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
                 .font(.system(size: 16))
                 .foregroundStyle(SumiTheme.foreground)
-                .onSubmit {
-                    remember(query)
-                    Task { await runSearch() }
-                }
+                // Remembering only: the debounce has already searched this
+                // text, and a second run cancelled that one, cleared its
+                // results and asked AniList again from the start.
+                .onSubmit { remember(query) }
             if !query.isEmpty {
                 Button {
                     query = ""
@@ -1454,6 +1480,10 @@ private struct SearchTab: View {
     private func runSearch() async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if model.appMode == .cinema {
+            // `searchCinema` drops an answer whose text no longer matches
+            // `model.searchQuery`, and this tab types into its own `query`:
+            // with the model's left empty, every typed search was discarded.
+            model.searchQuery = trimmed
             await model.searchCinema(trimmed)
             return
         }
@@ -1462,6 +1492,7 @@ private struct SearchTab: View {
             return
         }
         await model.search(query: trimmed, mediaType: filters.mediaType, filters: filters.engineFilters)
+        if !Task.isCancelled { searchedQuery = trimmed }
     }
 
     /// The filters in force, as chips above the results. A tap on one

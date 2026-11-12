@@ -1035,6 +1035,8 @@ extension AppModel {
         } ?? false
         guard let engine, !trimmedQuery.isEmpty || hasActiveFilter else {
             activeSearchTask?.cancel()
+            searchGeneration += 1
+            isSearching = false
             searchResults = []
             searchHasMorePages = true
             return
@@ -1042,7 +1044,10 @@ extension AppModel {
 
         if !append {
             activeSearchTask?.cancel()
+            searchGeneration += 1
+            isSearching = true
         }
+        let generation = searchGeneration
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -1055,6 +1060,7 @@ extension AppModel {
             }
             defer {
                 if append { self.isLoadingMoreSearchResults = false } else { self.isLoading = false }
+                if !append, generation == self.searchGeneration { self.isSearching = false }
             }
 
             do {

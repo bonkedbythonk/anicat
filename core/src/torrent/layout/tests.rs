@@ -505,3 +505,62 @@ fn a_bare_number_before_the_tags_is_the_episode_inside_a_pack() {
     assert_eq!(bare_numbered("Kaiju No. 8 (1080p)"), None);
     assert_eq!(bare_numbered("Senjou no Valkyria 3 [BD]"), None);
 }
+
+/// Higurashi no Naku Koro ni Rei (AniList 3652) is an OVA series of five
+/// episodes with no TV run of its own, so every release numbers it like a TV
+/// show. File names verbatim from five Nyaa packs; all five were refused with
+/// "episode 1 not found inside torrent" while the entry read as an extra.
+#[test]
+fn a_standalone_ova_series_is_read_by_its_plain_numbering() {
+    let packs: [(&str, [&str; 5]); 5] = [
+        ("[Soap] Higurashi no Naku Koro ni Rei (BD 1080p 10-bit x264 FLAC)", [
+            "[Soap] Higurashi no Naku Koro ni Rei - 02 (BD 1080p x264 10-bit FLAC) [A8EE7A40].mkv",
+            "[Soap] Higurashi no Naku Koro ni Rei - 01 (BD 1080p x264 10-bit FLAC) [4309E35A].mkv",
+            "[Soap] Higurashi no Naku Koro ni Rei - 03 (BD 1080p x264 10-bit FLAC) [01DA515D].mkv",
+            "[Soap] Higurashi no Naku Koro ni Rei - 04 (BD 1080p x264 10-bit FLAC) [25707DD9].mkv",
+            "[Soap] Higurashi no Naku Koro ni Rei - 05 (BD 1080p x264 10-bit FLAC) [0B3A5930].mkv",
+        ]),
+        ("[UQW] Higurashi no Naku Koro ni Rei [BDRip 1080p AVC-YUV420P10 FLAC]", [
+            "[UQW] Higurashi no Naku Koro ni Rei - Ep01 [BDRip 1080p AVC-YUV420P10 FLAC].mkv",
+            "[UQW] Higurashi no Naku Koro ni Rei - Ep02 [BDRip 1080p AVC-YUV420P10 FLAC].mkv",
+            "[UQW] Higurashi no Naku Koro ni Rei - Ep03 [BDRip 1080p AVC-YUV420P10 FLAC].mkv",
+            "[UQW] Higurashi no Naku Koro ni Rei - Ep04 [BDRip 1080p AVC-YUV420P10 FLAC].mkv",
+            "[UQW] Higurashi no Naku Koro ni Rei - Ep05 [BDRip 1080p AVC-YUV420P10 FLAC].mkv",
+        ]),
+        ("[Cleo] Higurashi no Naku Koro ni Rei | When They Cry: Rei [BD720p][HEVC-x265]", [
+            "[Cleo]Higurashi_no_Naku_Koro_ni_Rei_-_01_(10bit_BD720p_x265).mkv",
+            "[Cleo]Higurashi_no_Naku_Koro_ni_Rei_-_02_(10bit_BD720p_x265).mkv",
+            "[Cleo]Higurashi_no_Naku_Koro_ni_Rei_-_03_(10bit_BD720p_x265).mkv",
+            "[Cleo]Higurashi_no_Naku_Koro_ni_Rei_-_04_(10bit_BD720p_x265).mkv",
+            "[Cleo]Higurashi_no_Naku_Koro_ni_Rei_-_05_(10bit_BD720p_x265).mkv",
+        ]),
+        ("[Zurako] Higurashi no Naku Koro ni Rei (BD 1080p AAC)", [
+            "[Zurako] Higurashi no Naku Koro ni Rei - 01 - Shame Exposing Chapter (BD 1080p AAC) [AF39F548].mkv",
+            "[Zurako] Higurashi no Naku Koro ni Rei - 02 - Dice Killing Chapter One (BD 1080p AAC) [0A465071].mkv",
+            "[Zurako] Higurashi no Naku Koro ni Rei - 03 - Dice Killing Chapter Two (BD 1080p AAC) [9633B75A].mkv",
+            "[Zurako] Higurashi no Naku Koro ni Rei - 04 - Dice Killing Chapter Three (BD 1080p AAC) [FED80C49].mkv",
+            "[Zurako] Higurashi no Naku Koro ni Rei - 05 - Day Breaking Chapter (BD 1080p AAC) [3479E246].mkv",
+        ]),
+        ("[Bulldog] Higurashi - When They Cry Rei [BD 1080p AVC FLAC]", [
+            "[Bulldog] Higurashi - When They Cry Rei - 01 [BD 1080p AVC FLAC].mkv",
+            "[Bulldog] Higurashi - When They Cry Rei - 02 [BD 1080p AVC FLAC].mkv",
+            "[Bulldog] Higurashi - When They Cry Rei - 03 [BD 1080p AVC FLAC].mkv",
+            "[Bulldog] Higurashi - When They Cry Rei - 04 [BD 1080p AVC FLAC].mkv",
+            "[Bulldog] Higurashi - When They Cry Rei - 05 [BD 1080p AVC FLAC].mkv",
+        ]),
+    ];
+    let entry = |count| (
+        vec!["Higurashi no Naku Koro ni Rei".to_string(), "When They Cry Rei".to_string()],
+        EntryHint { kind: EntryKind::Extra, season: None, season_at_least: None },
+        Some(count),
+    );
+    for (release, names) in packs {
+        let files: Vec<(&str, u64)> = names.iter().map(|n| (*n, 1_000_000_000)).collect();
+        for ep in 1..=5i64 {
+            let got = choose(&files, release, entry(5), ep).unwrap_or_else(|e| panic!("{release} ep {ep}: {e}"));
+            assert!(got.contains(&format!("{ep:02}")), "{release} ep {ep} -> {got}");
+        }
+        // A run that is not this entry's length is still another entry's.
+        assert_eq!(choose(&files, release, entry(1), 1), Err(SelectError::NotFound), "{release}");
+    }
+}

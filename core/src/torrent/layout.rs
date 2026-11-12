@@ -485,7 +485,21 @@ fn pick_within(subset: &[&FileFacts], req: &SelectRequest) -> Option<usize> {
     // belongs to the TV run sitting in the same pack, and answering "special
     // 1" with "episode 1" is exactly the wrong-content mistake this module
     // exists to stop — the caller is better served by the next candidate.
+    //
+    // Except an OVA series that has no TV run beside it: every release of
+    // Higurashi no Naku Koro ni Rei (five OVAs) numbers it "- 01".."- 05" with
+    // no extras marking, and all five packs on Nyaa were refused. A pack with
+    // no extras material at all whose numbered run is exactly this entry's
+    // length is that entry; a TV run of another length still declines.
+    let standalone_run = subset.iter().all(|f| !f.is_extra && f.special.is_none())
+        && req.episode_count.is_some_and(|count| {
+            let mut numbers: Vec<i64> = subset.iter().filter_map(|f| f.episode).collect();
+            numbers.sort_unstable();
+            numbers.dedup();
+            numbers.len() as i64 == count
+        });
     if req.hint.kind == EntryKind::Extra
+        && !standalone_run
         && !subset.iter().all(|f| f.is_extra || f.special.is_some())
     {
         return None;

@@ -478,6 +478,11 @@ public final class AppModel {
     // Guards the AniList auto-advance below to one attempt per episode
     // rather than once a second for the rest of the episode once past 85%.
     var hasAdvancedAniListForCurrentEpisode = false
+    /// The sequel offered on the player's end card while the playing title's
+    /// final episode runs out, and the offers still waiting on the home row.
+    var nextSeasonOffer: NextSeasonOffer?
+    var nextSeasonCardHidden = false
+    var pendingNextSeasons: [NextSeasonOffer] = NextSeason.loadPending()
     // Same idea, for auto-play-next: one attempt per episode once past the
     // near-end line below.
     var hasAutoAdvancedEpisode = false

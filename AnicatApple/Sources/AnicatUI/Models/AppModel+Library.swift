@@ -198,6 +198,7 @@ extension AppModel {
         await shelves
         await history
         await loadHomeDiscoverRows()
+        await reconcilePendingNextSeasons()
         persistHomeCache()
         // After the shelves, and detached: it is a handful of requests to the
         // manga sources and nothing on screen waits for it.

@@ -127,6 +127,10 @@ struct HomeSectionView: View {
                     }
                 }
 
+                if model.isSignedIn, !model.pendingNextSeasons.isEmpty {
+                    NextSeasonShelf(model: model, onOpenDetail: onOpenDetail)
+                }
+
                 if !model.scheduleItems.filter({ $0.isWatching }).isEmpty {
                     WeekStrip(items: model.scheduleItems) { item in
                         onOpenDetail(item.id, item.title, item.coverImageURL, false, nil)
@@ -278,6 +282,67 @@ struct HomeShelf: View {
                     }
                 }
                 .padding(.vertical, 4)
+            }
+        }
+    }
+}
+
+/// Sequels of seasons the viewer finished and has not started, filed by
+/// `AppModel.prepareNextSeasonOffer` when the last episode crossed 85%. The
+/// player's end card is the first chance to take one; this is for the viewer
+/// who closed the player first.
+struct NextSeasonShelf: View {
+    let model: AppModel
+    let onOpenDetail: (Int64, String, URL?, Bool, String?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SumiSectionHeader("Next season")
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(model.pendingNextSeasons) { offer in
+                    row(offer)
+                }
+            }
+        }
+    }
+
+    private func row(_ offer: NextSeasonOffer) -> some View {
+        let cover = URL(string: offer.coverImage)
+        return HStack(alignment: .center, spacing: 14) {
+            Button {
+                onOpenDetail(offer.sequelId, offer.title, cover, false, nil)
+            } label: {
+                CachedAsyncImage(url: cover, maxPixelSize: 240) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Rectangle().fill(SumiTheme.card)
+                }
+                .frame(width: 54, height: 78)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.sumiPressable)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(offer.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .tracking(-0.2)
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(2)
+                Text("After \(offer.sourceTitle)")
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.muted)
+                    .lineLimit(1)
+                HStack(spacing: 14) {
+                    Button(offer.isReleased ? "Add to watching" : "Add to planning") {
+                        Task { await model.addNextSeasonToList(offer) }
+                    }
+                    .foregroundColor(SumiTheme.indigo)
+                    Button("Dismiss") { model.dismissNextSeason(offer) }
+                        .foregroundColor(SumiTheme.muted)
+                }
+                .font(.system(size: 13, weight: .medium))
+                .buttonStyle(.sumiPressable)
+                .padding(.top, 2)
             }
         }
     }

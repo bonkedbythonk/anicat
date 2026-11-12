@@ -770,6 +770,10 @@ public struct PlayerView: View {
                 nextEpisodeCard
                     .frame(width: videoRect.width, height: videoRect.height)
                     .position(x: videoRect.midX, y: videoRect.midY)
+
+                nextSeasonCard
+                    .frame(width: videoRect.width, height: videoRect.height)
+                    .position(x: videoRect.midX, y: videoRect.midY)
             } else {
                 // Mini-player chrome: a transparent tap-to-restore catcher
                 // over the whole small video (it sits above `MpvSurface`
@@ -1199,6 +1203,73 @@ public struct PlayerView: View {
             }
             .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
             .animation(.smooth, value: controller.nextEpisodeCountdown.phase)
+        }
+    }
+
+    /// The end card of a finished season: offers the sequel, never plays it
+    /// unasked. Same corner and look as the countdown card, which cannot be
+    /// up at the same time (it needs a next episode, this needs there to be
+    /// none). Shown for the last `countdownTailSeconds` of the file; a
+    /// declined card stays on the home row until dismissed there.
+    @ViewBuilder
+    private var nextSeasonCard: some View {
+        if let model = AppModel.shared,
+           let offer = model.nextSeasonOffer,
+           !model.nextSeasonCardHidden,
+           controller.duration > 0,
+           controller.currentTime >= controller.duration - PlayerController.countdownTailSeconds {
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    HStack(alignment: .center, spacing: 12) {
+                        CachedAsyncImage(url: URL(string: offer.coverImage), maxPixelSize: 240) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Rectangle().fill(SumiTheme.card)
+                        }
+                        .frame(width: 54, height: 78)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Next season")
+                                .sumiTabularMono(size: 9.5, weight: .bold)
+                                .foregroundColor(SumiTheme.indigo)
+                            Text(offer.title)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundColor(PlayerChrome.foreground)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack(spacing: 8) {
+                                Button(offer.isReleased ? "Watch now" : "Add to planning") {
+                                    if offer.isReleased {
+                                        model.watchNextSeason(offer)
+                                    } else {
+                                        Task { await model.addNextSeasonToList(offer) }
+                                    }
+                                }
+                                .buttonStyle(.sumiPressable)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(SumiTheme.indigo)
+                                Button("Not now") {
+                                    model.nextSeasonCardHidden = true
+                                }
+                                .buttonStyle(.sumiPressable)
+                                .font(.system(size: 11))
+                                .foregroundColor(PlayerChrome.muted)
+                            }
+                            .padding(.top, 2)
+                        }
+                        .frame(width: 168, alignment: .leading)
+                    }
+                    .padding(12)
+                    .playerScrim(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: Color.black.opacity(0.4), radius: 16, y: 6)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, controller.areControlsVisible ? 100 : 24)
+                }
+            }
+            .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
         }
     }
 

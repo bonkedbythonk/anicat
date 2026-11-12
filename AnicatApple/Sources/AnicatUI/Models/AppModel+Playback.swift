@@ -39,6 +39,7 @@ extension AppModel {
         lastRecordedSecond = -1
         lastDiscordPaused = discordPaused
         hasAdvancedAniListForCurrentEpisode = false
+        nextSeasonOffer = nil
         hasAutoAdvancedEpisode = false
         hasLoggedAutoNextGates = false
         hasPreloadedNextEpisode = false
@@ -1127,6 +1128,9 @@ extension AppModel {
                 // detail page is open, and sends the same mutation itself
                 // when it isn't — see `advanceAniListProgress`.
                 Task { await self.advanceAniListProgress(catalogId: catalogId, episode: Int(episode)) }
+                if !playerController.hasNextEpisode {
+                    Task { await self.prepareNextSeasonOffer(catalogId: catalogId, episode: Int(episode)) }
+                }
             }
         }
 

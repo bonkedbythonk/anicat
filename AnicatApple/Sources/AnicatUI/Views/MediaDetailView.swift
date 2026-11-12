@@ -1511,6 +1511,11 @@ public struct MediaDetailView: View {
         // Unfiltered "first unwatched" picked an announced-but-unaired
         // episode as soon as everything aired so far was watched, offering
         // "Play Episode 11" while only 10 existed to stream.
+        // A Completed title starts over from the first episode: the button
+        // reads "Rewatch" and a last-episode target made that Rewatch Ep 12.
+        if details.listStatus == "COMPLETED", let first = episodes.first(where: \.isAired) {
+            return first
+        }
         return episodes.first(where: { !$0.isWatched && $0.isAired })
             ?? episodes.last(where: \.isAired)
             ?? episodes.first
@@ -1653,7 +1658,7 @@ public struct MediaDetailView: View {
         if isSingleSitting {
             return Text(target.isWatched ? "Watch again" : "Play")
         }
-        return Text(target.isWatched ? "Rewatch\(episode)" : "Play\(episode)")
+        return target.isWatched ? Text("Rewatch") : Text("Play\(episode)")
     }
 
     static func clock(_ seconds: Int) -> String {

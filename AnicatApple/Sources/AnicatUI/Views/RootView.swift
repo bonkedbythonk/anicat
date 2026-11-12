@@ -1520,6 +1520,17 @@ private func playEpisode(
         model.playFeedback(.error)
         return
     }
+    // Starting a finished title over from its first episode begins a
+    // rewatch: Rewatching, with progress back at 0 so the round is recorded
+    // as it is watched. Only episode 1 and only from Completed: replaying
+    // episode 5 is not a new round, and resetting progress there would throw
+    // away AniList's count.
+    if let details = model.selectedMediaDetails, details.id == catalogId,
+       details.listStatus == "COMPLETED",
+       episode == model.selectedEpisodes.first?.number,
+       model.selectedEpisodes.first?.isWatched == true {
+        Task { await model.updateListEntry(status: "REPEATING", progress: 0) }
+    }
     model.openingPlayerSourceKey = morphKey
     model.openingPlayerThumbnailURL = morphThumbnailURL
     // A file already on the disk beats the swarm. Without this the only

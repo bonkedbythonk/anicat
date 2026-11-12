@@ -413,7 +413,10 @@ def crate_closure():
                 # lock files resolve from different directories, and the ids of
                 # their shared crates are equal only while both happen to agree
                 # on every source string.
-                if pkg["source"] is not None:
+                # A vendored crate has no source either, but is not ours: the
+                # librqbit patched under core/vendor dropped out of the notices
+                # the moment [patch.crates-io] pointed at it.
+                if pkg["source"] is not None or "/vendor/" in pkg["manifest_path"]:
                     unique.setdefault((pkg["name"], pkg["version"]), pkg)
     # Sorted, because the first crate in a group decides which copy of a
     # shared text is printed, and a set's order changes with every process.

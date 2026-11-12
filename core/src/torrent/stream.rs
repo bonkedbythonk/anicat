@@ -137,6 +137,10 @@ pub async fn torrent_stream_handler(
     let range = parse_range(&headers, file_len);
     let (start, end) = range.unwrap_or((0, file_len - 1));
     let len = end - start + 1;
+    // Which bytes mpv asked for: a stall at 0:00 with the head on disk read
+    // as "slow wifi", and nothing said whether mpv was waiting on the head,
+    // the next piece or the index at the file's end.
+    log::info!("[stream] t={} f={} range {start}-{end} of {file_len}", q.t, q.f);
 
     let mut stream = match handle.stream(q.f) {
         Ok(s) => s,

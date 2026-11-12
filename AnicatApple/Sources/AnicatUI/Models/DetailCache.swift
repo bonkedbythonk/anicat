@@ -136,6 +136,17 @@ enum DetailCache {
         return peeked.details.bannerURL
     }
 
+    /// One episode's row, for the phone's Continue watching still.
+    /// `MediaSummary` carries the cover only, and a poster squeezed into a
+    /// 16:9 card was the "uneven cards" the redesign replaced. No mtime touch,
+    /// for `peekFacts`'s reason.
+    static func peekEpisode(id: Int64, number: Int) -> MediaDetailView.EpisodeItem? {
+        struct EpisodesOnly: Decodable { let episodes: [MediaDetailView.EpisodeItem] }
+        guard let data = try? Data(contentsOf: fileURL(id: id, isManga: false)),
+              let peeked = try? JSONDecoder().decode(EpisodesOnly.self, from: data) else { return nil }
+        return peeked.episodes.first { $0.number == number }
+    }
+
     /// Whether `episode` exists yet, as far as the snapshot knows: the row's
     /// own `isAired` when the list has the row, the episode count when it
     /// does not, and `nil` when there is no snapshot to ask. `nil` is a

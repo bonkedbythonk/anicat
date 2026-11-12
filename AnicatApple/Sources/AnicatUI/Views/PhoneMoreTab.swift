@@ -2,33 +2,137 @@
 import SwiftUI
 import AnicatCoreKit
 
-/// What is left once the sections a viewer uses weekly moved to their tabs
-/// (Schedule to Up Next, Downloads and History to Library): Stats and
-/// Settings. The Up Next avatar stays a shortcut to Settings, because it is
-/// where people already look for the account.
-struct PhoneMoreTab: View {
+/// The account and what a viewer opens now and then, behind the avatar on
+/// every tab root. It replaced a fifth "More" tab that held two rows, and
+/// the Mac remote, which was an unlabelled 21pt icon on Up Next alone.
+struct PhoneProfileView: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
+    let onRemote: (BonjourDiscovery.DiscoveredNode) -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
+                Section { account }
                 Section {
+                    NavigationLink { PhoneDownloadsView(model: model) } label: {
+                        row("Downloads", "arrow.down.circle", value: downloadCount == 0 ? nil : "\(downloadCount)")
+                    }
+                    NavigationLink { PhoneHistoryView(model: model, showDetail: $showDetail) } label: {
+                        row("History", "clock.arrow.circlepath", value: nil)
+                    }
                     NavigationLink { PhoneStatsView(model: model, showDetail: $showDetail) } label: {
-                        Label("Stats", systemImage: "chart.bar")
+                        row("Stats", "chart.bar", value: nil)
                     }
                 }
                 Section {
                     NavigationLink { PhoneSettingsView(model: model) } label: {
-                        Label("Settings", systemImage: "gearshape")
+                        row("Settings", "gearshape", value: nil)
+                    }
+                    // Always listed. Shown only while a Mac was advertising,
+                    // the row was simply absent otherwise, and the owner went
+                    // looking for a remote that had "disappeared".
+                    let node = BonjourDiscovery.shared.discoveredMacNode
+                    Button { if let node { onRemote(node) } } label: {
+                        row("Mac remote", "macbook.and.iphone", value: node?.name ?? "No Mac found")
+                    }
+                    .foregroundStyle(SumiTheme.foreground)
+                    .disabled(node == nil)
+                } footer: {
+                    if BonjourDiscovery.shared.discoveredMacNode == nil {
+                        Text("Open Anicat on your Mac, on the same Wi-Fi as this phone.")
                     }
                 }
             }
             .scrollContentBackground(.hidden)
             .background(SumiTheme.background)
-            .navigationTitle("More")
+            .navigationTitle("Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
         }
+    }
+
+    private var downloadCount: Int { model.libraryDownloads.count + model.offlineChapters.count }
+
+    private var account: some View {
+        HStack(spacing: 14) {
+            AccountAvatar(model: model, size: 56)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.viewer?.name ?? "Not signed in")
+                    .font(.sumiHeading(size: 18, weight: .semibold))
+                    .foregroundStyle(SumiTheme.foreground)
+                Text(accountLine)
+                    .font(.system(size: 13)).monospacedDigit()
+                    .foregroundStyle(SumiTheme.muted)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var accountLine: String {
+        guard let viewer = model.viewer else { return "Connect AniList in Settings" }
+        guard let minutes = viewer.minutesWatched, minutes > 0 else { return "AniList" }
+        return "AniList · \(minutes / 60) h watched"
+    }
+
+    private func row(_ title: String, _ icon: String, value: String?) -> some View {
+        LabeledContent {
+            if let value { Text(value).monospacedDigit() }
+        } label: {
+            Label(title, systemImage: icon)
+        }
+    }
+}
+
+/// The signed-in avatar, not a generic person glyph: a placeholder symbol
+/// reads as an unfinished control, the account's own picture as the account.
+struct AccountAvatar: View {
+    @Bindable var model: AppModel
+    let size: CGFloat
+
+    var body: some View {
+        if let avatar = model.viewer?.avatarUrl.flatMap(URL.init(string:)) {
+            CachedAsyncImage(url: avatar, maxPixelSize: size * 3) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                SumiTheme.card
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: size * 0.9))
+                .foregroundStyle(SumiTheme.muted)
+        }
+    }
+}
+
+extension EnvironmentValues {
+    /// Opens the Profile sheet, which `RootTabView` owns. Every tab root draws
+    /// the avatar; only the root can present over all of them.
+    @Entry var openProfile: () -> Void = {}
+}
+
+/// The avatar in each tab root's header.
+struct ProfileButton: View {
+    @Bindable var model: AppModel
+    @Environment(\.openProfile) private var openProfile
+
+    var body: some View {
+        Button(action: openProfile) {
+            AccountAvatar(model: model, size: 30)
+                // The 30pt avatar is the picture; the target around it is 44.
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Profile")
     }
 }
 

@@ -41,6 +41,9 @@ public enum AppHaptics {
         /// Hold-for-2x engaging, half a second after touch-down with
         /// nothing on screen yet under the finger.
         case speedHold
+        /// A scrub crossing into another chapter, the opening or ending
+        /// most of all, felt without looking down at the bar.
+        case chapterCross
     }
 
     /// A phone in a pocket shows nothing, so the watched mark and the error
@@ -61,6 +64,8 @@ public enum AppHaptics {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .speedHold:
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        case .chapterCross:
+            UISelectionFeedbackGenerator().selectionChanged()
         }
         #endif
     }

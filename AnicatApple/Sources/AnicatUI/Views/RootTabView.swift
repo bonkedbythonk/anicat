@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import AnicatCoreKit
 
 /// The iPhone root, in place of `RootView`'s 200pt sidebar rail.
 ///
@@ -9,8 +10,8 @@ import SwiftUI
 /// header already carries Anime and Films & TV. The sections without a tab
 /// sit where a streaming app's viewer looks for them, not in the rail's
 /// order: today's schedule on Up Next, Downloads and History beside the
-/// lists in Library. Under More, all three were two taps deep, and Downloads
-/// is what someone opens offline. More keeps Stats and Settings.
+/// lists in Library. Stats, Settings and the Mac remote sit in Profile,
+/// behind the avatar on every tab root, rather than in a fifth tab.
 public struct RootTabView: View {
     @Bindable var model: AppModel
 
@@ -19,8 +20,20 @@ public struct RootTabView: View {
     }
 
     enum Tab: Hashable {
-        case upNext, library, read, search, more
+        /// `profile` is not a tab: it owns a detail page opened from the
+        /// Profile sheet (History, Stats), so no tab behind the sheet claims
+        /// the same page and pushes a second copy of it.
+        case upNext, library, read, search, profile
     }
+
+    @State private var showProfile = false
+    /// The Mac the open remote is driving, captured when it is opened rather
+    /// than read live: `discoveredMacNode` goes nil the moment the Mac
+    /// sleeps or leaves the Wi-Fi, and a cover bound to it snapped shut.
+    @State private var remoteNode: BonjourDiscovery.DiscoveredNode?
+    /// The remote asked for from inside Profile, presented once the sheet is
+    /// gone: a cover presented while a sheet is still dismissing is dropped.
+    @State private var pendingRemote: BonjourDiscovery.DiscoveredNode?
 
     @State private var tab: Tab = .upNext
     /// Which tab the open detail page belongs to, if any.
@@ -51,11 +64,8 @@ public struct RootTabView: View {
                 SearchTab(model: model, showDetail: scoped(to: .search))
                     .tabItem { Label("Search", systemImage: "magnifyingglass") }
                     .tag(Tab.search)
-
-                PhoneMoreTab(model: model, showDetail: scoped(to: .more))
-                    .tabItem { Label("More", systemImage: "ellipsis.circle") }
-                    .tag(Tab.more)
             }
+            .environment(\.openProfile) { showProfile = true }
             // Room for the mini-player bar above the tab bar, so the last
             // row of a list is not under it.
             .safeAreaInset(edge: .bottom) {
@@ -224,7 +234,47 @@ public struct RootTabView: View {
             case .library, .history, .downloads: tab = .library
             case .manga, .novels: tab = .read
             case .search: tab = .search
-            case .stats, .settings: tab = .more
+            case .stats, .settings: showProfile = true
+            }
+        }
+        .sheet(isPresented: $showProfile, onDismiss: {
+            // A page opened from Profile goes with it; left owned, the next
+            // open of the sheet came back to a stale page.
+            if detailOwner == .profile { scoped(to: .profile).wrappedValue = false }
+            if let node = pendingRemote {
+                pendingRemote = nil
+                remoteNode = node
+            }
+        }) {
+            PhoneProfileView(model: model, showDetail: scoped(to: .profile)) { node in
+                pendingRemote = node
+                showProfile = false
+            }
+        }
+        // The player, the readers and the person pages are layers of this
+        // ZStack, under any sheet. A play from a History row or a detail page
+        // inside Profile started behind it, heard and not seen.
+        .onChange(of: model.activeStreamURL != nil || model.activeReadingSession != nil
+                  || model.novelReaderOpen || !model.personPageStack.isEmpty) { _, covered in
+            if covered { showProfile = false }
+        }
+        // `fullScreenCover`, not a detented sheet: the remote at `.medium`
+        // was a half-height card with a poster, a scrubber and two rows of
+        // controls crammed into it. It is the only thing in use while open.
+        .fullScreenCover(item: $remoteNode) { node in
+            PhoneRemoteView(node: node, model: model)
+        }
+        // `anicat://remote`, which is the only thing a Live Activity can ask
+        // for.
+        .onChange(of: model.wantsRemoteSheet) { _, wanted in
+            guard wanted else { return }
+            model.wantsRemoteSheet = false
+            guard let node = BonjourDiscovery.shared.discoveredMacNode else { return }
+            if showProfile {
+                pendingRemote = node
+                showProfile = false
+            } else {
+                remoteNode = node
             }
         }
         .animation(.sumi(.page), value: model.personPageStack.count)
@@ -400,36 +450,38 @@ struct DetailPush: ViewModifier {
 private struct UpNextTab: View {
     @Bindable var model: AppModel
     @Binding var showDetail: Bool
-    /// The Mac the open remote sheet is driving, captured when the button is
-    /// pressed rather than read live.
-    ///
-    /// The button itself disappears the moment `discoveredMacNode` goes nil
-    /// -- the Mac sleeping, quitting or leaving the Wi-Fi -- and a `.sheet`
-    /// attached to it would go with it, snapping shut in the middle of
-    /// whatever was on screen. Same shape as the `MpvSurface` note above:
-    /// a view moved out of an `if` branch is torn down, and everything
-    /// hanging off it goes too.
-    @State private var remoteNode: BonjourDiscovery.DiscoveredNode?
+    /// Where each Up Next title stands inside its next episode, read off the
+    /// main actor. Nil until the first read lands, and the split below waits
+    /// for it: without the wait every title with an episode out drew as a
+    /// New episodes row for a frame and then jumped into Continue watching.
+    @State private var resume: [Int64: ShelfResume]?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
                     TabHeader(title: "Up Next", model: model) {
-                        HStack(spacing: 14) {
-                            remoteButton
-                            profileButton
-                        }
+                        ProfileButton(model: model)
                     }
 
                     if model.appMode == .cinema {
                         cinemaBody
                     } else {
-                    if !model.upNextItems.isEmpty {
-                        ContinueWatchingRow(model: model, onOpen: open)
+                    // One place per title. Both sections used to draw from
+                    // the whole queue, so a show with a new episode sat in
+                    // Continue watching and again under New episodes. A
+                    // started episode is something to resume; an unstarted
+                    // one that has aired is news.
+                    let isNews: (UpNextQueueView.QueueEntry) -> Bool = { entry in
+                        guard let resume else { return false }
+                        return entry.hasNewEpisode && resume[entry.id]?.secondsLeft == nil
+                    }
+                    let continuing = model.upNextItems.filter { !isNews($0) }
+                    if !continuing.isEmpty {
+                        ContinueWatchingRow(model: model, items: continuing, resume: resume ?? [:], onOpen: open)
                     }
 
-                    let newEpisodes = model.upNextItems.filter(\.hasNewEpisode)
+                    let newEpisodes = model.upNextItems.filter(isNews)
                     if !newEpisodes.isEmpty {
                         SectionHeader("New episodes")
                         VStack(spacing: 0) {
@@ -471,25 +523,43 @@ private struct UpNextTab: View {
             .refreshable { await model.refreshAll() }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
         }
-        // On the stack, not on the button: the button is conditional on a
-        // Mac being in range and takes its modifiers with it when that goes.
-        // `fullScreenCover`, not a detented sheet. The remote was coming up
-        // at `.medium` -- a half-height card with a poster, a scrubber and
-        // two rows of controls crammed into it, under a title bar that still
-        // belonged to the page behind. It is the only thing being used while
-        // it is open, so it takes the screen.
-        .fullScreenCover(item: $remoteNode) { node in
-            PhoneRemoteView(node: node, model: model)
+        // Keyed on the episode as well as the title: finishing one moves the
+        // row to the next episode, whose still and position are different.
+        .task(id: model.upNextItems.map { "\($0.id):\($0.nextEpisodeOrChapter)" }) {
+            let entries = model.upNextItems.filter { $0.unit == "EP" }
+            let engine = model.engine
+            resume = await Task.detached(priority: .utility) {
+                Self.lookUp(entries, engine: engine)
+            }.value
         }
-        // `anicat://remote`, which is the only thing a Live Activity can ask
-        // for. Answered here because this is where the sheet lives and where
-        // the discovered Mac is known.
-        .onChange(of: model.wantsRemoteSheet) { _, wanted in
-            guard wanted else { return }
-            model.wantsRemoteSheet = false
-            guard let node = BonjourDiscovery.shared.discoveredMacNode else { return }
-            remoteNode = node
+    }
+
+    /// The still and the time left for each title's next episode: the still
+    /// from the title's detail snapshot, the position from the watch
+    /// registry. Both are disk reads, a few dozen per refresh, which is why
+    /// this runs detached rather than in `body`.
+    nonisolated private static func lookUp(_ entries: [UpNextQueueView.QueueEntry], engine: AnicatEngine?) -> [Int64: ShelfResume] {
+        var found: [Int64: ShelfResume] = [:]
+        for entry in entries {
+            let episode = DetailCache.peekEpisode(id: entry.id, number: entry.nextEpisodeOrChapter)
+            var left: Int?
+            var fraction = 0.0
+            if let progress = try? engine?.getProgress(catalog: .anilist, catalogId: entry.id, episodeNumber: Int64(entry.nextEpisodeOrChapter)),
+               progress.stopTime > 0, progress.duration > 0,
+               // Past 85% the episode is recorded watched and replays from
+               // the start (`resolveAndPlay`), so there is nothing to resume.
+               Double(progress.stopTime) / Double(progress.duration) < 0.85 {
+                left = Int(progress.duration - progress.stopTime)
+                fraction = Double(progress.stopTime) / Double(progress.duration)
+            }
+            found[entry.id] = ShelfResume(
+                still: episode?.thumbnailURL,
+                episodeTitle: episode?.title,
+                secondsLeft: left,
+                fraction: fraction
+            )
         }
+        return found
     }
 
     /// The same page for films and series. `cinemaShelves` is whatever TMDB
@@ -523,55 +593,6 @@ private struct UpNextTab: View {
             return "TMDB is rate limiting this key. Try again shortly."
         }
         return raw
-    }
-
-    /// Appears only while a Mac running Anicat is advertising on this
-    /// Wi-Fi. There is no disabled state and no "no Mac found" screen: the
-    /// control is the answer to whether a Mac is there.
-    @ViewBuilder
-    private var remoteButton: some View {
-        if let node = BonjourDiscovery.shared.discoveredMacNode {
-            Button { remoteNode = node } label: {
-                Image(systemName: "macbook.and.iphone")
-                    .font(.system(size: 21))
-                    .foregroundStyle(SumiTheme.muted)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Mac remote")
-        }
-    }
-
-    /// Settings lives behind this button rather than in a fourth tab: it is
-    /// opened once to sign in and then rarely, which is not what a tab slot
-    /// is for. It is also the only route back to "Connect AniList" once
-    /// onboarding has been dismissed.
-    @ViewBuilder
-    private var profileButton: some View {
-        NavigationLink {
-            PhoneSettingsView(model: model)
-        } label: {
-            // The signed-in avatar, not a generic person glyph: a
-            // placeholder symbol reads as an unfinished control, the
-            // account's own picture reads as the account.
-            if let avatar = model.viewer?.avatarUrl.flatMap(URL.init(string:)) {
-                CachedAsyncImage(url: avatar, maxPixelSize: 96) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    SumiTheme.card
-                }
-                .frame(width: 30, height: 30)
-                .clipShape(Circle())
-            } else {
-                Image(systemName: "person.crop.circle")
-                    .font(.system(size: 27))
-                    .foregroundStyle(SumiTheme.muted)
-            }
-        }
-        // The 30pt avatar is the picture; the target around it is 44.
-        .frame(width: 44, height: 44)
-        .contentShape(Rectangle())
-        .accessibilityLabel("Settings")
     }
 
 
@@ -742,8 +763,19 @@ struct PosterShelf: View {
     }
 }
 
+/// Where a title stands inside its next episode, for the Continue watching
+/// card. `secondsLeft` is nil when the episode has not been started.
+struct ShelfResume: Sendable {
+    let still: URL?
+    let episodeTitle: String?
+    let secondsLeft: Int?
+    let fraction: Double
+}
+
 struct ContinueWatchingRow: View {
     @Bindable var model: AppModel
+    let items: [UpNextQueueView.QueueEntry]
+    let resume: [Int64: ShelfResume]
     let onOpen: (Int64, String, URL?, Bool) -> Void
 
     var body: some View {
@@ -751,7 +783,7 @@ struct ContinueWatchingRow: View {
             SectionHeader("Continue watching")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
-                    ForEach(model.upNextItems) { entry in
+                    ForEach(items) { entry in
                         // To the show's page, not straight into a stream: a
                         // tap on a card started a resolve the viewer had not
                         // asked for (owner, 2026-09-23). The page's own
@@ -760,7 +792,7 @@ struct ContinueWatchingRow: View {
                         Button {
                             onOpen(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH")
                         } label: {
-                            ContinueWatchingCard(entry: entry)
+                            ContinueWatchingCard(entry: entry, resume: resume[entry.id])
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -790,6 +822,18 @@ struct ContinueWatchingRow: View {
 
 struct ContinueWatchingCard: View {
     let entry: UpNextQueueView.QueueEntry
+    let resume: ShelfResume?
+
+    private var caption: String {
+        let episode = "Ep \(entry.nextEpisodeOrChapter)"
+        if let left = resume?.secondsLeft {
+            return "\(episode) · \(max(1, left / 60)) min left"
+        }
+        if let title = resume?.episodeTitle, !title.isEmpty {
+            return "\(episode) · \(title)"
+        }
+        return episode
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -798,10 +842,13 @@ struct ContinueWatchingCard: View {
                 // ratio itself: a fill image proposes its own size, so a
                 // poster thumbnail made its card taller than its neighbours
                 // and the titles under the row stopped lining up.
+                // The episode's still first, then the title's banner, then
+                // the cover: a still exists only once the title's page has
+                // been opened on this phone.
                 Color.clear
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .overlay {
-                        CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 480) { image in
+                        CachedAsyncImage(url: resume?.still ?? entry.bannerURL ?? entry.thumbnailURL, maxPixelSize: 640) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
                             SumiTheme.card
@@ -809,33 +856,33 @@ struct ContinueWatchingCard: View {
                     }
                     .clipped()
 
-                GeometryReader { geo in
-                    Rectangle()
-                        .fill(SumiTheme.indigo)
-                        .frame(width: geo.size.width * entry.progressPercent / 100, height: 3)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
+                // How far into this episode, not through the series: the
+                // series fraction filled the bar of a show the viewer had not
+                // started tonight.
+                if let fraction = resume?.fraction, fraction > 0 {
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(SumiTheme.indigo)
+                            .frame(width: geo.size.width * fraction, height: 3)
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
+                    .frame(height: 3)
                 }
-                .frame(height: 3)
             }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             Text(entry.title)
-                .font(.sumiHeading(size: 13, weight: .medium))
+                .font(.sumiHeading(size: 14, weight: .medium))
                 .foregroundStyle(SumiTheme.foreground)
                 .lineLimit(1)
-            // The remainder only once there is a started episode to resume:
-            // a not-yet-started one read "100% left" on every card.
-            Text(entry.progressPercent > 0 && entry.progressPercent < 100
-                 ? "\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter) · \(Int(100 - entry.progressPercent))% left"
-                 : "\(entry.unit.capitalized) \(entry.nextEpisodeOrChapter)")
+            Text(caption)
                 .font(.system(size: 12)).monospacedDigit()
-                .foregroundStyle(SumiTheme.muted)
+                .foregroundStyle(resume?.secondsLeft != nil ? SumiTheme.indigo : SumiTheme.muted)
                 .lineLimit(1)
         }
-        // Three across whatever the screen is. This was a constant derived
-        // from a 402pt iPhone 17 Pro, so on a 393pt 15 Pro the third card was
-        // clipped and on a 440pt Max there was a dead gutter.
-        .containerRelativeFrame(.horizontal, count: 3, span: 1, spacing: 12)
+        // Three fifths of the screen, so the next card shows at the edge and
+        // the row reads as one that scrolls.
+        .containerRelativeFrame(.horizontal, count: 5, span: 3, spacing: 12)
     }
 }
 
@@ -895,6 +942,7 @@ private struct LibraryTab: View {
     @AppStorage("anicat_library_sort") private var sortRaw = LibrarySort.updated.rawValue
     @AppStorage("anicat_library_layout") private var layoutRaw = "grid"
     @State private var formatFilter = ""
+    @State private var showSortFilter = false
 
     enum LibrarySort: String, CaseIterable {
         case updated, title, score, progress
@@ -910,7 +958,7 @@ private struct LibraryTab: View {
 
     /// The six AniList list statuses, in the order the site itself lists
     /// them. Paired with their labels here rather than reusing
-    /// `PhoneDetailView.listStatus`: this drives a `Picker`'s tags, so the
+    /// `PhoneDetailView.listStatus`: these drive the status tabs, so the
     /// raw values have to round-trip, not just render.
     private static let statuses: [(raw: String, label: String)] = [
         ("CURRENT", "Watching"),
@@ -976,8 +1024,12 @@ private struct LibraryTab: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    TabHeader(title: "Library", model: model) { statusMenu }
-                    shortcuts
+                    TabHeader(title: "Library", model: model) {
+                        ProfileButton(model: model)
+                    }
+                    if model.appMode == .anime, model.isSignedIn {
+                        statusTabs
+                    }
 
                     if model.appMode == .cinema {
                         if model.cinemaWatchlist.isEmpty {
@@ -1007,25 +1059,23 @@ private struct LibraryTab: View {
                             detail: "Titles you move to this list on AniList show up here."
                         )
                     } else {
-                        if availableFormats.count > 1 {
-                            formatChips
-                        }
+                        // The choices in force as one line, and one button
+                        // for all of them. Sort menu, format chips and the
+                        // layout toggle were three controls in two rows.
                         HStack {
-                            Text("\(shownItems.count) title\(shownItems.count == 1 ? "" : "s")")
-                                .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                            Text(sortFilterLine)
+                                .font(.system(size: 13)).monospacedDigit()
                                 .foregroundStyle(SumiTheme.muted)
-                            Spacer()
-                            sortMenu
-                            Button {
-                                layoutRaw = isGrid ? "list" : "grid"
-                            } label: {
-                                Image(systemName: isGrid ? "list.bullet" : "square.grid.2x2")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(SumiTheme.muted)
-                                    .frame(width: 44, height: 44)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Button { showSortFilter = true } label: {
+                                Text("Sort & filter")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(SumiTheme.indigo)
+                                    .frame(minHeight: 44)
                                     .contentShape(Rectangle())
                             }
-                            .accessibilityLabel(isGrid ? "Show as list" : "Show as grid")
+                            .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 16)
                         if isGrid {
@@ -1041,6 +1091,11 @@ private struct LibraryTab: View {
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.loadLibrary() }
             .modifier(DetailPush(model: model, isPresented: $showDetail))
+            .sheet(isPresented: $showSortFilter) {
+                sortFilterSheet
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
         }
         .task {
             guard model.isSignedIn else { return }
@@ -1050,131 +1105,115 @@ private struct LibraryTab: View {
         }
     }
 
-    /// Downloads and History, beside the lists as a streaming app keeps them.
-    /// Pushed on this tab's own stack, so a title opened from either comes
-    /// back to it.
-    @ViewBuilder
-    private var shortcuts: some View {
-        HStack(spacing: 10) {
-            NavigationLink { PhoneDownloadsView(model: model) } label: {
-                shortcut("Downloads", "arrow.down.circle",
-                         count: model.libraryDownloads.count + model.offlineChapters.count)
-            }
-            NavigationLink { PhoneHistoryView(model: model, showDetail: $showDetail) } label: {
-                shortcut("History", "clock.arrow.circlepath", count: 0)
-            }
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-    }
-
-    private func shortcut(_ title: String, _ symbol: String, count: Int) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(SumiTheme.indigo)
-            Text(title)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(SumiTheme.foreground)
-            Spacer(minLength: 4)
-            if count > 0 {
-                Text("\(count)")
-                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(SumiTheme.muted)
-            }
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(SumiTheme.muted)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-        .frame(maxWidth: .infinity)
-        .background(SumiTheme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(SumiTheme.border, lineWidth: 1))
-        .contentShape(Rectangle())
-    }
-
-    /// A menu, not a segmented control: six statuses across 402pt truncate to
-    /// about two letters each. Same shape Mail uses for its filter. Cinema
-    /// has its own watchlist statuses and does not use this one.
-    @ViewBuilder
-    private var statusMenu: some View {
-        if model.appMode == .cinema {
-            EmptyView()
-        } else {
-        Menu {
-                        Picker("Status", selection: Binding(
-                            get: { storedStatus },
-                            set: { next in
-                                storedStatus = next
-                                Task { await model.loadLibrary(status: next) }
-                            }
-                        )) {
-                            ForEach(Self.statuses, id: \.raw) { status in
-                                Text(status.label).tag(status.raw)
-                            }
-                        }
-        } label: {
-            HStack(spacing: 4) {
-                Text(currentLabel)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(SumiTheme.foreground)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(SumiTheme.muted)
-            }
-        }
-        }
-    }
-
-    @ViewBuilder
-    private var sortMenu: some View {
-        Menu {
-            Picker("Sort", selection: $sortRaw) {
-                ForEach(LibrarySort.allCases, id: \.rawValue) { option in
-                    Text(option.label).tag(option.rawValue)
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(sort.label)
-                    .font(.system(size: 13))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(SumiTheme.muted)
-            // 12pt text with no padding was a target a thumb missed.
-            .padding(.horizontal, 8)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-    }
-
-    /// One row of chips, "All" first, scrolling sideways when the list has
-    /// more formats than fit. A filter is one tap on and one tap off.
-    @ViewBuilder
-    private var formatChips: some View {
+    /// The six statuses as tabs, one tap each. Behind a menu in the header,
+    /// switching lists took two taps and the other five were out of sight.
+    /// Scrolls sideways: six labels do not fit across a phone. The count is
+    /// the open list's only, the one the fetch has returned.
+    private var statusTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chip("All", selected: formatFilter.isEmpty) { formatFilter = "" }
-                ForEach(availableFormats, id: \.self) { format in
-                    chip(Self.formatLabel(format), selected: formatFilter == format) {
-                        formatFilter = formatFilter == format ? "" : format
+            HStack(spacing: 22) {
+                ForEach(Self.statuses, id: \.raw) { status in
+                    let selected = storedStatus == status.raw
+                    Button {
+                        guard !selected else { return }
+                        storedStatus = status.raw
+                        formatFilter = ""
+                        Task { await model.loadLibrary(status: status.raw) }
+                    } label: {
+                        VStack(spacing: 6) {
+                            HStack(spacing: 5) {
+                                Text(status.label)
+                                    .font(.system(size: 15, weight: selected ? .semibold : .regular))
+                                if selected, !model.libraryItems.isEmpty {
+                                    Text("\(model.libraryItems.count)")
+                                        .font(.system(size: 13)).monospacedDigit()
+                                        .foregroundStyle(SumiTheme.muted)
+                                }
+                            }
+                            .foregroundStyle(selected ? SumiTheme.foreground : SumiTheme.muted)
+                            Rectangle()
+                                .fill(selected ? SumiTheme.indigo : Color.clear)
+                                .frame(height: 2)
+                        }
+                        .frame(minHeight: 40, alignment: .bottom)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 16)
         }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(SumiTheme.muted.opacity(0.2)).frame(height: 0.5)
+        }
     }
 
-    private func chip(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    private var sortFilterLine: String {
+        var parts = ["\(shownItems.count) title\(shownItems.count == 1 ? "" : "s")", sort.label]
+        if !formatFilter.isEmpty { parts.append(Self.formatLabel(formatFilter)) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var sortFilterSheet: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                Text("Sort & filter")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(SumiTheme.foreground)
+                    .padding(.top, 24)
+
+                sheetGroup("Sort") {
+                    ForEach(LibrarySort.allCases, id: \.rawValue) { option in
+                        sheetRow(option.label, selected: sort == option) { sortRaw = option.rawValue }
+                    }
+                }
+
+                if availableFormats.count > 1 {
+                    sheetGroup("Format") {
+                        sheetRow("All", selected: formatFilter.isEmpty) { formatFilter = "" }
+                        ForEach(availableFormats, id: \.self) { format in
+                            sheetRow(Self.formatLabel(format), selected: formatFilter == format) { formatFilter = format }
+                        }
+                    }
+                }
+
+                sheetGroup("Show as") {
+                    SumiSlashToggle([("grid", "Grid"), ("list", "List")], selection: isGrid ? "grid" : "list") { layoutRaw = $0 }
+                        .padding(.vertical, 8)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+        }
+        .background(SumiTheme.background)
+    }
+
+    private func sheetGroup<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SumiTheme.muted)
+                .padding(.bottom, 4)
+            content()
+        }
+    }
+
+    private func sheetRow(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label)
-                .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? SumiTheme.background : SumiTheme.foreground)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 6)
-                .background(selected ? SumiTheme.indigo : SumiTheme.card, in: Capsule())
+            HStack {
+                Text(label)
+                    .font(.system(size: 16))
+                    .foregroundStyle(SumiTheme.foreground)
+                Spacer()
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(SumiTheme.indigo)
+                }
+            }
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -1291,6 +1330,7 @@ private struct SearchTab: View {
                     TabHeader(title: "Search", model: model) {
                         // In the header, not the toolbar: the tab roots hide
                         // the navigation bar (see `TabHeader`).
+                        HStack(spacing: 4) {
                         if model.appMode == .anime {
                             Button {
                                 showFilters = true
@@ -1304,6 +1344,8 @@ private struct SearchTab: View {
                                     .contentShape(Rectangle())
                             }
                             .accessibilityLabel("Filters")
+                        }
+                        ProfileButton(model: model)
                         }
                     }
 
@@ -1484,20 +1526,45 @@ private struct SearchTab: View {
         .map(\.value)
         .filter { !$0.isEmpty && $0 != "Ecchi" }
 
+    /// Two columns of buttons, the first seven genres and the sheet as the
+    /// eighth. Chips in a flow wrapped to ragged rows of different widths,
+    /// and their 30pt height was under the 44pt a thumb needs.
     @ViewBuilder
     private var genreChips: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Genres")
-                .font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                .foregroundStyle(SumiTheme.muted)
-                .padding(.horizontal, 16)
-            // Setting the filter is the search: `onChange(of: filters)` runs
-            // it, and the chip above the results takes it off again.
-            FlowChips(items: Self.browseGenres) { genre in
-                filters.genre = genre
+            SectionHeader("Genres")
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                // Setting the filter is the search: `onChange(of: filters)`
+                // runs it, and the chip above the results takes it off again.
+                ForEach(Self.browseGenres.prefix(7), id: \.self) { genre in
+                    genreButton(genre, trailing: nil) { filters.genre = genre }
+                }
+                genreButton("All genres", trailing: "chevron.right") { showFilters = true }
             }
             .padding(.horizontal, 16)
         }
+    }
+
+    private func genreButton(_ title: String, trailing: String?, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(SumiTheme.foreground)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let trailing {
+                    Image(systemName: trailing)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(SumiTheme.muted)
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 52)
+            .background(SumiTheme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Recent searches

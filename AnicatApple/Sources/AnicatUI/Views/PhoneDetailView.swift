@@ -22,6 +22,7 @@ struct PhoneDetailView: View {
     }
 
     @State private var showTrailer = false
+    @State private var showListSheet = false
     @State private var showGallery = false
 
     /// A manga's first segment lists chapters, a light novel's lists
@@ -63,8 +64,16 @@ struct PhoneDetailView: View {
                 if let details = model.selectedMediaDetails {
                     header(details)
 
-                    if !isManga, !isNovel {
-                        watchButton
+                    // Side by side: the trailer alone sat in a band of its
+                    // own under the synopsis, a full row for a 12pt word.
+                    if (!isManga && !isNovel) || hasTrailer {
+                        HStack(spacing: 10) {
+                            if !isManga, !isNovel {
+                                watchButton
+                            }
+                            trailerButton(details)
+                        }
+                        .padding(.horizontal, 16)
                     }
 
                     overview(details)
@@ -116,29 +125,79 @@ struct PhoneDetailView: View {
         // case: wrapping the `ToolbarItem` itself in `if let` renders no
         // button at all, which is why list editing had no entry point.
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { listButton }
             ToolbarItem(placement: .topBarTrailing) { listMenu }
+        }
+        .sheet(isPresented: $showListSheet) {
+            listSheet
+                .presentationDetents([.height(380)])
+                .presentationDragIndicator(.visible)
         }
     }
 
-    /// List editing, behind the bar's "...". `updateListEntry` and
-    /// `toggleFavourite` already existed on the model and were simply
-    /// unreachable from the phone.
+    private static let listStatuses = ["CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED"]
+
+    /// The list status as a labelled button, not a picker buried in "...":
+    /// a viewer could not see from the page whether a title was on their
+    /// list at all.
+    @ViewBuilder
+    private var listButton: some View {
+        let status = model.selectedMediaDetails?.listStatus
+        // AniList statuses only: a film or series is on the TMDB watchlist,
+        // which has no Planning or Paused to pick from.
+        if model.currentDetailCatalog == .anilist {
+        Button { showListSheet = true } label: {
+            Text(status.map { Self.listStatus($0, reading: isManga || isNovel) } ?? "Add to list")
+                .font(.system(size: 15, weight: .semibold))
+        }
+        .disabled(model.selectedMediaDetails == nil || !model.isSignedIn)
+        }
+    }
+
+    private var listSheet: some View {
+        let current = model.selectedMediaDetails?.listStatus
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("List status")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(SumiTheme.foreground)
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 8)
+            ForEach(Self.listStatuses, id: \.self) { status in
+                Button {
+                    showListSheet = false
+                    guard status != current else { return }
+                    Task { await model.updateListEntry(status: status) }
+                } label: {
+                    HStack {
+                        Text(Self.listStatus(status, reading: isManga || isNovel))
+                            .font(.system(size: 16))
+                            .foregroundStyle(SumiTheme.foreground)
+                        Spacer()
+                        if status == current {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(SumiTheme.indigo)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .frame(minHeight: 52)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SumiTheme.background)
+    }
+
+    /// Favourite and share, behind the bar's "...". The list status has its
+    /// own labelled button beside it.
     @ViewBuilder
     private var listMenu: some View {
         let details = model.selectedMediaDetails
         Menu {
-            Picker("Status", selection: Binding(
-                get: { details?.listStatus ?? "" },
-                set: { status in
-                    Task { await model.updateListEntry(status: status) }
-                }
-            )) {
-                Text(isManga || isNovel ? "Reading" : "Watching").tag("CURRENT")
-                Text("Planning").tag("PLANNING")
-                Text("Completed").tag("COMPLETED")
-                Text("Paused").tag("PAUSED")
-                Text("Dropped").tag("DROPPED")
-            }
             Button {
                 Task { await model.toggleFavourite() }
             } label: {
@@ -469,7 +528,32 @@ struct PhoneDetailView: View {
             }
             .sumiPrimaryButton()
             .controlSize(.large)
-            .padding(.horizontal, 16)
+        }
+    }
+
+    @ViewBuilder
+    private func trailerButton(_ details: HeroBanner.Details) -> some View {
+        if hasTrailer {
+            Button {
+                showTrailer = true
+            } label: {
+                Label("Trailer", systemImage: "play.rectangle")
+                    .fontWeight(.semibold)
+            }
+            .sumiSecondaryButton()
+            .controlSize(.large)
+            .fixedSize()
+            .sheet(isPresented: $showTrailer) {
+                if let id = details.trailerId {
+                    TrailerPlayer(
+                        site: details.trailerSite, videoId: id,
+                        thumbnail: details.trailerThumbnail.flatMap(URL.init(string:)))
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .background(Color.black.ignoresSafeArea())
+                    .presentationDetents([.medium, .large])
+                }
+            }
         }
     }
 
@@ -664,29 +748,6 @@ struct PhoneDetailView: View {
                 .font(.system(size: 13))
             }
 
-            if hasTrailer {
-                Button {
-                    showTrailer = true
-                } label: {
-                    Text("Trailer")
-                        .sumiTabularMono(size: 12, weight: .semibold)
-                        .foregroundStyle(SumiTheme.indigo)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .sheet(isPresented: $showTrailer) {
-                    if let id = details.trailerId {
-                        TrailerPlayer(
-                            site: details.trailerSite, videoId: id,
-                            thumbnail: details.trailerThumbnail.flatMap(URL.init(string:)))
-                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                        .background(Color.black.ignoresSafeArea())
-                        .presentationDetents([.medium, .large])
-                    }
-                }
-            }
         }
         .padding(.horizontal, 16)
     }
@@ -975,6 +1036,9 @@ struct PhoneDetailView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
+            // The whole row, not the title alone: a muted title beside a
+            // full-colour still read as unwatched at a glance.
+            .opacity(episode.isWatched ? 0.55 : 1)
             .contentShape(Rectangle())
         }
     }

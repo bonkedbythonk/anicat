@@ -39,7 +39,7 @@ struct PhoneReadTab: View {
                     // draws for Anime / Films & TV, with the segment
                     // pulled up into the header's bottom padding.
                     VStack(alignment: .leading, spacing: 0) {
-                        TabHeader(title: "Read", model: nil) { EmptyView() }
+                        TabHeader(title: "Read", model: nil) { ProfileButton(model: model) }
                         // The slash toggle every other tab uses for its
                         // mode; a stock segmented control here was the one
                         // tab that looked like a different app.

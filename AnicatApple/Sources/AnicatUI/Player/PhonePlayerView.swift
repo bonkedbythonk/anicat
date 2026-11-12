@@ -36,6 +36,10 @@ struct PhonePlayerView: View {
     @State private var isLoadingReleases = false
     @State private var showReleases = false
     @State private var showEpisodes = false
+    /// The side panel standing in for the overflow `Menu`: twelve rows in
+    /// one list put Stop beside Speed and hid Chapters two levels down, and
+    /// a menu covers the picture it is adjusting.
+    @State private var panel: Panel?
     /// A pinch and the one-finger recogniser see the same touches. While
     /// this is set, or just after, the drag is ignored: a pinch opening
     /// sideways otherwise read as a scrub and landed a seek on lift.
@@ -63,10 +67,16 @@ struct PhonePlayerView: View {
 
     enum DragAxis { case horizontal, brightness, volume }
 
+    enum Panel { case tracks, options }
+
     struct Hud: Equatable {
         let symbol: String
         let text: String
         var fraction: Double? = nil
+        /// Brightness and volume draw as a slim bar at the edge their drag
+        /// started on; the centred box sat over the middle of the picture
+        /// being adjusted.
+        var edge: HorizontalEdge? = nil
     }
 
     var body: some View {
@@ -113,8 +123,19 @@ struct PhonePlayerView: View {
                 // the opening watchdog) can run while the old file still
                 // plays; its line and Cancel live here, not on the tab bar's
                 // card, which stays hidden under a full-screen player.
-                if controller.isBuffering || controller.resolveStatus != nil {
-                    bufferingIndicator
+                // With the chrome up the transport carries the spinner and
+                // this readout sits under it; drawn here as well, the play
+                // button and its scrim landed on the percentage and the
+                // swarm line, and a viewer who tapped to see what was wrong
+                // saw a pause button and nothing else.
+                if isStalled, !controller.areControlsVisible {
+                    VStack(spacing: 10) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .controlSize(.large)
+                            .tint(.white)
+                        bufferingDetails
+                    }
                 }
 
                 skipPill
@@ -132,6 +153,10 @@ struct PhonePlayerView: View {
                 if let hud {
                     hudView(hud)
                         .transition(.opacity)
+                }
+
+                if let panel {
+                    panelLayer(panel)
                 }
             }
         }
@@ -207,14 +232,23 @@ struct PhonePlayerView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(SumiTheme.muted)
+            // Forward, not close, beside play: the close sat where a thumb
+            // reaching for the tab bar lands, and ended the episode. Stop is
+            // a long press on the bar and a row in the Options panel.
+            Button {
+                // Not `seek(by:)`: that also raises the full player's
+                // chrome, which then greeted the next restore.
+                AppHaptics.play(.transport)
+                controller.seekRelative(by: 5)
+            } label: {
+                Image(systemName: "goforward.5")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(SumiTheme.foreground)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Forward 5 seconds")
         }
         .padding(.leading, 8)
         .padding(.trailing, 6)
@@ -234,6 +268,11 @@ struct PhonePlayerView: View {
         .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
         .contentShape(Rectangle())
         .onTapGesture(perform: onRestore)
+        .contextMenu {
+            Button(role: .destructive, action: onClose) {
+                Label("Stop", systemImage: "xmark")
+            }
+        }
         .padding(.horizontal, 16)
         // Same coordinate space as the thumbnail's `GeometryReader`, which
         // ignores the safe area: measured from the physical bottom, both
@@ -326,8 +365,7 @@ struct PhonePlayerView: View {
     private var topBar: some View {
         HStack(spacing: 14) {
             // Minimise, not stop: the system player's chevron shrinks the
-            // picture and keeps it going. Stop is in the menu and on the
-            // mini bar.
+            // picture and keeps it going. Stop is the X at the other end.
             Button(action: onMinimize) {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 17, weight: .semibold))
@@ -356,6 +394,18 @@ struct PhonePlayerView: View {
             // One glass capsule for the pair, as the system player groups
             // its trailing buttons.
             HStack(spacing: 0) {
+                // Subtitles and audio get their own button: the setting a
+                // viewer changes most, and it sat inside the overflow menu.
+                Button {
+                    openPanel(.tracks)
+                } label: {
+                    Image(systemName: "captions.bubble")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Subtitles and audio")
+
                 if !controller.episodeList.isEmpty {
                     Button {
                         showEpisodes = true
@@ -368,9 +418,30 @@ struct PhonePlayerView: View {
                     .accessibilityLabel("Episodes")
                 }
 
-                tracksMenu
+                Button {
+                    openPanel(.options)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Options")
             }
             .playerGlass(in: Capsule())
+
+            // Ending the episode took the Options panel's Stop row or a long
+            // press on the mini bar, and nobody found either. Opposite
+            // corner from the chevron, so minimise and stop are not one
+            // mis-tap apart.
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .playerGlass(in: Circle())
+            }
+            .accessibilityLabel("Stop")
         }
     }
 
@@ -448,129 +519,279 @@ struct PhonePlayerView: View {
         }
     }
 
-    @ViewBuilder
-    private var tracksMenu: some View {
-        Menu {
-            // Films and TV have no sub/dub split; their audio tracks are
-            // the picker below.
-            if AppModel.shared?.currentPlaybackCatalog == .anilist {
-                Picker(selection: subDubSelection) {
-                    Text("Subtitled").tag("Subtitled")
-                    Text("Dubbed").tag("Dubbed")
-                } label: {
-                    Label("Sub / Dub", systemImage: "captions.bubble")
-                }
-                .pickerStyle(.menu)
-            }
-            // Anime already has Sub / Dub above, so the track list appears
-            // only when the file has a choice that row cannot name; films
-            // and TV have no such row, and keep the list whenever there are tracks.
-            if !audioTracks.isEmpty,
-               AppModel.shared?.currentPlaybackCatalog != .anilist || PlayerTrack.needsAudioPicker(audioTracks) {
-                Picker("Audio", selection: audioSelection) {
-                    ForEach(audioTracks) { track in
-                        Text(label(for: track)).tag(track.id)
-                    }
-                }
-            }
-            if !subtitleTracks.isEmpty {
-                Picker("Subtitles", selection: subtitleSelection) {
-                    Text("Off").tag(PlayerTrack.off)
-                    ForEach(subtitleTracks) { track in
-                        Text(label(for: track)).tag(track.id)
-                    }
-                }
-            }
-            Picker("Speed", selection: Binding(
-                get: { controller.playbackRate },
-                set: { rate in
-                    storedSpeed = rate
-                    controller.setPlaybackRate(rate)
-                }
-            )) {
-                ForEach(Self.speeds, id: \.self) { rate in
-                    Text(Self.speedLabel(rate)).tag(rate)
-                }
-            }
-            .pickerStyle(.menu)
+    // MARK: Panels
 
-            Picker("Subtitle size", selection: Binding(
-                get: { subtitleScale },
-                set: { scale in
-                    subtitleScale = scale
-                    controller.setSubtitleScale(scale)
-                }
-            )) {
-                Text("Small").tag(0.8)
-                Text("Normal").tag(1.0)
-                Text("Large").tag(1.25)
-                Text("Huge").tag(1.5)
-            }
-            .pickerStyle(.menu)
-
-            if !controller.chapters.isEmpty {
-                Menu {
-                    ForEach(controller.chapters) { chapter in
-                        Button {
-                            controller.seek(to: chapter.time)
-                            controller.showControlsBriefly()
-                        } label: {
-                            Text("\(Self.timestamp(chapter.time))  \(chapter.title)")
-                        }
-                    }
-                } label: {
-                    Label("Chapters", systemImage: "list.number")
-                }
-            }
-
-            Button {
-                setFill(!controller.isFillingScreen)
-            } label: {
-                Label(controller.isFillingScreen ? "Fit to screen" : "Fill screen",
-                      systemImage: controller.isFillingScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-            }
-
-            Button {
-                showReleases = true
-            } label: {
-                Label("Release", systemImage: "square.stack.3d.up")
-            }
-
-            sleepTimerMenu
-            continueOnMac
-
-            if controller.hasNextEpisode {
-                Button("Next episode") { controller.nextEpisode() }
-            }
-            if controller.hasPreviousEpisode {
-                Button("Previous episode") { controller.previousEpisode() }
-            }
-
-            Button(role: .destructive, action: onClose) {
-                Label("Stop", systemImage: "xmark.circle")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+    private func openPanel(_ which: Panel) {
+        if which == .tracks { fetchTracks() }
+        withAnimation(.snappy) {
+            panel = which
+            controller.areControlsVisible = false
         }
-        // A tap gesture on a `Menu` never fires (the menu's own recogniser
-        // takes the touch), so the press is read off the button style.
-        .menuStyle(.button)
-        .buttonStyle(MenuPressStyle { controller.holdControlsForMenu() })
     }
 
-    /// Reports the touch-down on a `Menu`'s label without changing how it
-    /// draws.
-    private struct MenuPressStyle: ButtonStyle {
-        let onPress: () -> Void
+    private func closePanel() {
+        withAnimation(.snappy) { panel = nil }
+        controller.showControlsBriefly()
+    }
 
-        func makeBody(configuration: Configuration) -> some View {
-            configuration.label
-                .onChange(of: configuration.isPressed) { _, pressed in
-                    if pressed { onPress() }
+    /// A column at the trailing edge with the picture still playing beside
+    /// it. A tap on the picture closes it.
+    @ViewBuilder
+    private func panelLayer(_ which: Panel) -> some View {
+        ZStack(alignment: .trailing) {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { closePanel() }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    switch which {
+                    case .tracks: tracksPanel
+                    case .options: optionsPanel
+                    }
                 }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
+            .scrollIndicators(.hidden)
+            .frame(width: 320)
+            .frame(maxHeight: .infinity)
+            .foregroundStyle(.white)
+            .playerPanelGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.vertical, 10)
+            .padding(.trailing, 10)
+        }
+        .transition(.move(edge: .trailing).combined(with: .opacity))
+    }
+
+    @ViewBuilder
+    private var tracksPanel: some View {
+        Text("Subtitles and audio")
+            .font(.system(size: 17, weight: .semibold))
+        // Films and TV have no sub/dub split; their audio tracks are the
+        // list below.
+        if AppModel.shared?.currentPlaybackCatalog == .anilist {
+            panelHeading("Language")
+            panelSteps([("Subtitled", "Sub"), ("Dubbed", "Dub")], selected: storedSubDub) { option in
+                subDubSelection.wrappedValue = option
+            }
+        }
+        // Anime already has Sub / Dub above, so the track list appears only
+        // when the file has a choice that row cannot name.
+        if !audioTracks.isEmpty,
+           AppModel.shared?.currentPlaybackCatalog != .anilist || PlayerTrack.needsAudioPicker(audioTracks) {
+            panelHeading("Audio")
+            ForEach(audioTracks) { track in
+                panelChoice(label(for: track), selected: track.isSelected) {
+                    audioSelection.wrappedValue = track.id
+                }
+            }
+        }
+        if !subtitleTracks.isEmpty {
+            panelHeading("Subtitles")
+            panelChoice("Off", selected: !subtitleTracks.contains(where: \.isSelected)) {
+                subtitleSelection.wrappedValue = PlayerTrack.off
+            }
+            ForEach(subtitleTracks) { track in
+                panelChoice(label(for: track), selected: track.isSelected) {
+                    subtitleSelection.wrappedValue = track.id
+                }
+            }
+        }
+        panelHeading("Subtitle size")
+        panelSteps([(0.8, "Small"), (1.0, "Normal"), (1.25, "Large"), (1.5, "Huge")], selected: subtitleScale) { scale in
+            subtitleScale = scale
+            controller.setSubtitleScale(scale)
+        }
+    }
+
+    @ViewBuilder
+    private var optionsPanel: some View {
+        Text("Options")
+            .font(.system(size: 17, weight: .semibold))
+
+        panelHeading("Speed")
+        panelSteps(Self.speeds.map { ($0, Self.speedLabel($0)) }, selected: controller.playbackRate) { rate in
+            storedSpeed = rate
+            controller.setPlaybackRate(rate)
+        }
+
+        panelHeading("Picture")
+        panelSteps([(false, "Fit"), (true, "Fill")], selected: controller.isFillingScreen) { fill in
+            setFill(fill)
+        }
+
+        if let model = AppModel.shared {
+            panelHeading(model.sleepTimerCaption.map { "Sleep timer \u{00B7} \($0)" } ?? "Sleep timer")
+            panelSteps(
+                [(0, "Off"), (-1, "End"), (15, "15m"), (30, "30m"), (45, "45m"), (60, "60m")],
+                selected: model.sleepTimer == .off ? 0 : (model.sleepTimer == .afterEpisode ? -1 : nil)
+            ) { minutes in
+                switch minutes {
+                case 0: model.sleepTimer = .off
+                case -1: model.sleepTimer = .afterEpisode
+                default: model.sleepTimer = .at(Date().addingTimeInterval(TimeInterval(minutes * 60)))
+                }
+            }
+        }
+
+        if !controller.chapters.isEmpty {
+            panelHeading("Chapters")
+            ForEach(controller.chapters) { chapter in
+                Button {
+                    controller.seek(to: chapter.time)
+                    closePanel()
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(Self.timestamp(chapter.time))
+                            .sumiTabularMono(size: 13)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .frame(width: 52, alignment: .leading)
+                        Text(chapter.title)
+                            .font(.system(size: 15))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+
+        panelHeading("Source")
+        Button {
+            closePanel()
+            showReleases = true
+        } label: {
+            HStack(spacing: 8) {
+                Text("Release")
+                    .font(.system(size: 15))
+                Spacer(minLength: 8)
+                Text(controller.currentReleaseName ?? "")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        if controller.hasNextEpisode || controller.hasPreviousEpisode {
+            panelHeading("Episode")
+            if controller.hasNextEpisode {
+                panelAction("Next episode", systemImage: "forward.end") {
+                    closePanel()
+                    controller.nextEpisode()
+                }
+            }
+            if controller.hasPreviousEpisode {
+                panelAction("Previous episode", systemImage: "backward.end") {
+                    closePanel()
+                    controller.previousEpisode()
+                }
+            }
+        }
+
+        continueOnMac
+            .buttonStyle(.plain)
+            .font(.system(size: 15))
+            .frame(minHeight: 44)
+
+        Divider().overlay(.white.opacity(0.15)).padding(.vertical, 6)
+        Button(role: .destructive, action: onClose) {
+            HStack {
+                Text("Stop")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+            }
+            .foregroundStyle(Color(red: 1, green: 0.45, blue: 0.42))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func panelHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.6))
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+    }
+
+    private func panelChoice(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            SumiHaptics.selection()
+            action()
+        } label: {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 15))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func panelAction(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 20)
+                Text(title)
+                    .font(.system(size: 15))
+                Spacer()
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// One row of short choices, the current one filled. Speed was a
+    /// submenu of six; here every value is one tap.
+    private func panelSteps<Value: Hashable>(
+        _ options: [(Value, String)],
+        selected: Value?,
+        pick: @escaping (Value) -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            ForEach(options, id: \.0) { option in
+                let isOn = option.0 == selected
+                Button {
+                    // The chosen one is inert: re-picking Sub or Dub started
+                    // the language check and release search over again.
+                    guard !isOn else { return }
+                    SumiHaptics.selection()
+                    pick(option.0)
+                } label: {
+                    Text(option.1)
+                        .font(.system(size: 13, weight: isOn ? .semibold : .regular))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(isOn ? .black : .white)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .background(isOn ? Color.white : Color.white.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -659,26 +880,6 @@ struct PhonePlayerView: View {
         }
     }
 
-    /// The phone's sleep timer; the Mac has no control for it. Same
-    /// `AppModel.sleepTimer`, same "stop, do not pause" semantics at the end.
-    @ViewBuilder
-    private var sleepTimerMenu: some View {
-        if let model = AppModel.shared {
-            Menu {
-                Button("Off") { model.sleepTimer = .off }
-                Button("End of episode") { model.sleepTimer = .afterEpisode }
-                ForEach([15, 30, 45, 60], id: \.self) { minutes in
-                    Button("\(minutes) min") {
-                        model.sleepTimer = .at(Date().addingTimeInterval(TimeInterval(minutes * 60)))
-                    }
-                }
-            } label: {
-                Label(model.sleepTimerCaption.map { "Sleep timer: \($0)" } ?? "Sleep timer",
-                      systemImage: "moon.zzz")
-            }
-        }
-    }
-
     private var nextEpisodeItem: MediaDetailView.EpisodeItem? {
         guard let index = controller.episodeList.firstIndex(where: { $0.number == controller.episodeNumber }),
               controller.episodeList.indices.contains(index + 1) else { return nil }
@@ -687,70 +888,76 @@ struct PhonePlayerView: View {
 
     /// The Mac's countdown card, phone-sized. Same controller state:
     /// `armNextEpisodeCountdown` decides when, this only draws it and
-    /// hands the two buttons to `playNextEpisodeNow` / `cancel`.
+    /// hands the two buttons to `playNextEpisodeNow` / `cancel`. The next
+    /// episode's still and a bar that fills, rather than a ring and a
+    /// number: the still says which episode before the title is read.
     @ViewBuilder
     private var nextEpisodeCard: some View {
         if controller.nextEpisodeCountdown.isVisible {
             let next = nextEpisodeItem
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    HStack(spacing: 12) {
-                        // Position-driven like the Mac's ring: the countdown
-                        // counts playback seconds, so a pause holds it.
-                        ZStack {
-                            Circle().stroke(.white.opacity(0.25), lineWidth: 3)
-                            Circle()
-                                .trim(from: 0, to: controller.nextEpisodeCountdown.elapsedFraction(at: controller.currentTime))
-                                .stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                                .rotationEffect(.degrees(-90))
-                            Text("\(max(1, Int(controller.nextEpisodeCountdown.remaining(at: controller.currentTime).rounded(.up))))")
-                                .sumiTabularMono(size: 12, weight: .semibold)
-                                .foregroundStyle(.white)
-                        }
-                        .frame(width: 34, height: 34)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Up next")
-                                .sumiTabularMono(size: 12, weight: .semibold)
-                                .foregroundStyle(.white.opacity(0.7))
-                            Text(next.map { "Episode \($0.number)\($0.title.isEmpty ? "" : " \u{00B7} \($0.title)")" } ?? "Next episode")
-                                .font(.system(size: 13, weight: .semibold))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    CachedAsyncImage(url: next?.thumbnailURL, maxPixelSize: 300) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Color.white.opacity(0.12)
+                    }
+                    .frame(width: 112, height: 63)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(next.map { "Next \u{00B7} Episode \($0.number)" } ?? "Next episode")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.7))
+                        if let title = next?.title, !title.isEmpty {
+                            Text(title)
+                                .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .lineLimit(1)
                         }
-                        .frame(maxWidth: 220, alignment: .leading)
-                        Button {
-                            controller.playNextEpisodeNow()
-                        } label: {
-                            Text("Play now")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.black)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(.white, in: Capsule())
-                                // Hit area to 44pt without growing the capsule.
-                                .padding(.vertical, 8)
-                                .contentShape(Rectangle())
+                        // Position-driven like the Mac's ring: the countdown
+                        // counts playback seconds, so a pause holds it.
+                        GeometryReader { geo in
+                            Capsule().fill(.white.opacity(0.25))
+                                .overlay(alignment: .leading) {
+                                    Capsule().fill(.white)
+                                        .frame(width: geo.size.width * controller.nextEpisodeCountdown.elapsedFraction(at: controller.currentTime))
+                                }
                         }
-                        .buttonStyle(.plain)
-                        Button {
-                            withAnimation(.snappy) { controller.cancelNextEpisodeCountdown() }
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
+                        .frame(height: 3)
+                        .padding(.top, 5)
                     }
-                    .padding(.leading, 12)
-                    .padding(.trailing, 6)
-                    .padding(.vertical, 8)
-                    .playerGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                HStack(spacing: 8) {
+                    Button {
+                        withAnimation(.snappy) { controller.cancelNextEpisodeCountdown() }
+                    } label: {
+                        Text("Stay here")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        AppHaptics.play(.transport)
+                        controller.playNextEpisodeNow()
+                    } label: {
+                        Text("Play now")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
+            .padding(10)
+            .frame(width: 320)
+            .playerGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             .padding(.horizontal, 26)
             .padding(.bottom, controller.areControlsVisible ? 96 : 26)
             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -759,6 +966,37 @@ struct PhonePlayerView: View {
 
     @ViewBuilder
     private func hudView(_ hud: Hud) -> some View {
+        if let edge = hud.edge, let fraction = hud.fraction {
+            edgeBar(symbol: hud.symbol, fraction: fraction, edge: edge)
+        } else {
+            centredHud(hud)
+        }
+    }
+
+    private func edgeBar(symbol: String, fraction: Double, edge: HorizontalEdge) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(height: 18)
+            Capsule()
+                .fill(.white.opacity(0.25))
+                .frame(width: 6, height: 150)
+                .overlay(alignment: .bottom) {
+                    Capsule().fill(.white).frame(width: 6, height: 150 * fraction)
+                }
+        }
+        .foregroundStyle(.white)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 10)
+        .playerGlass(in: Capsule())
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge == .leading ? .leading : .trailing)
+        .padding(.horizontal, 24)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func centredHud(_ hud: Hud) -> some View {
         VStack(spacing: 8) {
             Image(systemName: hud.symbol)
                 .font(.system(size: 26, weight: .regular))
@@ -836,10 +1074,20 @@ struct PhonePlayerView: View {
                 AppHaptics.play(.transport)
                 controller.showControlsBriefly()
             } label: {
-                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 50, weight: .regular))
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: Self.playCell, height: Self.playCell)
+                // mpv keeps `pause` false while it waits for the cache, so a
+                // stall showed a pause button as if it were playing.
+                if isStalled {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.large)
+                        .tint(.white)
+                        .frame(width: Self.playCell, height: Self.playCell)
+                } else {
+                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 50, weight: .regular))
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: Self.playCell, height: Self.playCell)
+                }
             }
             Button { seek(by: 5) } label: {
                 Image(systemName: "goforward.5")
@@ -849,6 +1097,17 @@ struct PhonePlayerView: View {
         }
         .buttonStyle(TransportPressStyle())
         .foregroundStyle(.white)
+        .overlay(alignment: .top) {
+            if isStalled {
+                bufferingDetails
+                    .fixedSize()
+                    .offset(y: Self.playCell + 12)
+            }
+        }
+    }
+
+    private var isStalled: Bool {
+        controller.isBuffering || controller.resolveStatus != nil
     }
 
     static let playCell: CGFloat = 76
@@ -870,16 +1129,31 @@ struct PhonePlayerView: View {
     private struct PhoneBottomBar: View {
         @Bindable var controller: PlayerController
         @Binding var scrubTarget: Double?
+        /// The chapter the last scrub position fell in, so crossing into
+        /// another one can tick under the finger.
+        @State private var scrubChapter: Int?
 
         var body: some View {
             let position = scrubTarget ?? controller.currentTime
-            VStack(spacing: 2) {
+            VStack(alignment: .leading, spacing: 2) {
+                // Which stretch the playhead or the scrub is in, named: the
+                // segments alone say there is an opening, not where.
+                if let index = PhonePlayerView.chapterIndex(at: position, in: controller.chapters) {
+                    Text(controller.chapters[index].title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                        .padding(.bottom, 2)
+                }
                 Scrubber(
                     value: position,
                     duration: max(controller.duration, 0.001),
                     buffered: controller.bufferedRanges,
                     marks: controller.chapters.map(\.time),
                     onScrub: { value in
+                        let chapter = PhonePlayerView.chapterIndex(at: value, in: controller.chapters)
+                        if scrubTarget != nil, chapter != scrubChapter { AppHaptics.play(.chapterCross) }
+                        scrubChapter = chapter
                         scrubTarget = value
                         controller.isScrubbing = true
                         controller.cancelAutohide()
@@ -887,6 +1161,7 @@ struct PhonePlayerView: View {
                     onCommit: { value in
                         controller.seek(to: value)
                         scrubTarget = nil
+                        scrubChapter = nil
                         controller.isScrubbing = false
                         controller.showControlsBriefly()
                     }
@@ -922,14 +1197,18 @@ struct PhonePlayerView: View {
                         withAnimation(.snappy) { controller.skipPendingWindow() }
                         AppHaptics.play(.transport)
                     } label: {
-                        Text(window.label)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 10)
-                            .background(.white.opacity(0.92), in: Capsule())
-                            .compositingGroup()
+                        HStack(spacing: 8) {
+                            Text(window.label)
+                                .font(.system(size: 14, weight: .semibold))
+                            Image(systemName: "forward.end.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 44)
+                        .playerGlass(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 26)
@@ -1036,11 +1315,11 @@ struct PhonePlayerView: View {
                             case .brightness?:
                                 let value = min(max(dragStartValue - Double(drag.translation.height / geo.size.height) * 1.5, 0), 1)
                                 UIScreen.main.brightness = CGFloat(value)
-                                hud = Hud(symbol: value < 0.35 ? "sun.min" : "sun.max", text: "\(Int(value * 100))%", fraction: value)
+                                hud = Hud(symbol: value < 0.35 ? "sun.min" : "sun.max", text: "\(Int(value * 100))%", fraction: value, edge: .leading)
                             case .volume?:
                                 let value = min(max(dragStartValue - Double(drag.translation.height / geo.size.height) * 1.5, 0), 1)
                                 controller.setVolume(value)
-                                hud = Hud(symbol: value == 0 ? "speaker.slash" : "speaker.wave.2", text: "\(Int(value * 100))%", fraction: value)
+                                hud = Hud(symbol: value == 0 ? "speaker.slash" : "speaker.wave.2", text: "\(Int(value * 100))%", fraction: value, edge: .trailing)
                             case nil:
                                 break
                             }
@@ -1203,11 +1482,8 @@ struct PhonePlayerView: View {
     }
 
     @ViewBuilder
-    private var bufferingIndicator: some View {
+    private var bufferingDetails: some View {
         VStack(spacing: 10) {
-            ProgressView()
-                .progressViewStyle(.circular)
-                .tint(.white)
             // The engine's phase while a resolve is in flight (Next,
             // Previous, a release switch), mpv's percentage otherwise. The
             // seconds count comes in past 2s of resolve: a bare spinner for
@@ -1227,14 +1503,16 @@ struct PhonePlayerView: View {
                         .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
-            } else if let percent = controller.bufferingPercent {
-                Text("\(percent)%")
-                    .sumiTabularMono(size: 12)
-                    .foregroundStyle(.white.opacity(0.8))
             } else if let seconds = controller.resolveElapsedSeconds {
                 Text(PlayerController.withElapsed("Searching indexers", seconds))
                     .sumiTabularMono(size: 12)
                     .foregroundStyle(.white.opacity(0.8))
+            } else {
+                // A bare "0%" under a spinner said nothing about what was
+                // being waited for.
+                Text(controller.bufferingPercent.map { "Buffering \($0)%" } ?? "Buffering")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
             }
             // Not during a resolve: the engine may still hold the torrent
             // being left, whose peers say nothing about the one coming.
@@ -1278,6 +1556,11 @@ struct PhonePlayerView: View {
     /// window, so a slow swarm that is still alive is not nagged, and the
     /// watchdog's own switch gets to happen first while opening.
     static let stallNudgeSeconds = 25
+
+    /// The last chapter starting at or before `time`, nil with no chapters.
+    static func chapterIndex(at time: Double, in chapters: [PlayerChapter]) -> Int? {
+        chapters.lastIndex(where: { $0.time <= time })
+    }
 
     static func timestamp(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }
@@ -1408,28 +1691,30 @@ private struct Scrubber: View {
             let fraction = min(max(value / duration, 0), 1)
             let width = geo.size.width
 
+            let height: CGFloat = isDragging ? 7 : 4
+
             ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.white.opacity(0.28))
-                    .frame(height: isDragging ? 7 : 4)
-                ForEach(Array(buffered.enumerated()), id: \.offset) { _, span in
-                    let x0 = width * min(max(span.start / duration, 0), 1)
-                    let x1 = width * min(max(span.end / duration, 0), 1)
-                    Capsule()
-                        .fill(.white.opacity(0.32))
-                        .frame(width: max(x1 - x0, 0), height: isDragging ? 7 : 4)
-                        .offset(x: x0)
-                }
-                .allowsHitTesting(false)
-                Capsule()
-                    .fill(.white)
-                    .frame(width: width * fraction, height: isDragging ? 7 : 4)
-                ForEach(marks, id: \.self) { mark in
+                // The track splits at chapter starts with a gap, not a dark
+                // tick painted on it: the tick was 55% black, which shows on
+                // the white played part and next to nothing on the dim
+                // unplayed track over a dark frame.
+                ZStack(alignment: .leading) {
                     Rectangle()
-                        .fill(.black.opacity(0.55))
-                        .frame(width: 2, height: isDragging ? 7 : 4)
-                        .offset(x: width * min(max(mark / duration, 0), 1) - 1)
+                        .fill(.white.opacity(0.28))
+                    ForEach(Array(buffered.enumerated()), id: \.offset) { _, span in
+                        let x0 = width * min(max(span.start / duration, 0), 1)
+                        let x1 = width * min(max(span.end / duration, 0), 1)
+                        Rectangle()
+                            .fill(.white.opacity(0.32))
+                            .frame(width: max(x1 - x0, 0))
+                            .offset(x: x0)
+                    }
+                    Rectangle()
+                        .fill(.white)
+                        .frame(width: width * fraction)
                 }
+                .frame(height: height)
+                .mask(SegmentedTrack(cuts: marks.map { min(max($0 / duration, 0), 1) }))
                 .allowsHitTesting(false)
                 Circle()
                     .fill(.white)
@@ -1455,6 +1740,28 @@ private struct Scrubber: View {
     }
 }
 
+/// The scrubber's track cut into one rounded segment per chapter. `cuts`
+/// are fractions of the width; a cut at either end draws no gap.
+private struct SegmentedTrack: Shape {
+    let cuts: [Double]
+    static let gap: CGFloat = 3
+
+    func path(in rect: CGRect) -> Path {
+        let inner = cuts.filter { $0 > 0.005 && $0 < 0.995 }.sorted()
+        let edges = [0.0] + inner + [1.0]
+        var path = Path()
+        for (start, end) in zip(edges, edges.dropFirst()) {
+            let x0 = rect.minX + rect.width * start + (start > 0 ? Self.gap / 2 : 0)
+            let x1 = rect.minX + rect.width * end - (end < 1 ? Self.gap / 2 : 0)
+            guard x1 > x0 else { continue }
+            path.addRoundedRect(
+                in: CGRect(x: x0, y: rect.minY, width: x1 - x0, height: rect.height),
+                cornerSize: CGSize(width: rect.height / 2, height: rect.height / 2))
+        }
+        return path
+    }
+}
+
 /// The system player's transport buttons dip and dim under the finger.
 private struct TransportPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -1475,6 +1782,17 @@ private extension View {
             self.glassEffect(.regular.interactive(), in: shape)
         } else {
             self.background(.black.opacity(0.35), in: shape)
+        }
+    }
+
+    /// The side panel's ground. Not `.interactive()`: that variant answers
+    /// touches, which suits a button, not a surface a finger scrolls.
+    @ViewBuilder
+    func playerPanelGlass(in shape: some Shape) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(.black.opacity(0.6), in: shape)
         }
     }
 }

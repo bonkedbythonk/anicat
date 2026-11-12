@@ -909,6 +909,13 @@ public struct PlayerView: View {
                 controller.seekRelative(by: seconds)
             }
             keyMonitor.start()
+            // Both key monitors stand aside while a text field is first
+            // responder, and the Search field kept that role after a title
+            // was played from its results: Space and the arrows then went
+            // to the field instead of the player.
+            if let window = NSApp.keyWindow, window.firstResponder is NSText {
+                window.makeFirstResponder(nil)
+            }
         }
         #endif
         // The card is where Cancel lives, so it must not arm behind a

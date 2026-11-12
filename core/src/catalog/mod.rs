@@ -38,6 +38,10 @@ const AIRING_MAX_PAGES: i64 = 10;
 /// How many of the viewer's titles seed the "Because you watched" shelf, and
 /// how many recommendations each is asked for.
 const RECOMMENDATION_SEEDS: usize = 6;
+/// Pages of 25 fetched for a cast list or a voice actor's credits: 100 rows.
+/// A busy voice actor runs past 20 pages, and AniList drops to 30 requests a
+/// minute when degraded, so the list is capped rather than walked to the end.
+const CREDIT_PAGES: i64 = 4;
 const RECOMMENDATIONS_PER_SEED: i64 = 12;
 
 /// One episode airing at a known time. A projection rather than the raw
@@ -539,25 +543,36 @@ impl Catalogs {
         &self,
         media_id: i64,
     ) -> Result<Vec<anilist::types::CharacterEdge>, String> {
-        let key = AniListCache::key("get_media_characters", &[("id", &media_id.to_string())]);
+        // `pages=` in the key: entries cached before pagination hold one
+        // 25-row page and would otherwise keep the cast short until expiry.
+        let key = AniListCache::key(
+            "get_media_characters",
+            &[("id", &media_id.to_string()), ("pages", &CREDIT_PAGES.to_string())],
+        );
         if let Some(hit) = self.cache.get(&key) {
             if let Ok(parsed) = serde_json::from_value(hit) {
                 return Ok(parsed);
             }
         }
-        let mut vars = HashMap::new();
-        vars.insert("id".to_string(), serde_json::json!(media_id));
-        vars.insert("page".to_string(), serde_json::json!(1));
-        vars.insert("perPage".to_string(), serde_json::json!(30));
-        let res: anilist::responses::CharacterResponse = self
-            .anilist
-            .execute(anilist::queries::MEDIA_CHARACTERS_QUERY, vars)
-            .await?;
-        let edges = res
-            .media
-            .and_then(|m| m.characters)
-            .and_then(|c| c.edges)
-            .unwrap_or_default();
+        // AniList caps every connection at 25 rows a page whatever perPage
+        // asks for, so the old single request of 30 showed 25 characters of
+        // One Piece's hundreds.
+        let mut edges = Vec::new();
+        for page in 1..=CREDIT_PAGES {
+            let mut vars = HashMap::new();
+            vars.insert("id".to_string(), serde_json::json!(media_id));
+            vars.insert("page".to_string(), serde_json::json!(page));
+            vars.insert("perPage".to_string(), serde_json::json!(25));
+            let res: anilist::responses::CharacterResponse = self
+                .anilist
+                .execute(anilist::queries::MEDIA_CHARACTERS_QUERY, vars)
+                .await?;
+            let Some(conn) = res.media.and_then(|m| m.characters) else { break };
+            edges.extend(conn.edges.unwrap_or_default());
+            if !conn.page_info.and_then(|p| p.has_next_page).unwrap_or(false) {
+                break;
+            }
+        }
         if let Ok(v) = serde_json::to_value(&edges) {
             self.cache.set(key, v, "get_media_characters");
         }
@@ -620,20 +635,53 @@ impl Catalogs {
         &self,
         staff_id: i64,
     ) -> Result<anilist::types::StaffDetailNode, String> {
-        let key = AniListCache::key("staff_detail", &[("id", &staff_id.to_string())]);
+        let key = AniListCache::key(
+            "staff_detail",
+            &[("id", &staff_id.to_string()), ("pages", &CREDIT_PAGES.to_string())],
+        );
         if let Some(hit) = self.cache.get(&key) {
             if let Ok(parsed) = serde_json::from_value(hit) {
                 return Ok(parsed);
             }
         }
-        let mut vars = HashMap::new();
-        vars.insert("id".to_string(), serde_json::json!(staff_id));
-        vars.insert("perPage".to_string(), serde_json::json!(25));
-        let res: anilist::responses::StaffDetailResponse = self
-            .anilist
-            .execute(anilist::queries::STAFF_DETAIL_QUERY, vars)
-            .await?;
-        let staff = res.staff.ok_or_else(|| format!("AniList has no staff member {staff_id}"))?;
+        // One `$page` drives both credit lists; each stops growing once its
+        // own `hasNextPage` is false, and the loop ends when both have.
+        let mut staff: Option<anilist::types::StaffDetailNode> = None;
+        for page in 1..=CREDIT_PAGES {
+            let mut vars = HashMap::new();
+            vars.insert("id".to_string(), serde_json::json!(staff_id));
+            vars.insert("page".to_string(), serde_json::json!(page));
+            vars.insert("perPage".to_string(), serde_json::json!(25));
+            let res: anilist::responses::StaffDetailResponse = self
+                .anilist
+                .execute(anilist::queries::STAFF_DETAIL_QUERY, vars)
+                .await?;
+            let next = res.staff.ok_or_else(|| format!("AniList has no staff member {staff_id}"))?;
+            let more = |c: &Option<anilist::types::MediaConnection>| {
+                c.as_ref().and_then(|c| c.page_info.as_ref()).and_then(|p| p.has_next_page).unwrap_or(false)
+            };
+            let acc = match staff.as_mut() {
+                None => staff.insert(next),
+                Some(acc) => {
+                    for (into, from) in [
+                        (&mut acc.character_media, next.character_media),
+                        (&mut acc.staff_media, next.staff_media),
+                    ] {
+                        let (Some(into), Some(from)) = (into.as_mut(), from) else { continue };
+                        if !into.page_info.as_ref().and_then(|p| p.has_next_page).unwrap_or(false) {
+                            continue;
+                        }
+                        into.edges.get_or_insert_with(Vec::new).extend(from.edges.unwrap_or_default());
+                        into.page_info = from.page_info;
+                    }
+                    acc
+                }
+            };
+            if !more(&acc.character_media) && !more(&acc.staff_media) {
+                break;
+            }
+        }
+        let staff = staff.ok_or_else(|| format!("AniList has no staff member {staff_id}"))?;
         if let Ok(v) = serde_json::to_value(&staff) {
             self.cache.set(key, v, "staff_detail");
         }

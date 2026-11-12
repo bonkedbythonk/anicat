@@ -294,6 +294,7 @@ pub const MEDIA_CHARACTERS_QUERY: &str = r#"
 query ($id: Int, $page: Int, $perPage: Int) {
   Media(id: $id) {
     characters(page: $page, perPage: $perPage, sort: [ROLE, RELEVANCE]) {
+      pageInfo { hasNextPage }
       edges {
         role
         node {
@@ -354,12 +355,13 @@ query ($id: Int, $perPage: Int) {
 /// `staffMedia` is where they held a production role, and a person can be in
 /// both for the same show.
 ///
-/// Sorted newest-first as a filmography. The previous, unshipped version of
-/// this query used POPULARITY_DESC on the grounds that it surfaces what an
-/// actor is known for; the cost of START_DATE_DESC is that announced-but-
-/// unaired titles lead the list. Both lists cap at 25 per page server-side.
+/// Both lists cap at 25 per page server-side, and `staff_detail` stops after
+/// a few pages. Voiced roles are sorted by popularity because of that cap:
+/// newest-first kept only the last year or two of a busy voice actor's work,
+/// and the roles they are known for never reached the page. Production
+/// credits stay newest-first; they are grouped by role, not ranked.
 pub const STAFF_DETAIL_QUERY: &str = r#"
-query ($id: Int, $perPage: Int) {
+query ($id: Int, $page: Int, $perPage: Int) {
   Staff(id: $id) {
     id
     name { full native }
@@ -369,7 +371,8 @@ query ($id: Int, $perPage: Int) {
     primaryOccupations
     homeTown
     favourites
-    characterMedia(perPage: $perPage, sort: [START_DATE_DESC]) {
+    characterMedia(page: $page, perPage: $perPage, sort: [POPULARITY_DESC]) {
+      pageInfo { hasNextPage }
       edges {
         characterRole
         node {
@@ -381,7 +384,8 @@ query ($id: Int, $perPage: Int) {
         characters { id name { full } image { medium large } }
       }
     }
-    staffMedia(perPage: $perPage, sort: [START_DATE_DESC]) {
+    staffMedia(page: $page, perPage: $perPage, sort: [START_DATE_DESC]) {
+      pageInfo { hasNextPage }
       edges {
         staffRole
         node {

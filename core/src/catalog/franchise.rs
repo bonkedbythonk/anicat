@@ -136,6 +136,7 @@ mod tests {
                     })
                     .collect(),
             ),
+            page_info: None,
         });
         item
     }

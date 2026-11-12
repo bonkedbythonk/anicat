@@ -147,6 +147,8 @@ pub struct MediaItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaConnection {
     pub edges: Option<Vec<MediaEdge>>,
+    #[serde(rename = "pageInfo", default, skip_serializing_if = "Option::is_none")]
+    pub page_info: Option<super::responses::PageInfo>,
 }
 
 /// AniList's own `MediaEdge`, which is reused for four different connections:

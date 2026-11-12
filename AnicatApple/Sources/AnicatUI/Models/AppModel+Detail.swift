@@ -434,7 +434,10 @@ extension AppModel {
 
             // Asynchronously load real Cast & Staff and Discussions from AniList if not already populated
             activeDetailExtrasTask?.cancel()
-            let needsCharacters = (cached?.characters.isEmpty ?? true) || self.selectedCharacters.isEmpty
+            // Always asked: the engine's own cache answers a repeat visit
+            // without a request, and skipping it whenever the snapshot had a
+            // cast left every snapshot from before cast pagination at 25.
+            let needsCharacters = true
             let needsDiscussions = (cached?.discussions.isEmpty ?? true) || self.selectedDiscussions.isEmpty
             if needsCharacters || needsDiscussions {
                 activeDetailExtrasTask = Task { [weak self, weak engine] in

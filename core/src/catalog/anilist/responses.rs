@@ -105,6 +105,8 @@ pub struct CharacterWrapper {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterConnection {
     pub edges: Option<Vec<super::types::CharacterEdge>>,
+    #[serde(rename = "pageInfo")]
+    pub page_info: Option<PageInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

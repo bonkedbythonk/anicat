@@ -1123,9 +1123,10 @@ pub struct AnicatEngine {
     lnori: LnoriClient,
     discord: DiscordClient,
     /// Started on the first resolve rather than in the constructor, which is
-    /// sync and so has no runtime to bind a listener on. `OnceCell` rather
-    /// than a flag: two resolves racing must produce one server, not two.
-    stream_port: tokio::sync::OnceCell<u16>,
+    /// sync and so has no runtime to bind a listener on. Behind a lock
+    /// rather than a flag: two resolves racing must produce one server, not
+    /// two, and a dead one is replaced, see `ensure_stream_server`.
+    stream_port: tokio::sync::Mutex<Option<u16>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -1205,7 +1206,7 @@ impl AnicatEngine {
             lnori: LnoriClient::new(http.clone()),
             discord: DiscordClient::new(),
             http,
-            stream_port: tokio::sync::OnceCell::new(),
+            stream_port: tokio::sync::Mutex::new(None),
         }))
     }
 
@@ -1662,7 +1663,14 @@ impl AnicatEngine {
     /// stopped watching, which on a phone is most of the time. Safe to call
     /// while something is playing: the playing torrent is exempt.
     pub async fn purge_stream_cache(&self) -> FfiResult<()> {
-        self.torrents.purge_stream_cache().await;
+        self.torrents.purge_stream_cache(false).await;
+        Ok(())
+    }
+
+    /// The same, for the phone leaving the foreground: the episode last
+    /// played stays, so coming back to it does not start from an empty file.
+    pub async fn purge_stream_cache_for_background(&self) -> FfiResult<()> {
+        self.torrents.purge_stream_cache(true).await;
         Ok(())
     }
 
@@ -4735,11 +4743,32 @@ impl AnicatEngine {
         })
     }
     async fn ensure_stream_server(&self) -> FfiResult<u16> {
-        self.stream_port
-            .get_or_try_init(|| crate::torrent::stream::serve(self.torrents.clone()))
+        let mut slot = self.stream_port.lock().await;
+        if let Some(port) = *slot {
+            // iOS reclaims a suspended app's sockets, listening ones too.
+            // Seen on a phone after a lock: mpv's open of the loopback URL
+            // failed with "Connection refused" on the port reported at
+            // start-up, nothing logged on the server's side, and every play
+            // until a relaunch died the same way. A connect to loopback costs
+            // microseconds, so every resolve checks the server still
+            // answers and binds a new one on a new port when it does not.
+            let answers = tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                tokio::net::TcpStream::connect(("127.0.0.1", port)),
+            )
             .await
-            .copied()
-            .map_err(|msg| AnicatError::Internal { msg })
+            .map(|connected| connected.is_ok())
+            .unwrap_or(false);
+            if answers {
+                return Ok(port);
+            }
+            log::warn!("range server on 127.0.0.1:{port} is not answering; starting a new one");
+        }
+        let port = crate::torrent::stream::serve(self.torrents.clone())
+            .await
+            .map_err(|msg| AnicatError::Internal { msg })?;
+        *slot = Some(port);
+        Ok(port)
     }
 
     /// Cached wrapper around `catalog::anizip::fetch`. Not part of the

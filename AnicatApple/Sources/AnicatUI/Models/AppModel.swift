@@ -519,6 +519,15 @@ public final class AppModel {
     var hasBootstrappedOpening = false
     /// Once per launch: see `preresolveUpNextIfIdle`.
     var hasPreresolvedUpNext = false
+
+    /// The torrent session is dropped when the phone backgrounds idle (its
+    /// sockets do not survive suspension), so the next one is built here, on
+    /// the way back in, rather than on the first Play: a cold DHT took the
+    /// first candidate's 3.5s peer wait with it ("no peers connected").
+    func warmEngineAfterResume() {
+        guard let engine else { return }
+        Task.detached(priority: .utility) { await engine.warmUp() }
+    }
     /// That preresolve while it runs, so a play of the same episode can wait
     /// for it rather than resolve beside it; see `resolveAndPlay`.
     var preresolveInFlight: (catalogId: Int64, episode: Int64, task: Task<Void, Never>)?

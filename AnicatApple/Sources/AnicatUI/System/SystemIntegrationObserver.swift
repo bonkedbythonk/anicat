@@ -52,7 +52,10 @@ public struct SystemIntegrationObserver: View {
                 if phase == .active, let node = BonjourDiscovery.shared.discoveredMacNode {
                     RemoteClient.shared.ensureConnected(to: node)
                 }
-                if phase == .active { model.refreshListsOnForeground() }
+                if phase == .active {
+                    model.refreshListsOnForeground()
+                    model.warmEngineAfterResume()
+                }
                 guard phase == .background else { return }
                 RemoteClient.shared.disconnect()
                 // Not while a download is in flight: the purge evicts every
@@ -65,7 +68,7 @@ public struct SystemIntegrationObserver: View {
                     return false
                 }
                 if !downloading {
-                    Task { await model.purgeStreamCache() }
+                    Task { await model.purgeStreamCacheForBackground() }
                 }
             }
             // A Mac that appears *while* the app is in the foreground -- it

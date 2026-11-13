@@ -19,4 +19,11 @@ public extension AppModel {
         guard let engine else { return }
         try? await engine.purgeStreamCache()
     }
+
+    /// The same when the app leaves the foreground, keeping the episode last
+    /// played so resuming it does not download it again.
+    func purgeStreamCacheForBackground() async {
+        guard let engine else { return }
+        try? await engine.purgeStreamCacheForBackground()
+    }
 }

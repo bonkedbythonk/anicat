@@ -366,7 +366,7 @@ struct PhoneSettingsView: View {
                 }
             }
             .disabled(isPurging || (cacheBytes ?? 0) == 0)
-            Text("Cleared automatically when you leave the app. Whatever is playing is kept.")
+            Text("Cleared automatically when you leave the app, except the episode you played last, so it resumes quickly. Clear now removes that too.")
                 .font(.system(size: 12))
                 .foregroundStyle(SumiTheme.muted)
             Toggle("Smaller downloads", isOn: $smallerDownloads)

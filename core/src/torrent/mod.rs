@@ -389,7 +389,11 @@ pub struct TorrentChoice {
 }
 
 pub struct TorrentManager {
-    session: tokio::sync::OnceCell<Arc<Session>>,
+    /// Not a `OnceCell`: on the phone the session has to be droppable, see
+    /// `purge_stream_cache`. `session_init` keeps two first plays from
+    /// building two.
+    session: std::sync::Mutex<Option<Arc<Session>>>,
+    session_init: tokio::sync::Mutex<()>,
     cache_dir: PathBuf,
     resolved: tokio::sync::Mutex<HashMap<(crate::media::MediaKey, i64), Resolved>>,
     /// The candidate behind each entry of `resolved`, for the host to
@@ -440,6 +444,10 @@ pub struct TorrentManager {
     /// across a binge, each one a permanent extra selected file — the exact
     /// bandwidth leak `SELECTED_FILES_KEPT` exists to stop.
     playing_file: std::sync::Mutex<Option<(usize, usize)>>,
+    /// Directory name of the torrent last played, by name because ids restart
+    /// with a new session. The background purge keeps it, see
+    /// `purge_stream_cache`.
+    last_played_name: std::sync::Mutex<Option<String>>,
     /// Files the cache sweep truncated inside a torrent that stayed in the
     /// session, by torrent. librqbit still counts their pieces as held, so
     /// selecting one again would stream zeros; `try_candidate` reads this and
@@ -633,7 +641,8 @@ impl TorrentManager {
                 .block_on(cleanup_cache(&dir, None, &HashSet::new(), None));
         });
         Self {
-            session: tokio::sync::OnceCell::new(),
+            session: std::sync::Mutex::new(None),
+            session_init: tokio::sync::Mutex::new(()),
             cache_dir,
             resolved: tokio::sync::Mutex::new(HashMap::new()),
             winners: tokio::sync::Mutex::new(HashMap::new()),
@@ -644,6 +653,7 @@ impl TorrentManager {
             selected_files: tokio::sync::Mutex::new(HashMap::new()),
             evicted_files: Default::default(),
             playing_file: std::sync::Mutex::new(None),
+            last_played_name: std::sync::Mutex::new(None),
             download_limit_bps: std::sync::atomic::AtomicU32::new(0),
             downloads: tokio::sync::Mutex::new(HashMap::new()),
             downloading: std::sync::Mutex::new(HashMap::new()),
@@ -713,9 +723,26 @@ impl TorrentManager {
         );
     }
 
+    /// The session if one has been built and not dropped since.
+    fn session_if_ready(&self) -> Option<Arc<Session>> {
+        self.session.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     pub async fn session(&self) -> Result<Arc<Session>, String> {
-        self.session
-            .get_or_try_init(|| async {
+        if let Some(session) = self.session_if_ready() {
+            return Ok(session);
+        }
+        let _init = self.session_init.lock().await;
+        if let Some(session) = self.session_if_ready() {
+            return Ok(session);
+        }
+        let session = self.build_session().await?;
+        *self.session.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());
+        Ok(session)
+    }
+
+    async fn build_session(&self) -> Result<Arc<Session>, String> {
+        async {
                 std::fs::create_dir_all(&self.cache_dir).map_err(|e| e.to_string())?;
                 // Built twice: once normally, once without DHT persistence if
                 // the stored state turns out to be unusable. See below.
@@ -785,9 +812,8 @@ impl TorrentManager {
                             })
                     }
                 }
-            })
-            .await
-            .cloned()
+        }
+        .await
     }
 
     /// A candidate pool from the last `CANDIDATE_CACHE_TTL`, if one was
@@ -959,7 +985,10 @@ impl TorrentManager {
     /// the wrong one for a device that has finished. The playing torrent is
     /// kept because on iOS a background is not a stop: audio can still be
     /// running with the screen off.
-    pub async fn purge_stream_cache(&self) {
+    ///
+    /// `keep_last` is the app leaving the foreground; a button that says
+    /// "Clear" passes false, and the episode last played goes too.
+    pub async fn purge_stream_cache(&self, keep_last: bool) {
         let protected: HashSet<usize> = self
             .playing_file
             .lock()
@@ -968,9 +997,37 @@ impl TorrentManager {
             .into_iter()
             .chain(self.downloading_ids())
             .collect();
-        let session = self.session.get().cloned();
+        let session = self.session_if_ready();
         let pack = self.pack_eviction().await;
-        cleanup_cache_to(&self.cache_dir, session.as_ref(), &protected, Some(pack), 0, false).await;
+        // The episode last played stays. The purge used to take it too once
+        // the player had closed, so coming back to it, which is what a
+        // viewer does, started from an empty file: measured on a phone, a
+        // resume at 10:00 showed its first frame after 108 seconds and about
+        // 70% of the file downloaded, because the container's index at the
+        // end of the file and the resume point both had to arrive first.
+        // One episode is the cost.
+        let keep = {
+            let mut last = self.last_played_name.lock().unwrap_or_else(|e| e.into_inner());
+            if keep_last { last.clone() } else { last.take(); None }
+        };
+        cleanup_cache_to(&self.cache_dir, session.as_ref(), &protected, Some(pack), 0, false, keep.as_deref()).await;
+        // iOS takes a suspended app's UDP sockets away. Seen on a phone after
+        // a 2.5 minute lock: the DHT's framer quit with "Socket is not
+        // connected (os error 57)", and the UDP tracker client's receive loop
+        // (which logs the error and loops, with no backoff) then wrote 415,000
+        // identical lines in a few minutes with a core pinned, stalling the
+        // whole app, while nothing could be discovered any more because the
+        // DHT and the trackers were both dead. The session cannot be given
+        // new sockets, so with nothing playing or downloading it is dropped
+        // here and the next play builds a fresh one (the persisted DHT table
+        // makes that cheap). A playing torrent keeps its session.
+        #[cfg(target_os = "ios")]
+        if protected.is_empty() {
+            let old = self.session.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some(old) = old {
+                let _ = old.stop().await;
+            }
+        }
     }
 
     /// Bytes the stream cache is holding on disk right now.
@@ -989,7 +1046,10 @@ impl TorrentManager {
         };
         *self.playing_file.lock().unwrap_or_else(|e| e.into_inner()) =
             Some((r.torrent_id, r.file_id));
-        let Some(session) = self.session.get().cloned() else { return };
+        let Some(session) = self.session_if_ready() else { return };
+        if let Some(name) = session.get(r.torrent_id.into()).and_then(|handle| handle.name()) {
+            *self.last_played_name.lock().unwrap_or_else(|e| e.into_inner()) = Some(name);
+        }
         self.ensure_selected(&session, r.torrent_id, r.file_id).await;
     }
 
@@ -1009,7 +1069,7 @@ impl TorrentManager {
         else {
             return Vec::new();
         };
-        let Some(session) = self.session.get() else {
+        let Some(session) = self.session_if_ready() else {
             return Vec::new();
         };
         let Some(handle) = session.get(torrent_id.into()) else {
@@ -1056,7 +1116,7 @@ impl TorrentManager {
     /// playback).
     pub fn playing_torrent_stats(&self) -> Option<PlayingTorrentStats> {
         let (torrent_id, file_id) = (*self.playing_file.lock().unwrap_or_else(|e| e.into_inner()))?;
-        let session = self.session.get()?;
+        let session = self.session_if_ready()?;
         let handle = session.get(torrent_id.into())?;
         let stats = handle.stats();
         let file_name = handle
@@ -1745,7 +1805,7 @@ impl TorrentManager {
         // Every caller of this is a real teardown (mpv stopped, mpv exited),
         // so nothing is reading a file here any more.
         self.clear_playing();
-        let Some(session) = self.session.get().cloned() else { return };
+        let Some(session) = self.session_if_ready() else { return };
         let handles = std::sync::Mutex::new(Vec::new());
         session.with_torrents(|it| {
             let mut hs = handles.lock().unwrap();
@@ -1775,7 +1835,7 @@ impl TorrentManager {
     /// next-episode preload until the current episode's download is done, so
     /// the two never compete for bandwidth on a slow connection.
     pub async fn any_download_active(&self) -> bool {
-        let Some(session) = self.session.get().cloned() else { return false };
+        let Some(session) = self.session_if_ready() else { return false };
         let active = std::sync::Mutex::new(false);
         session.with_torrents(|it| {
             let mut a = active.lock().unwrap();
@@ -3168,7 +3228,7 @@ async fn cleanup_cache(
     protected: &HashSet<usize>,
     pack: Option<PackEviction>,
 ) {
-    cleanup_cache_to(dir, session, protected, pack, CACHE_CAP_BYTES, true).await
+    cleanup_cache_to(dir, session, protected, pack, CACHE_CAP_BYTES, true, None).await
 }
 
 /// Lets the sweep reach inside a torrent it has to keep.
@@ -3303,6 +3363,7 @@ async fn cleanup_cache_to(
     pack: Option<PackEviction>,
     cap: u64,
     respect_grace: bool,
+    keep: Option<&str>,
 ) {
     // The scan walks every torrent directory in the cache and stats every file
     // in it, which on a multi-GB cache is real, uninterruptible disk work.
@@ -3355,6 +3416,9 @@ async fn cleanup_cache_to(
             break;
         }
         if respect_grace && mtime > grace_cutoff {
+            continue;
+        }
+        if keep.is_some() && path.file_name().and_then(|n| n.to_str()) == keep {
             continue;
         }
         let matched_id = path
@@ -3554,6 +3618,24 @@ mod tests {
         let pausable = pausable_torrents(&[0, 1, 2, 3], &downloading);
         assert_eq!(pausable, [0, 1, 3].into_iter().collect());
         assert_eq!(pausable_torrents(&[0, 1], &HashSet::new()), [0, 1].into_iter().collect());
+    }
+
+    /// The background purge empties the cache except for the episode last
+    /// played: without it a resume re-downloaded the episode from nothing.
+    #[tokio::test]
+    async fn the_background_purge_keeps_the_episode_last_played() {
+        let dir = std::env::temp_dir().join(format!("anicat-keep-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for name in ["last played", "older one"] {
+            std::fs::create_dir_all(dir.join(name)).unwrap();
+            std::fs::write(dir.join(name).join("episode.mkv"), vec![0u8; 4096]).unwrap();
+        }
+        cleanup_cache_to(&dir, None, &HashSet::new(), None, 0, false, Some("last played")).await;
+        assert!(dir.join("last played").exists());
+        assert!(!dir.join("older one").exists());
+        cleanup_cache_to(&dir, None, &HashSet::new(), None, 0, false, None).await;
+        assert!(!dir.join("last played").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

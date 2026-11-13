@@ -312,7 +312,7 @@ struct StudyTextPanel: View {
                 Text(failure)
                     .font(.system(size: 13))
                     .foregroundColor(SumiTheme.foreground)
-                    .textSelection(.enabled)
+                    .sumiTextSelectable()
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

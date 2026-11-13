@@ -113,7 +113,7 @@ struct StudyReviewView: View {
                         .foregroundColor(SumiTheme.indigo)
                 }
                 .buttonStyle(.sumiPressable)
-                .keyboardShortcut(.space, modifiers: [])
+                .sumiKeyboardShortcut(.space, modifiers: [])
             }
         }
     }

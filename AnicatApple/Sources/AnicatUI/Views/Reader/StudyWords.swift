@@ -187,7 +187,7 @@ struct StudyWordsView: View {
                 Text(text)
                     .font(.system(size: 24, weight: .medium))
                     .foregroundColor(SumiTheme.foreground)
-                    .textSelection(.enabled)
+                    .sumiTextSelectable()
                     .fixedSize(horizontal: false, vertical: true)
                 switch words.state {
                 case .preparing:
@@ -217,7 +217,7 @@ struct StudyWordsView: View {
                 Text(explanation.translation)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
-                    .textSelection(.enabled)
+                    .sumiTextSelectable()
                     .fixedSize(horizontal: false, vertical: true)
                 if explanation.spansBubbles {
                     Text("The sentence runs across more than one bubble.")
@@ -359,7 +359,7 @@ struct StudyWordsView: View {
                         Text(entry.word)
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(SumiTheme.foreground)
-                            .textSelection(.enabled)
+                            .sumiTextSelectable()
                         // The reading, not the spelling: a voice reading the
                         // kanji alone guesses, and 方 comes out かた or ほう.
                         listenButton("Listen to the word", text: entry.reading)

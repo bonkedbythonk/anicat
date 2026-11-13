@@ -11,7 +11,6 @@ pub mod seadex;
 pub mod series;
 pub mod search;
 pub mod stream;
-pub mod verify;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -79,7 +78,6 @@ impl RememberedRelease {
 
     fn to_candidate(&self) -> search::Candidate {
         search::Candidate {
-            anidb_aid: None,
             name: self.name.clone(),
             magnet: self.magnet.clone(),
             torrent_url: self.torrent_url.clone(),
@@ -178,8 +176,6 @@ pub struct ResolveTarget<'a> {
     /// language now asked for. A preference, not a filter: every other
     /// release is tried first and these only when nothing else is left.
     pub lacking_audio: &'a [String],
-    /// This entry's AniDB franchise, for `verify`. `None` skips the check.
-    pub franchise: Option<verify::FranchiseAids>,
 }
 
 /// Drops the releases the player has already found without the audio language
@@ -291,8 +287,6 @@ struct CandidateContext<'a> {
     /// Where this attempt's progress writes go. Not `episode` above, which
     /// is the files' numbering rather than the one the host polls with.
     progress_key: ProgressKey,
-    /// See `ResolveTarget::franchise`.
-    franchise: Option<&'a verify::FranchiseAids>,
     /// Whether a failure here still leaves another release to try. Gates the
     /// pre-buffer's zero-bytes cutoff, which must never skip the only swarm.
     others_remain: bool,
@@ -410,9 +404,6 @@ pub struct TorrentManager {
     /// SeaDex's parsed release list per AniList id — see
     /// `seadex::find_candidates`'s doc comment for why this is cached at all.
     seadex_cache: tokio::sync::Mutex<HashMap<i64, Vec<seadex::SeadexRelease>>>,
-    /// AnimeTosho's AniDB anime per release name, once looked up. A pack
-    /// serves every episode of a season, and each would otherwise ask again.
-    release_aids: std::sync::Mutex<HashMap<String, i64>>,
     /// The merged, sorted indexer pool of a recent search, with the instant it
     /// was produced. Nyaa answers four concurrent queries and starts returning
     /// 429s at eight, and a throttled query doesn't fail — it just yields a
@@ -649,7 +640,6 @@ impl TorrentManager {
             stall_logging: std::sync::Mutex::new(std::collections::HashSet::new()),
             swarm_health: std::sync::Mutex::new(HashMap::new()),
             seadex_cache: tokio::sync::Mutex::new(HashMap::new()),
-            release_aids: std::sync::Mutex::new(HashMap::new()),
             candidate_cache: tokio::sync::Mutex::new(HashMap::new()),
             selected_files: tokio::sync::Mutex::new(HashMap::new()),
             evicted_files: Default::default(),
@@ -925,50 +915,6 @@ impl TorrentManager {
     /// Records a successful candidate as this episode's resolution. Every
     /// success path in `resolve` goes through here so the winner map can
     /// never disagree with the reuse cache.
-    /// Refuses a release AniDB places outside this entry's franchise. Both
-    /// lookups run together and share one budget; anything not known by then
-    /// is let through, see `verify`.
-    async fn verify_candidate(
-        &self,
-        client: &reqwest::Client,
-        cand: &search::Candidate,
-        franchise: &verify::FranchiseAids,
-    ) -> Result<(), String> {
-        let cached = self.release_aids.lock().unwrap_or_else(|e| e.into_inner()).get(&cand.name).copied();
-        let mut rx = franchise.clone();
-        let franchise_wait = async move {
-            rx.wait_for(|v| v.is_some()).await.ok().and_then(|v| v.clone().flatten())
-        };
-        let release_lookup = async {
-            match cached {
-                Some(aid) => Some(aid),
-                None => verify::release_aid(client, cand).await,
-            }
-        };
-        let Ok((set, aid)) = tokio::time::timeout(
-            verify::VERIFY_BUDGET,
-            async { tokio::join!(franchise_wait, release_lookup) },
-        )
-        .await
-        else {
-            log::info!("[verify] no AniDB answer in time for '{}', going by its name", cand.name);
-            return Ok(());
-        };
-        if let Some(aid) = aid {
-            self.release_aids.lock().unwrap_or_else(|e| e.into_inner()).insert(cand.name.clone(), aid);
-        }
-        match verify::judge(aid, set.as_deref()) {
-            verify::Verdict::OtherAnime(other) => {
-                log::warn!("[verify] '{}' is AniDB anime {}, outside this entry's franchise; skipping it", cand.name, other);
-                Err(format!("AniDB lists this release as a different anime ({})", other))
-            }
-            verdict => {
-                log::info!("[verify] '{}': {:?} (release aid {:?})", cand.name, verdict, aid);
-                Ok(())
-            }
-        }
-    }
-
     /// Drops this title's reusable resolutions and cached search pools, so a
     /// rejected release is not handed back from memory.
     pub async fn forget_media(&self, media: crate::media::MediaKey) {
@@ -1219,7 +1165,7 @@ impl TorrentManager {
         target: ResolveTarget<'_>,
         proxy_port: u16,
     ) -> Result<String, String> {
-        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub, prefer_small, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered, rejected, lacking_audio, franchise } = target;
+        let ResolveTarget { media, episode, titles, allow_episodeless, episode_count, aired_episodes, prefer_dub, prefer_small, browser_client, chosen_name, movie, series: series_criteria, entry, sibling_titles, resume_fraction, remembered, rejected, lacking_audio } = target;
         let criteria = search::ReleaseCriteria {
             episode,
             allow_episodeless,
@@ -1371,7 +1317,7 @@ impl TorrentManager {
         if let (Some(rem), None) = (remembered.as_ref(), chosen_name.as_ref()) {
             const REMEMBERED_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
             let cand = rem.to_candidate();
-            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), franchise: franchise.as_ref(), others_remain: true };
+            let ctx = CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), others_remain: true };
             let added = std::sync::Mutex::new(None);
             let attempt = tokio::time::timeout(
                 REMEMBERED_BUDGET,
@@ -1587,7 +1533,7 @@ impl TorrentManager {
             use futures_util::StreamExt;
             let in_flight_cap = if raced { 2 } else { 1 };
             let ctxs: Vec<CandidateContext> = (0..shortlist.len())
-                .map(|index| CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), franchise: franchise.as_ref(), others_remain: index + 1 < tried_total })
+                .map(|index| CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), others_remain: index + 1 < tried_total })
                 .collect();
             let added: Vec<std::sync::Mutex<Option<usize>>> =
                 (0..shortlist.len()).map(|_| std::sync::Mutex::new(None)).collect();
@@ -1688,7 +1634,7 @@ impl TorrentManager {
                     client,
                     &session,
                     cand,
-                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), franchise: franchise.as_ref(), others_remain: index + 1 < tried_total },
+                    &CandidateContext { titles, alts: &alts, hint, episode: file_episode, episode_count, allow_episodeless, resume_fraction, prefer_dub, progress_key: (media, episode), others_remain: index + 1 < tried_total },
                     &std::sync::Mutex::new(None),
                 )
                 .await
@@ -2679,15 +2625,11 @@ impl TorrentManager {
             p.attempt += 1;
             p.bytes_per_second = 0;
         });
-        // Before the AniDB check, which answers Unknown for a release it has
-        // not indexed. Every path comes through here -- the remembered release,
+        // Every path comes through here -- the remembered release,
         // the race and its fallbacks -- so a season-2 release that scored as
         // season 1 cannot be played as episode 1 by any of them.
         if matches!(ctx.hint.kind, layout::EntryKind::Tv) && search::names_another_season(&cand.name, ctx.hint.season) {
             return Err(format!("release states another season than season {}", ctx.hint.season.unwrap_or(0)));
-        }
-        if let Some(franchise) = ctx.franchise {
-            self.verify_candidate(client, cand, franchise).await?;
         }
         // Prefer the .torrent file (instant metadata) over the magnet.
         let torrent_bytes: Option<bytes::Bytes> = if let Some(ref url) = cand.torrent_url {
@@ -3535,10 +3477,6 @@ fn piece_ranges_in_file(
 mod tests {
     use super::*;
 
-    /// The check itself, with AnimeTosho's AniDB id already on the listing so
-    /// no lookup is needed. A Gun Gale Online pack for Sword Art Online II is
-    /// refused; a combined pack carrying the first season's id is not; a
-    /// franchise that could not be established lets everything through.
     /// Torrent 6 of the 2026-10-20 log, sampled every 5s from its own
     /// stall-check lines: (progress MiB, live, dead). Bytes stopped at 20:56:14
     /// and the peers drained; it is dead by 20:56:34, and stays dead through
@@ -3616,29 +3554,6 @@ mod tests {
         let pausable = pausable_torrents(&[0, 1, 2, 3], &downloading);
         assert_eq!(pausable, [0, 1, 3].into_iter().collect());
         assert_eq!(pausable_torrents(&[0, 1], &HashSet::new()), [0, 1].into_iter().collect());
-    }
-
-    #[tokio::test]
-    async fn a_release_from_outside_the_franchise_is_refused_before_it_is_added() {
-        let mgr = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-verify-test"));
-        let client = client();
-        let cand = |aid: i64| search::Candidate {
-            name: format!("release {}", aid),
-            magnet: None,
-            torrent_url: None,
-            seeders: 50,
-            seeders_known: true,
-            size_bytes: None,
-            score: 1000,
-            assume_batch: true,
-            anidb_aid: Some(aid),
-        };
-        let (tx, rx) = tokio::sync::watch::channel(None);
-        tx.send(Some(Some(Arc::new([10376i64, 8692].into_iter().collect())))).unwrap();
-        assert!(mgr.verify_candidate(&client, &cand(13939), &rx).await.is_err());
-        assert!(mgr.verify_candidate(&client, &cand(8692), &rx).await.is_ok());
-        let (_unknown_tx, unknown) = tokio::sync::watch::channel(Some(None));
-        assert!(mgr.verify_candidate(&client, &cand(13939), &unknown).await.is_ok());
     }
 
     #[test]
@@ -3743,7 +3658,6 @@ mod tests {
             },
         };
         let pool = vec![search::Candidate {
-            anidb_aid: None,
             name: "[Group] Some Show - 03 [1080p]".to_string(),
             magnet: None,
             torrent_url: None,
@@ -3833,7 +3747,6 @@ mod tests {
 
     fn candidate(name: &str) -> search::Candidate {
         search::Candidate {
-            anidb_aid: None,
             name: name.to_string(),
             magnet: None,
             torrent_url: None,
@@ -4353,7 +4266,6 @@ mod tests {
                 remembered: None,
                 rejected: &[],
                 lacking_audio: &[],
-                franchise: None,
             },
             13370,
         )
@@ -4406,7 +4318,6 @@ mod tests {
             remembered,
             rejected: &[],
             lacking_audio: &[],
-            franchise: None,
         };
 
         let cold = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-remembered-cold"));
@@ -4823,7 +4734,6 @@ mod tests {
                         remembered: None,
                         rejected: &[],
                         lacking_audio: &[],
-                        franchise: None,
                     },
                     13370,
                 )
@@ -4940,7 +4850,6 @@ mod tests {
                 progress_key: (MediaKey::anilist(1), episode),
                 resume_fraction: None,
                 prefer_dub: false,
-                franchise: None,
                 others_remain: false,
             };
             let resolved = mgr
@@ -5028,7 +4937,6 @@ mod tests {
                 remembered: None,
                 rejected: &[],
                 lacking_audio: &[],
-                franchise: None,
                 },
                 13370,
             )
@@ -5092,7 +5000,6 @@ mod tests {
                     remembered: None,
                     rejected: &[],
                     lacking_audio: &[],
-                    franchise: None,
                 },
                 13370,
             )
@@ -5162,7 +5069,6 @@ mod tests {
                     remembered: None,
                     rejected: &[],
                     lacking_audio: &[],
-                    franchise: None,
                 },
                 13370,
             )
@@ -5238,7 +5144,6 @@ mod tests {
                 remembered: None,
                 rejected: &[],
                 lacking_audio: &[],
-                franchise: None,
         };
 
         let cold_started = std::time::Instant::now();

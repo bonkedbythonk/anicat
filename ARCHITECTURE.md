@@ -167,8 +167,8 @@ lives here, and nothing here knows there is a UI.
   under, and as the fill for a sparse feed (a licensed title keeps only its
   newest simulpub chapters on MangaDex; the rest of the run is merged in
   from MangaKatana, deduplicated by chapter number). Syosetu for web novels.
-- **`torrent/`** — the anime source. Candidates come from three independent
-  indexes fired as one wave (SubsPlease, AnimeTosho, Nyaa RSS) plus SeaDex's
+- **`torrent/`** — the anime source. Candidates come from two independent
+  indexes fired as one wave (SubsPlease, Nyaa RSS) plus SeaDex's
   curated per-entry pick. `layout.rs` decides which file inside a pack is the
   wanted episode and refuses rather than guesses. Downloads run through an
   embedded `librqbit` session into a size-capped LRU cache and are served to

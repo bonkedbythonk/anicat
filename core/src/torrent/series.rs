@@ -285,7 +285,6 @@ fn collect(hits: Vec<KnabenHit>, title_norm: &str, criteria: EpisodeCriteria) ->
             .or_else(|| hit.hash.as_ref().map(|h| super::search::magnet_from_infohash(h)));
         let Some(magnet) = magnet else { continue };
         out.push(Candidate {
-            anidb_aid: None,
             name: hit.title,
             magnet: Some(magnet),
             torrent_url: None,

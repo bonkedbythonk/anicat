@@ -25,16 +25,12 @@ pub struct Candidate {
     /// episode before it will play one of these, so an untagged single-episode
     /// release can't be mistaken for a batch and played as the wrong episode.
     pub assume_batch: bool,
-    /// The AniDB anime AnimeTosho matched this torrent to, when the listing
-    /// came from AnimeTosho and it had one. See `verify`.
-    pub anidb_aid: Option<i64>,
     /// False where the index reports no swarm and `seeders` is a stand-in
-    /// (SubsPlease's API, SeaDex, AnimeTosho before it has scraped a
-    /// tracker). The ranking still needs a number; the release picker must
+    /// (SubsPlease's API, SeaDex). The ranking still needs a number; the release picker must
     /// not print "50 seeders" for a count nobody measured.
     pub seeders_known: bool,
     /// Total size of the torrent in bytes, where the index lists it (Nyaa,
-    /// AnimeTosho, Knaben, apibay). Shown in the release picker; nothing
+    /// Knaben, apibay). Shown in the release picker; nothing
     /// ranks on it.
     pub size_bytes: Option<u64>,
 }
@@ -71,9 +67,7 @@ pub(crate) const TRACKERS: &[&str] = &[
 /// Per-request deadline for an index query (SubsPlease, Nyaa, SeaDex). The
 /// shared client carries only a connect timeout, so a host that accepted the
 /// connection and then went quiet held the whole search wave, and every
-/// resolve behind it, until the kernel gave up on its own. AnimeTosho has a
-/// tighter budget of its own (`TOSHO_TIMEOUT`) because it is raced, not
-/// joined.
+/// resolve behind it, until the kernel gave up on its own.
 pub(crate) const INDEX_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// A title as it should be typed into Nyaa's search box: punctuation dropped,
@@ -489,8 +483,7 @@ fn season_episode(t: &str) -> Option<(u32, u32)> {
 /// an alias in parentheses after the title: "MAO S01E06 ... (Maoyuu Maou
 /// Yuusha, Multi-Subs)" is the 2026 MAO (AniDB 19469) tagged with the 2013
 /// show's name, and it passed as that show for three episodes in a row.
-/// AnimeTosho had not indexed the newest releases, so the AniDB check in
-/// `verify` said Unknown and the name decided.
+/// No AniDB answer existed for the newest releases, so the name decided.
 ///
 /// Deliberately narrow: only the no-bracket naming with an `SxxEyy` token,
 /// where the words before it are the release's own title. A `[Group] A ~ B
@@ -1219,7 +1212,7 @@ const DEAD_SWARM_PENALTY: i64 = 350;
 const TRUSTED_BONUS: i64 = 100;
 
 /// A magnet's v1 infohash as lowercase hex, whichever of the two encodings
-/// it was written in: Nyaa and AnimeTosho write 40 hex digits, SubsPlease
+/// it was written in: Nyaa writes 40 hex digits, SubsPlease
 /// 32 base32 characters.
 pub(crate) fn magnet_infohash(magnet: &str) -> Option<String> {
     let start = magnet.find("xt=urn:btih:")? + "xt=urn:btih:".len();
@@ -1598,7 +1591,6 @@ async fn search_subsplease(
             if d.get("res").and_then(|v| v.as_str()) == Some("1080") {
                 if let Some(magnet) = d.get("magnet").and_then(|v| v.as_str()) {
                     out.push(Candidate {
-                        anidb_aid: None,
                         name: format!("[SubsPlease] {} - {} (1080p)", show, ep_str),
                         magnet: Some(magnet.to_string()),
                         torrent_url: None,
@@ -1613,173 +1605,6 @@ async fn search_subsplease(
                 }
             }
         }
-    }
-    out
-}
-
-/// AnimeTosho's `title` is its own rewritten, metadata-enriched name
-/// ("[EMBER] Frieren: Beyond Journey's End S02E05 [1080p] ..."), while
-/// `torrent_name` is the release's real name, which is what Nyaa lists and
-/// what the in-torrent layout matcher expects. Neither is strictly better:
-/// the rewritten title often carries the English series name that the raw
-/// release name never does (so it matches an AniList `english` title the
-/// Nyaa listing would miss), while the raw name is the one that dedupes
-/// against Nyaa and that `layout::select` reasons about. Score both and keep
-/// whichever wins, so `name`, `score` and `assume_batch` always describe the
-/// same string.
-fn better_scored_name(
-    title: &str,
-    torrent_name: &str,
-    query_title_norm: &str,
-    alts: &[String],
-    siblings: &SiblingTitles<'_>,
-    criteria: ReleaseCriteria,
-) -> Option<(String, i64, bool)> {
-    let mut best: Option<(String, i64, bool)> = None;
-    for cand in [torrent_name, title] {
-        if cand.is_empty() {
-            continue;
-        }
-        if let Some((score, assume_batch)) =
-            score_release(cand, query_title_norm, alts, siblings, criteria)
-        {
-            if best.as_ref().is_none_or(|(_, best_score, _)| score > *best_score) {
-                best = Some((cand.to_string(), score, assume_batch));
-            }
-        }
-    }
-    best
-}
-
-/// Drop a trailing container extension from a release name. AnimeTosho's
-/// `torrent_name` for a single-file torrent is the file itself
-/// ("[ASW] Show - 05.mkv"); Nyaa lists the same release without it, and an
-/// unstripped "mkv" token survives `normalize` and defeats the dedupe that
-/// merges the two listings of one release.
-fn strip_container_ext(name: &str) -> &str {
-    for ext in [".mkv", ".mp4", ".avi", ".webm", ".ts", ".m4v", ".mov"] {
-        if let Some(stripped) = name.strip_suffix(ext) {
-            return stripped;
-        }
-    }
-    name
-}
-
-/// AnimeTosho mirrors Nyaa (and AniDex/Tosho's own uploads) behind a plain
-/// JSON feed with no rate limiting, and every entry carries a direct
-/// `.torrent` URL — so a hit here skips both the RSS parse and the DHT
-/// metadata round-trip a magnet would cost. It answers a whole query in one
-/// request where Nyaa needs a throttled round of three, which is why it runs
-/// ahead of Nyaa rather than alongside it.
-async fn search_animetosho(
-    client: &reqwest::Client,
-    query: &str,
-    query_title_norm: &str,
-    alts: &[String],
-    siblings: &SiblingTitles<'_>,
-    criteria: ReleaseCriteria,
-) -> Vec<Candidate> {
-    let mut out = vec![];
-    let url = format!(
-        "https://animetosho.org/feed/json?q={}&only_tor=1",
-        urlencoding_encode(query)
-    );
-    let mut items: Vec<Value> = Vec::new();
-    for attempt in 0..=1 {
-        // Tightly bounded, and deliberately tighter than a request timeout
-        // usually is. AnimeTosho serves one query at a time per client, so two
-        // fired together queue: the second cannot start until the first
-        // finishes, and a fruitful query takes ~2.4s against the live feed.
-        // Everything here runs concurrently with a Nyaa round that answers in
-        // about a second and covers the same releases, so a query still
-        // waiting at three seconds has already stopped being the fast index
-        // and become the reason the play is slow. Dropping it costs the extra
-        // candidates it would have added; keeping it costs the whole wave.
-        const TOSHO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
-        let request = client
-            .get(&url)
-            .header("User-Agent", concat!("Anicat/", env!("CARGO_PKG_VERSION")))
-            .timeout(TOSHO_TIMEOUT);
-        match request.send().await {
-            Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt == 0 => {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                continue;
-            }
-            Ok(r) if !r.status().is_success() => {
-                log::warn!("torrent: animetosho returned HTTP {} for '{}'", r.status(), query);
-                return out;
-            }
-            Ok(r) => {
-                match r.json::<Vec<Value>>().await {
-                    Ok(j) => items = j,
-                    // Distinguished from an empty feed on purpose: both reach
-                    // the caller as "no candidates", and only one of them is
-                    // a reason to look at this function.
-                    Err(e) => log::warn!(
-                        "torrent: animetosho response for '{}' did not parse as a list: {}",
-                        query, e
-                    ),
-                }
-                break;
-            }
-            Err(e) if e.is_timeout() => {
-                // Expected often enough not to be a warning: the budget below
-                // is deliberately shorter than this feed's slow path, and a
-                // dropped query costs extra candidates, never the play.
-                log::info!("torrent: animetosho gave up on '{}' at its timeout", query);
-                return out;
-            }
-            Err(e) => {
-                log::warn!("torrent: animetosho search failed for '{}': {}", query, e);
-                return out;
-            }
-        }
-    }
-    for item in items {
-        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or_default();
-        let torrent_name = item
-            .get("torrent_name")
-            .and_then(|v| v.as_str())
-            .map(strip_container_ext)
-            .unwrap_or_default();
-        if title.is_empty() && torrent_name.is_empty() {
-            continue;
-        }
-        // `seeders` is null for entries AnimeTosho has not managed to scrape a
-        // tracker for yet -- which says nothing about the swarm. Treating that
-        // as zero dropped the entry outright (the `< 2` gate below); treat it
-        // as unknown instead and let it in at the dead-swarm penalty, which is
-        // where an unverifiable swarm belongs.
-        let seeders_known = item.get("seeders").and_then(|v| v.as_u64());
-        let seeders = seeders_known.unwrap_or(0);
-        if seeders_known.is_some() && seeders < 2 {
-            continue;
-        }
-        let Some((name, mut score, assume_batch)) = better_scored_name(
-            title, torrent_name, query_title_norm, alts, siblings, criteria,
-        ) else {
-            continue;
-        };
-        score += seeder_score(seeders);
-        if seeders < LOW_SEEDER_THRESHOLD {
-            score -= DEAD_SWARM_PENALTY;
-        }
-        let torrent_url = item.get("torrent_url").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let magnet_uri = item.get("magnet_uri").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let info_hash = item.get("info_hash").and_then(|v| v.as_str());
-        let magnet = magnet_uri.or_else(|| info_hash.map(magnet_from_infohash));
-
-        out.push(Candidate {
-            name,
-            magnet,
-            torrent_url,
-            seeders,
-            seeders_known: seeders_known.is_some(),
-            size_bytes: item.get("total_size").and_then(|v| v.as_u64()),
-            score,
-            assume_batch,
-            anidb_aid: item.get("anidb_aid").and_then(|v| v.as_i64()),
-        });
     }
     out
 }
@@ -1877,7 +1702,6 @@ async fn search_nyaa(
             Some(magnet_from_infohash(&infohash))
         };
         out.push(Candidate {
-            anidb_aid: None,
             name,
             magnet,
             torrent_url: if torrent_url.is_empty() { None } else { Some(torrent_url) },
@@ -2095,39 +1919,8 @@ async fn search_pool(
     const MAX_CONCURRENT_NYAA_QUERIES: usize = 4;
     debug_assert!(rounds.iter().all(|r| r.len() <= MAX_CONCURRENT_NYAA_QUERIES));
 
-    // The first two title variants only. `expanded` lists each variant
-    // immediately followed by its own short form, so two entries already cover
-    // both the long AniList spelling and the short one releases actually use
-    // -- which is the pair that matters, since a show whose romaji is a
-    // 130-character light-novel sentence is indexed under the short form
-    // alone.
-    //
-    // Kept to two because AnimeTosho serves one query at a time per client:
-    // measured against the live feed, four fired together answered at 0.04s,
-    // 2.5s, 4.9s and 7.3s -- a clean ~2.4s queue, not parallelism. Two is what
-    // fits inside the Nyaa round running alongside it.
-    let tosho_queries: Vec<(String, String)> = expanded
-        .iter()
-        .take(2)
-        .map(|title| {
-            let norm = normalize(title);
-            let q_title = search_query_form(title);
-            let q = if criteria.allow_episodeless {
-                format!("{} 1080p", q_title)
-            } else {
-                // One episode spelling, unlike Nyaa's two: AnimeTosho
-                // tokenizes "S02E05" so a bare "05" matches it as well as a
-                // "- 05" release (verified against the live feed), and its
-                // one-at-a-time serving makes a second query cost a full
-                // round-trip for releases the first already returned.
-                format!("{} {:02}", q_title, episode)
-            };
-            (q, norm)
-        })
-        .collect();
-
-    // One wave across three independent hosts rather than three phases. These
-    // were run one after another -- SubsPlease, then AnimeTosho, then Nyaa --
+    // One wave across both hosts rather than two phases. These were run one
+    // after another -- SubsPlease, then AnimeTosho (since retired), then Nyaa --
     // with each phase's result deciding whether the next ran, which on a cold
     // play meant paying all three round-trips end to end before the first
     // candidate could be tried. Nothing about SubsPlease's answer changes what
@@ -2142,11 +1935,6 @@ async fn search_pool(
             .iter()
             .map(|title| search_subsplease(client, title, alts, episode, prefer_dub)),
     );
-    let tosho_all = futures_util::future::join_all(
-        tosho_queries
-            .iter()
-            .map(|(q, norm)| search_animetosho(client, q, norm, alts, siblings, criteria)),
-    );
     let nyaa_first = async {
         match rounds.first() {
             Some(queries) => {
@@ -2160,49 +1948,13 @@ async fn search_pool(
             None => vec![],
         }
     };
-    // AnimeTosho enriches the pool but is never allowed to be the reason a
-    // play is slow, so it is raced against the other two hosts rather than
-    // joined with them: once SubsPlease and the first Nyaa round are in, it
-    // gets a short grace period and is then abandoned mid-flight. It serves
-    // one query at a time per client and throttles hard under repeated use --
-    // measured against the live feed, the same query answered in 0.04s cold
-    // and still hadn't answered three seconds later once the feed had decided
-    // to queue us. Joining it would have handed that queue straight to the
-    // user as startup latency, for an index the other two already cover.
-    const TOSHO_GRACE: std::time::Duration = std::time::Duration::from_millis(600);
-    let others = async { tokio::join!(subs_all, nyaa_first) };
-    tokio::pin!(others);
-    tokio::pin!(tosho_all);
-    let mut tosho_batches: Vec<Vec<Candidate>> = Vec::new();
-    let mut tosho_pending = true;
-    let (subs_batches, nyaa_batches) = loop {
-        tokio::select! {
-            done = &mut others => break done,
-            batches = &mut tosho_all, if tosho_pending => {
-                tosho_batches = batches;
-                tosho_pending = false;
-            }
-        }
-    };
-    if tosho_pending {
-        match tokio::time::timeout(TOSHO_GRACE, tosho_all).await {
-            Ok(batches) => tosho_batches = batches,
-            Err(_) => log::info!(
-                "[resolve] animetosho abandoned after {:?} of grace; using the other indexes",
-                TOSHO_GRACE
-            ),
-        }
-    }
-    for batch in subs_batches
-        .into_iter()
-        .chain(tosho_batches)
-        .chain(nyaa_batches)
-    {
+    let (subs_batches, nyaa_batches) = tokio::join!(subs_all, nyaa_first);
+    for batch in subs_batches.into_iter().chain(nyaa_batches) {
         all.extend(batch);
     }
     let first_wave_ms = first_wave.elapsed().as_millis();
     // Merged before counting, not after: the same release listed by both Nyaa
-    // and AnimeTosho is one candidate, and counting it twice is how a pool
+    // and SubsPlease is one candidate, and counting it twice is how a pool
     // holding a single usable release satisfies a threshold that exists to
     // guarantee fallbacks.
     all = merge_duplicates(all);
@@ -2232,7 +1984,7 @@ async fn search_pool(
         all = merge_duplicates(all);
     }
     // The two halves cost very different things: the first wave is one
-    // round-trip against three hosts at once, while the rest is Nyaa alone,
+    // round-trip against both hosts at once, while the rest is Nyaa alone,
     // throttled into chunks of four. Separated because the fix for a slow one
     // is not the fix for a slow other -- fewer title variants versus a
     // different concurrency cap.
@@ -2416,14 +2168,14 @@ async fn stated_episodes(
 
 /// Collapse the several listings of one release into one candidate.
 ///
-/// AnimeTosho mirrors most of Nyaa, so the same release routinely arrives
-/// from both -- and the two listings are not interchangeable. Their seeder
-/// counts come from separate tracker scrapes, and Nyaa's own `trusted` flag
-/// adds a bonus AnimeTosho's copy never gets, so the scores differ and a
+/// Nyaa, SubsPlease and SeaDex often list the same release -- and the
+/// listings are not interchangeable. Their seeder counts come from separate
+/// sources, and Nyaa's own `trusted` flag adds a bonus the other copies never
+/// get, so the scores differ and a
 /// score-ordered `retain` would keep whichever copy happened to win and throw
 /// away whatever the other one knew. Keep the best score, the best-known
 /// swarm, and any direct `.torrent` URL either of them had -- that last one
-/// is the whole reason to prefer a mirrored listing, since it skips the DHT
+/// is the reason to keep it whichever listing carried it, since it skips the DHT
 /// metadata round-trip a magnet costs on the play path.
 ///
 /// Listings are matched by infohash first and by name second. SubsPlease's
@@ -2467,9 +2219,6 @@ fn merge_duplicates(candidates: Vec<Candidate>) -> Vec<Candidate> {
                 }
                 if kept.magnet.is_none() {
                     kept.magnet = c.magnet;
-                }
-                if kept.anidb_aid.is_none() {
-                    kept.anidb_aid = c.anidb_aid;
                 }
                 // Only one of the two listings needs to have named the episode
                 // for the pair to stop being a guess.
@@ -2628,7 +2377,6 @@ mod tests {
 
     fn candidate(score: i64, seeders: u64, assume_batch: bool) -> Candidate {
         Candidate {
-            anidb_aid: None,
             name: "release".into(),
             magnet: None,
             torrent_url: None,
@@ -2781,7 +2529,6 @@ mod tests {
     #[test]
     fn one_release_listed_by_two_indexes_keeps_what_each_of_them_knew() {
         let from_tosho = Candidate {
-            anidb_aid: None,
             name: "[ASW] Some Show - 05 [1080p]".into(),
             magnet: Some("magnet:?xt=urn:btih:abc".into()),
             torrent_url: Some("https://storage.animetosho.org/torrent/abc.torrent".into()),
@@ -2796,7 +2543,6 @@ mod tests {
         // different swarm -- so a score-ordered dedupe would keep this one and
         // throw the `.torrent` URL away with the other.
         let from_nyaa = Candidate {
-            anidb_aid: None,
             name: "[ASW] Some Show - 05 [1080p]".into(),
             magnet: Some("magnet:?xt=urn:btih:abc".into()),
             torrent_url: None,
@@ -3002,17 +2748,6 @@ mod tests {
         // Still counts as a dub for someone who asked for one.
         assert!(is_dub_release(&normalize("[Yameii] Some Show - 05 [English Dub]")));
         assert!(is_dub_release(&normalize("[EMBER] Some Show S01E05 [Dual Audio]")));
-    }
-
-    /// AnimeTosho lists a single-file torrent's `torrent_name` as the file
-    /// itself; Nyaa lists the same release without the extension, and an
-    /// unstripped "mkv" token survives `normalize` and defeats the merge.
-    #[test]
-    fn a_release_and_its_filename_are_the_same_release() {
-        assert_eq!(
-            normalize(strip_container_ext("[ASW] Some Show - 05 [1080p].mkv")),
-            normalize("[ASW] Some Show - 05 [1080p]")
-        );
     }
 
     #[test]

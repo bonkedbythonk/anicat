@@ -282,7 +282,6 @@ fn collect(rows: Vec<ApibayRow>, title_norm: &str, criteria: MovieCriteria, requ
             continue;
         }
         out.push(Candidate {
-            anidb_aid: None,
             magnet: Some(magnet_for(&row.info_hash, &row.name)),
             torrent_url: None,
             size_bytes: row.size.parse().ok(),
@@ -353,7 +352,6 @@ fn collect_knaben(
         let magnet = hit.magnet_url.or_else(|| hit.hash.as_ref().map(|h| magnet_from_infohash(h)));
         let Some(magnet) = magnet else { continue };
         out.push(Candidate {
-            anidb_aid: None,
             magnet: Some(magnet),
             torrent_url: None,
             name: hit.title,

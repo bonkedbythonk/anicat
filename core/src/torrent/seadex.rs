@@ -208,7 +208,6 @@ pub(crate) async fn find_candidates(
             score += SEADEX_BEST_BONUS;
         }
         out.push(Candidate {
-            anidb_aid: None,
             name: format!("[SeaDex{}] {}", if rel.is_best { " Best" } else { "" }, rel.group),
             magnet: Some(magnet_from_infohash(&rel.info_hash)),
             torrent_url: rel.torrent_url.clone(),

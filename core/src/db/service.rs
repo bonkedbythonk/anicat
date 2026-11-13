@@ -37,7 +37,7 @@ pub struct ExportedRelease {
 
 /// Hosts a `.torrent` file can come from: the ones `torrent/search.rs` and
 /// `seadex.rs` build a link on.
-const TORRENT_HOSTS: [&str; 3] = ["nyaa.si", "animetosho.org", "subsplease.org"];
+const TORRENT_HOSTS: [&str; 2] = ["nyaa.si", "subsplease.org"];
 
 /// Whether a release that arrived from another device may be stored.
 ///
@@ -973,32 +973,6 @@ impl Registry {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
-    /// `Some(mapping)` when a fresh enough answer is stored (the mapping itself
-    /// may be `None`: AniDB has no such entry), `None` when it has to be
-    /// fetched.
-    pub fn anidb_id(&self, anilist_id: i64) -> Result<Option<Option<i64>>, String> {
-        let conn = self.lock()?;
-        conn.query_row(
-            "SELECT anidb_id FROM anidb_ids WHERE anilist_id = ?1
-               AND (anidb_id IS NOT NULL OR fetched_at > datetime('now', '-7 days'))",
-            params![anilist_id],
-            |r| r.get::<_, Option<i64>>(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())
-    }
-
-    pub fn set_anidb_id(&self, anilist_id: i64, anidb_id: Option<i64>) -> Result<(), String> {
-        let conn = self.lock()?;
-        conn.execute(
-            "INSERT INTO anidb_ids (anilist_id, anidb_id, fetched_at) VALUES (?1, ?2, datetime('now'))
-             ON CONFLICT(anilist_id) DO UPDATE SET anidb_id = excluded.anidb_id, fetched_at = excluded.fetched_at",
-            params![anilist_id, anidb_id],
-        )
-        .map(|_| ())
-        .map_err(|e| e.to_string())
-    }
-
     pub fn remembered_release(
         &self,
         catalog: Catalog,
@@ -1319,7 +1293,7 @@ mod tests {
 
         let mut sub = exported("sub", "2026-09-09 12:00:00");
         sub.episode_number = 99;
-        sub.torrent_url = Some("https://storage.animetosho.org/torrent/abc.torrent".into());
+        sub.torrent_url = Some("https://www.subsplease.org/torrent/abc.torrent".into());
         assert_eq!(db.import_resolved_releases(&[sub]).unwrap(), 1);
 
         let mut not_a_magnet = exported("scheme", "2026-09-09 12:00:00");
@@ -1658,16 +1632,6 @@ mod tests {
         assert!(db.audio_misses(Catalog::Anilist, 20594, true).unwrap().is_empty());
         // The fast path no longer replays it for the dub preference.
         assert_eq!(db.remembered_release(Catalog::Anilist, 15583, 3).unwrap(), None);
-    }
-
-    #[test]
-    fn anidb_ids_round_trip_including_no_mapping() {
-        let db = Registry::open_in_memory().unwrap();
-        assert_eq!(db.anidb_id(20594).unwrap(), None);
-        db.set_anidb_id(20594, Some(10376)).unwrap();
-        db.set_anidb_id(1, None).unwrap();
-        assert_eq!(db.anidb_id(20594).unwrap(), Some(Some(10376)));
-        assert_eq!(db.anidb_id(1).unwrap(), Some(None));
     }
 
     #[test]

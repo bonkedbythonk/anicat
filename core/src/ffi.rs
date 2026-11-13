@@ -1467,9 +1467,6 @@ impl AnicatEngine {
             .registry
             .audio_misses(media.catalog, media.id, req.prefer_dub)
             .unwrap_or_default();
-        // Started now and read by each candidate as it is tried, so the AniDB
-        // lookups overlap the search instead of adding to it.
-        let franchise = self.franchise_aids(req.catalog_id);
 
         if !req.preload {
             self.torrents.release_pin_for_evicted(media, req.episode).await;
@@ -1502,7 +1499,6 @@ impl AnicatEngine {
                     remembered,
                     rejected: &rejected,
                     lacking_audio: &lacking,
-                    franchise: Some(franchise),
                 },
                 port,
             )
@@ -2563,7 +2559,6 @@ impl AnicatEngine {
                     remembered: None,
                     rejected: &[],
                     lacking_audio: &[],
-                    franchise: None,
                 },
             )
             .await;
@@ -2662,7 +2657,6 @@ impl AnicatEngine {
                     remembered: None,
                     rejected: &[],
                     lacking_audio: &[],
-                    franchise: None,
                 },
                 port,
             )
@@ -4346,75 +4340,6 @@ fn push_child_comments(
 }
 
 impl AnicatEngine {
-    /// This entry's AniDB franchise: its own AniDB id and those of every
-    /// entry reachable through prequel/sequel/parent/side-story links. Built
-    /// in the background; see `verify::FranchiseAids`.
-    fn franchise_aids(&self, anilist_id: i64) -> crate::torrent::verify::FranchiseAids {
-        use crate::torrent::verify;
-        let (tx, rx) = tokio::sync::watch::channel(None);
-        let http = self.http.clone();
-        let catalogs = self.catalogs.clone();
-        let registry = self.registry.clone();
-        tokio::spawn(async move {
-            // Bounded: a long franchise is a dozen seasons and films, and the
-            // AniList detail fetches are cached, so this is cheap after once.
-            const MAX_ENTRIES: usize = 24;
-            let mut ids = vec![anilist_id];
-            let mut next = 0;
-            while next < ids.len() && ids.len() < MAX_ENTRIES {
-                let id = ids[next];
-                next += 1;
-                let Ok(detail) = catalogs.media_detail(id, false).await else { continue };
-                let Some(media) = detail.media else { continue };
-                for edge in media.relations.and_then(|r| r.edges).unwrap_or_default() {
-                    let Some(relation) = edge.relation_type.as_deref() else { continue };
-                    let Some(node) = edge.node else { continue };
-                    if !verify::is_chain_relation(relation)
-                        || matches!(node.format.as_deref(), Some("MANGA") | Some("NOVEL") | Some("ONE_SHOT"))
-                        || ids.contains(&node.id)
-                    {
-                        continue;
-                    }
-                    ids.push(node.id);
-                }
-            }
-            let lookups = ids.iter().map(|&id| {
-                let http = http.clone();
-                let registry = registry.clone();
-                async move {
-                    if let Ok(Some(stored)) = registry.anidb_id(id) {
-                        return (id, stored);
-                    }
-                    match verify::anidb_for_anilist(&http, id).await {
-                        Ok(found) => {
-                            let _ = registry.set_anidb_id(id, found);
-                            (id, found)
-                        }
-                        Err(e) => {
-                            log::warn!("[verify] AniDB mapping for AniList {} unavailable: {}", id, e);
-                            (id, None)
-                        }
-                    }
-                }
-            });
-            let found = futures_util::future::join_all(lookups).await;
-            // Without this entry's own id there is nothing to judge against:
-            // a set of only its sequels would refuse its own releases.
-            let own = found.iter().find(|(id, _)| *id == anilist_id).and_then(|(_, aid)| *aid);
-            let set = own.map(|_| {
-                std::sync::Arc::new(found.iter().filter_map(|(_, aid)| *aid).collect::<std::collections::HashSet<i64>>())
-            });
-            log::info!(
-                "[verify] AniList {} franchise: {} entries, AniDB ids {:?}",
-                anilist_id,
-                ids.len(),
-                set.as_ref().map(|s| { let mut v: Vec<_> = s.iter().copied().collect(); v.sort(); v })
-            );
-            let _ = tx.send(Some(set));
-        });
-        rx
-    }
-
     /// Records a download once it lands, whatever the UI is doing.
     ///
     /// Polls the same status the episode row polls, at the same interval, and
@@ -4512,7 +4437,6 @@ impl AnicatEngine {
                     remembered,
                     rejected: &[],
                     lacking_audio: &[],
-                    franchise: None,
                 },
                 port,
             )

@@ -132,7 +132,13 @@ final class CastEncoder: @unchecked Sendable {
         // A filter graph mpv cannot build only says "no audio or video data
         // played" at the end; the reason is in its warnings.
         mpv_request_log_messages(mpv, "warn")
-        var args: [UnsafePointer<CChar>?] = ["loadfile", job.url].map { UnsafePointer(strdup($0)) }
+        // The closure's parameter type is spelled out: CI's compiler took the
+        // array literal for `[UnsafePointer<CChar>?]` from the declared type
+        // and refused both strings ("cannot convert value of type 'String'"),
+        // while the local one inferred it. AudioExtractor builds it the same way.
+        var args: [UnsafePointer<CChar>?] = ["loadfile", job.url].map { (arg: String) -> UnsafePointer<CChar>? in
+            UnsafePointer(strdup(arg))
+        }
         args.append(nil)
         defer { args.forEach { $0.map { free(UnsafeMutableRawPointer(mutating: $0)) } } }
         guard args.withUnsafeMutableBufferPointer({ mpv_command(mpv, $0.baseAddress) }) >= 0 else { return }

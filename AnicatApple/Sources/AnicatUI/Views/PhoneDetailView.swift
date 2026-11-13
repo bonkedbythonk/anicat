@@ -204,7 +204,9 @@ struct PhoneDetailView: View {
                 Label(details?.isFavourite == true ? "Remove from favourites" : "Add to favourites",
                       systemImage: details?.isFavourite == true ? "heart.fill" : "heart")
             }
-            if let details {
+            // Not for Films & TV: `details.id` is a TMDB id there, and the
+            // AniList address built below opened an unrelated title or a 404.
+            if let details, model.appMode != .cinema {
                 // The AniList page, which is the one address everyone can
                 // open; the app's own `anicat://` link means nothing to
                 // someone without it.
@@ -427,7 +429,7 @@ struct PhoneDetailView: View {
                         model.playGuardedByCellular { play(episode.number) }
                     } label: {
                         HStack(spacing: 0) {
-                            EpisodeRow(episode: episode)
+                            EpisodeRow(episode: episode, resumeSeconds: resumeSeconds(for: episode.number))
                             downloadGlyph(model.downloadStates[episode.number])
                         }
                     }
@@ -512,8 +514,18 @@ struct PhoneDetailView: View {
         let aired = model.selectedEpisodes.filter(\.isAired)
         if let first = aired.first {
             let next = aired.first { !$0.isWatched }
-            let target = next ?? first
+            // The episode with a recorded position wins over the first
+            // unwatched one, as on the Mac: the engine only keeps a position
+            // for an episode that was left part way, and the button has to
+            // say so or the phone looks like it forgot where the viewer was.
+            let resumed = model.selectedMediaDetails?.resumeEpisode.flatMap { number in
+                aired.first { $0.number == number }
+            }
+            let target = resumed ?? next ?? first
             let label: String = {
+                if let seconds = resumeSeconds(for: target.number) {
+                    return "Resume Ep \(target.number)  \(MediaDetailView.clock(seconds))"
+                }
                 if aired.count == 1 { return "Play" }
                 if next == nil { return "Watch again from Ep \(first.number)" }
                 if target.number == first.number, (target.progressPercent ?? 0) == 0 { return "Start watching Ep \(target.number)" }
@@ -529,6 +541,15 @@ struct PhoneDetailView: View {
             .sumiPrimaryButton()
             .controlSize(.large)
         }
+    }
+
+    /// The stored position for `number`, only when it is the episode the
+    /// engine kept one for.
+    private func resumeSeconds(for number: Int) -> Int? {
+        guard let details = model.selectedMediaDetails,
+              details.resumeEpisode == number,
+              let seconds = details.resumeSeconds, seconds > 0 else { return nil }
+        return seconds
     }
 
     @ViewBuilder
@@ -994,6 +1015,7 @@ struct PhoneDetailView: View {
 
     private struct EpisodeRow: View {
         let episode: MediaDetailView.EpisodeItem
+        var resumeSeconds: Int? = nil
 
         var body: some View {
             HStack(spacing: 12) {
@@ -1027,7 +1049,11 @@ struct PhoneDetailView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if let runtime = episode.runtimeMinutes {
-                        Text("\(runtime) min")
+                        Text(resumeSeconds.map { "\(runtime) min  ·  Resume \(MediaDetailView.clock($0))" } ?? "\(runtime) min")
+                            .font(.system(size: 12)).monospacedDigit()
+                            .foregroundStyle(SumiTheme.muted)
+                    } else if let resumeSeconds {
+                        Text("Resume \(MediaDetailView.clock(resumeSeconds))")
                             .font(.system(size: 12)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                     }

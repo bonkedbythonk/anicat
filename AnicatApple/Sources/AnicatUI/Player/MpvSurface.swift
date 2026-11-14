@@ -815,6 +815,16 @@ public struct MpvSurface {
                     Task { @MainActor in completion(rows) }
                 }
             }
+            controller.onFetchSmoothFrame = { [weak self] completion in
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let tag = self.flatMap { s in s.withHandle { h -> String? in
+                        guard let c = mpv_get_property_string(h, "vf-metadata/smooth/lavfi.smooth_vt.frame") else { return nil }
+                        defer { mpv_free(c) }
+                        return String(cString: c)
+                    } } ?? nil
+                    Task { @MainActor in completion(tag) }
+                }
+            }
             controller.onSelectAudioTrack = { [weak self] id in
                 self?.selectAudioTrack(id: id)
             }

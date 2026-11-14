@@ -1,13 +1,13 @@
 {
-  "originHash" : "66ec2a92b11968566d7dd5d39f50b6ad5e78e1b843d7e86eefd4f3fc24960cab",
+  "originHash" : "a0cf526ec57d58e122134e3673f4ad1e24c97af215c2381985319fcd979264e6",
   "pins" : [
     {
       "identity" : "mpvkit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/bonkedbythonk/MPVKit.git",
       "state" : {
-        "revision" : "2ddd86ac2dad2486173c0eaffabb911e54ce7867",
-        "version" : "1.0.0-anicat.2"
+        "revision" : "d95bf9a81479674c2190de5fa4c7e27d979c0bc6",
+        "version" : "1.0.0-anicat.3"
       }
     }
   ],

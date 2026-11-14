@@ -44,7 +44,7 @@ let package = Package(
         // build its chain and an episode plays in silence. The fork differs
         // by the filter allow-list and a rebuilt Libavfilter-GPL; the
         // packaging script refuses a bundle that has no loudnorm.
-        .package(url: "https://github.com/bonkedbythonk/MPVKit.git", exact: "1.0.0-anicat.2")
+        .package(url: "https://github.com/bonkedbythonk/MPVKit.git", exact: "1.0.0-anicat.3")
     ],
     targets: [
         .binaryTarget(

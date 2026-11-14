@@ -660,6 +660,15 @@ public struct PlayerView: View {
                         .allowsHitTesting(false)
                 }
 
+                if controller.showsSmoothReadout {
+                    // In the black band above the picture: over the picture it
+                    // could barely be read.
+                    SmoothReadout(controller: controller, hover: chromeHover)
+                        .position(x: videoRect.midX, y: topGap / 2)
+                        .allowsHitTesting(false)
+                        .zIndex(1)   // above the top bar's own backing, which is drawn after it
+                }
+
                 // Top/bottom chrome, `topGap`/`bottomGap` tall. Where that
                 // is natural letterbox the background is the same black the
                 // picture is already framed in; where it exceeds the gap
@@ -1637,6 +1646,23 @@ public struct PlayerView: View {
 
             subtitleLookSection
 
+            if PlayerController.smoothMotionSupported {
+                Button {
+                    controller.showsSmoothReadout.toggle()
+                } label: {
+                    HStack {
+                        Text("Frame generation readout")
+                        Spacer()
+                        Text(controller.showsSmoothReadout ? "On" : "Off")
+                            .foregroundColor(controller.showsSmoothReadout ? SumiTheme.indigo : SumiTheme.muted)
+                    }
+                    .font(.system(size: 11))
+                    .foregroundColor(SumiTheme.muted)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+            }
+
             if controller.titleTrackMemory != nil {
                 Button {
                     controller.forgetTrackMemory()
@@ -2197,5 +2223,40 @@ private struct ChromeNameSlot: View {
         .lineLimit(1)
         .transition(.opacity)
         .animation(.snappy(duration: 0.15), value: hover.name)
+    }
+}
+
+/// The frame generation readout. Its own view polling on its own clock, so the
+/// player's view tree is not re-evaluated ten times a second. mpv reports the
+/// last frame through the filter, which runs a few frames ahead of the screen.
+private struct SmoothReadout: View {
+    let controller: PlayerController
+    let hover: ChromeHoverState
+    @State private var tag: String?
+
+    var body: some View {
+        // The band's centre is also where button names and on/off messages
+        // show; the readout steps aside for them.
+        Text(label)
+            .font(.system(size: 12, weight: .medium).monospacedDigit())
+            .foregroundColor(tag == "generated" ? SumiTheme.indigo : PlayerChrome.foreground)
+            .fixedSize()
+            .opacity(hover.name == nil && controller.hudFlash == nil ? 1 : 0)
+            .task {
+                while !Task.isCancelled {
+                    controller.onFetchSmoothFrame? { tag = $0 }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            }
+    }
+
+    private var label: String {
+        guard controller.isSmoothMotionActive else { return "Frame generation: off" }
+        switch tag {
+        case "generated": return "Frame generation: generated frame"
+        case "original": return "Frame generation: original frame"
+        case "starting": return "Frame generation: starting"
+        default: return "Frame generation: not running"
+        }
     }
 }

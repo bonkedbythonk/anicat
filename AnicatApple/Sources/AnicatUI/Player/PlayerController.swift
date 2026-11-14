@@ -298,6 +298,12 @@ public final class PlayerController {
     /// `anicat_frame_interpolation`, off unless the viewer turns it on.
     public var isInterpolationEnabled: Bool = UserDefaults.standard.bool(forKey: "anicat_frame_interpolation")
 
+    /// `anicat_smooth_readout`: a line on the video naming what `smooth_vt` last let
+    /// through, a generated frame or the original drawing. Toggled in Info and options.
+    public var showsSmoothReadout: Bool = UserDefaults.standard.bool(forKey: "anicat_smooth_readout") {
+        didSet { UserDefaults.standard.set(showsSmoothReadout, forKey: "anicat_smooth_readout") }
+    }
+
     /// VideoToolbox's frame-rate conversion and optical flow, which `smooth_vt` runs on:
     /// macOS 26 and Apple silicon. The Mac player is the only one offering it.
     /// The linked FFmpeg must carry the filter too: against a libavfilter without it,
@@ -723,6 +729,8 @@ public final class PlayerController {
     /// Decoder, cache and frame-drop readings for the stream details panel.
     /// Off the main thread for the same reason as `onFetchTracks`.
     public var onFetchMpvDetails: (@Sendable (_ completion: @escaping @Sendable @MainActor ([StreamDetailRow]) -> Void) -> Void)?
+    /// The filter's tag on the last frame it output, for the readout.
+    public var onFetchSmoothFrame: (@Sendable (_ completion: @escaping @Sendable @MainActor (String?) -> Void) -> Void)?
     /// The playing torrent's swarm, set by `AppModel` (this module's
     /// controller does not see the engine's types).
     public var onFetchTorrentDetails: (@Sendable (_ completion: @escaping @Sendable @MainActor ([StreamDetailRow]) -> Void) -> Void)?

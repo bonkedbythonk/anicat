@@ -36,6 +36,8 @@ public struct TVRootView: View {
     /// switching tabs must not read as a dismissal on the tab being left.
     @State private var detailOwner: Tab?
     @Environment(\.scenePhase) private var scenePhase
+    // Observed so a skin picked in Settings recolours the tab words now.
+    @State private var store = ThemeStore.shared
 
     public var body: some View {
         ZStack {
@@ -165,6 +167,8 @@ public struct TVRootView: View {
         // listener held across that is not one to trust, so the TV stops
         // announcing itself on the way out and starts again on the way back.
         // A suspended TV cannot be reached either way.
+        // Every skin and its light side is its own palette id.
+        .onChange(of: store.palette.id) { _, _ in TVTabBarStyle.apply() }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: BonjourDiscovery.shared.stopAdvertising()
@@ -202,6 +206,14 @@ enum TVMetrics {
     static let gutter: CGFloat = 80
     static let shelfSpacing: CGFloat = 40
     static let rowSpacing: CGFloat = 56
+    /// Between a focusable card and the title under it. The focus lift grows
+    /// the card past its frame, and at 12pt it covered the first line of the
+    /// title it was lifting.
+    static let cardTitleGap: CGFloat = 28
+    /// What a card shows until its picture arrives. `SumiTheme.card` is
+    /// #0B0A09 on OLED, which on a true-black ground is no card at all: a row
+    /// with one image still loading read as a gap.
+    static var placeholder: Color { SumiTheme.foreground.opacity(0.08) }
 }
 
 // MARK: - Mode toggle
@@ -216,7 +228,9 @@ private struct ModeToggle: View {
             // Words, as on the Mac and the phone: the chosen one in the
             // foreground colour, the other muted. The stock segmented
             // control read as a box floating over the hero.
-            HStack(spacing: 8) {
+            // Room for tvOS's focus platter, which grows past the word and
+            // at 8pt covered the one beside it.
+            HStack(spacing: 28) {
                 word("Anime", .anime)
                 Text("/")
                     .font(.system(size: 28))
@@ -227,11 +241,26 @@ private struct ModeToggle: View {
     }
 
     private func word(_ title: String, _ mode: AppModel.AppMode) -> some View {
-        let isOn = model.appMode == mode
-        return Button(title) { model.setAppMode(mode) }
-            .buttonStyle(.borderless)
-            .font(.system(size: 28, weight: isOn ? .semibold : .regular))
-            .foregroundStyle(isOn ? SumiTheme.foreground : SumiTheme.muted)
+        Button { model.setAppMode(mode) } label: {
+            Word(title: title, isOn: model.appMode == mode)
+        }
+        // `.plain`: tvOS lifts it onto a white platter under focus.
+        // `.borderless` drew nothing, so the switch worked blind, and a
+        // custom style took the words out of the focus engine altogether.
+        .buttonStyle(.plain)
+    }
+
+    /// Dark on the white focus platter: the light word vanished on it.
+    private struct Word: View {
+        let title: String
+        let isOn: Bool
+        @Environment(\.isFocused) private var isFocused
+
+        var body: some View {
+            Text(title)
+                .font(.system(size: 28, weight: isOn ? .semibold : .regular))
+                .foregroundStyle(isFocused ? Color.black : (isOn ? SumiTheme.foreground : SumiTheme.muted))
+        }
     }
 }
 
@@ -240,15 +269,18 @@ private struct TabHeader: View {
     var model: AppModel?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        // The switch under the title, on the left, as over the anime hero.
+        // At the far right of the title row no press reached it, up from
+        // the shelves or down from the tab bar.
+        VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.sumiHeading(size: 46, weight: .bold))
                 .foregroundStyle(SumiTheme.foreground)
-            Spacer(minLength: 40)
             if let model {
                 ModeToggle(model: model)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, TVMetrics.gutter)
         .padding(.top, 8)
     }
@@ -512,7 +544,7 @@ private struct ContinueWatchingShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: TVMetrics.shelfSpacing) {
                     ForEach(model.upNextItems) { entry in
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: TVMetrics.cardTitleGap) {
                             Button {
                                 if entry.unit == "CH" {
                                     onOpen(entry.id, entry.title, entry.thumbnailURL, true)
@@ -530,7 +562,7 @@ private struct ContinueWatchingShelf: View {
                                     CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 800) { image in
                                         image.resizable().aspectRatio(contentMode: .fill)
                                     } placeholder: {
-                                        SumiTheme.card
+                                        TVMetrics.placeholder
                                     }
                                     .frame(width: TVMetrics.thumbWidth, height: TVMetrics.thumbHeight)
                                     .clipped()
@@ -582,12 +614,12 @@ private struct NewEpisodesShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: TVMetrics.shelfSpacing) {
                     ForEach(entries) { entry in
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: TVMetrics.cardTitleGap) {
                             Button { onOpen(entry) } label: {
                                 CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 600) { image in
                                     image.resizable().aspectRatio(contentMode: .fill)
                                 } placeholder: {
-                                    SumiTheme.card
+                                    TVMetrics.placeholder
                                 }
                                 .frame(width: TVMetrics.posterWidth, height: TVMetrics.posterHeight)
                                 .clipped()
@@ -659,19 +691,20 @@ struct TVPosterCard: View {
         if let score = item.score, score > 0 {
             parts.append(String(format: "%.1f", Double(score) / 10))
         }
-        if let total = item.totalEpisodesOrChapters, total > 0 {
+        // A film's one "episode" is not a count worth showing ("1 eps").
+        if item.catalog != .tmdbMovie, let total = item.totalEpisodesOrChapters, total > 0 {
             parts.append("\(total) \(item.isManga ? "ch" : "eps")")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: TVMetrics.cardTitleGap) {
             Button { onOpen(item) } label: {
                 CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 600) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    SumiTheme.card
+                    TVMetrics.placeholder
                 }
                 .frame(width: TVMetrics.posterWidth, height: TVMetrics.posterHeight)
                 .clipped()

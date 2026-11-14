@@ -290,10 +290,12 @@ struct TVDetailView: View {
             )
         }
 
-        if !model.selectedRelations.isEmpty {
+        if model.selectedRelations.contains(where: { !AppModel.isMangaFormat($0.format) }) {
             TVPosterShelf(
                 title: "Related",
-                items: model.selectedRelations.map {
+                // Not the manga and novels: the TV has no reader, and opening
+                // one led to a page with nothing to play.
+                items: model.selectedRelations.filter { !AppModel.isMangaFormat($0.format) }.map {
                     MediaCard.Item(id: $0.id, title: $0.title, coverImageURL: $0.coverURL)
                 },
                 onOpen: { item in
@@ -404,7 +406,7 @@ struct TVDetailView: View {
                     CachedAsyncImage(url: details.coverURL, maxPixelSize: 600) { image in
                         image.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
-                        SumiTheme.card
+                        TVMetrics.placeholder
                     }
                     .frame(width: 200, height: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -448,13 +450,13 @@ struct TVDetailView: View {
         let onToggleWatched: () -> Void
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: TVMetrics.cardTitleGap) {
                 Button(action: onPlay) {
                     ZStack(alignment: .bottomLeading) {
                         CachedAsyncImage(url: episode.thumbnailURL, maxPixelSize: 800) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
-                            SumiTheme.card
+                            TVMetrics.placeholder
                         }
                         .frame(width: TVMetrics.thumbWidth, height: TVMetrics.thumbHeight)
                         .clipped()

@@ -209,12 +209,22 @@ struct TVSettingsView: View {
 
     // MARK: Playback
 
+    // Each choice is a full-width row that opens a menu in place, like the
+    // switches beside it. A Form picker's default pushes a page of choices,
+    // and inside this two-column layout that page came up empty and black:
+    // no theme, audio or time could be picked. Menu-style pickers worked but
+    // drew a floating value pill on an otherwise plain row.
+
     @ViewBuilder
     private var playback: some View {
         TVSection("Playback") {
-            Picker("Audio", selection: $subDub) {
-                Text("Subbed").tag("Subbed")
-                Text("Dubbed").tag("Dubbed")
+            Menu {
+                Picker("Audio", selection: $subDub) {
+                    Text("Subbed").tag("Subbed")
+                    Text("Dubbed").tag("Dubbed")
+                }
+            } label: {
+                LabeledContent("Audio", value: subDub)
             }
             Toggle("Skip intros and outros automatically", isOn: $autoSkip)
                 .onChange(of: autoSkip) { _, on in
@@ -254,27 +264,39 @@ struct TVSettingsView: View {
     @ViewBuilder
     private var appearance: some View {
         TVSection("Appearance") {
-            Picker("Theme", selection: Binding(
-                get: { store.skin },
-                set: { store.select($0) }
-            )) {
-                ForEach(SumiSkin.allCases, id: \.self) { skin in
-                    Text(skin.displayName).tag(skin)
-                }
-            }
-            if store.skin.hasLight {
-                Picker("Appearance", selection: Binding(
-                    get: { store.appearance },
+            Menu {
+                Picker("Theme", selection: Binding(
+                    get: { store.skin },
                     set: { store.select($0) }
                 )) {
-                    ForEach(AnicatAppearance.allCases, id: \.self) { appearance in
-                        Text(appearance.displayName).tag(appearance)
+                    ForEach(SumiSkin.allCases, id: \.self) { skin in
+                        Text(skin.displayName).tag(skin)
                     }
                 }
+            } label: {
+                LabeledContent("Theme", value: store.skin.displayName)
             }
-            Picker("Time", selection: $timeFormat) {
-                Text("24-hour").tag("24-hour")
-                Text("12-hour").tag("12-hour")
+            if store.skin.hasLight {
+                Menu {
+                    Picker("Appearance", selection: Binding(
+                        get: { store.appearance },
+                        set: { store.select($0) }
+                    )) {
+                        ForEach(AnicatAppearance.allCases, id: \.self) { appearance in
+                            Text(appearance.displayName).tag(appearance)
+                        }
+                    }
+                } label: {
+                    LabeledContent("Appearance", value: store.appearance.displayName)
+                }
+            }
+            Menu {
+                Picker("Time", selection: $timeFormat) {
+                    Text("24-hour").tag("24-hour")
+                    Text("12-hour").tag("12-hour")
+                }
+            } label: {
+                LabeledContent("Time", value: timeFormat)
             }
         }
     }

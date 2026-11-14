@@ -92,7 +92,15 @@ struct TVBackdrop: View {
         }
         .ignoresSafeArea()
         .task(id: source) {
-            guard let source else { return }
+            // Cleared, not kept: Films & TV passes none, and the last anime
+            // banner stayed behind the film rows.
+            guard let source else {
+                withAnimation(.sumi(.page)) {
+                    shown = nil
+                    glow = nil
+                }
+                return
+            }
             if shown != nil {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
@@ -174,8 +182,9 @@ struct TVShowcaseHero: View {
 /// and for hiding itself as the shelves scroll.
 ///
 /// Set through `UITabBar.appearance()` because SwiftUI's `TabView` has no
-/// such styling on tvOS. Read once, when the root is built: a skin chosen
-/// later recolours the words on the next launch.
+/// such styling on tvOS. The proxy only styles bars made after it is set,
+/// so a skin picked in Settings left the words in the old colours until
+/// the next launch; the bar already on screen is restyled directly too.
 @MainActor
 enum TVTabBarStyle {
     static func apply() {
@@ -190,6 +199,16 @@ enum TVTabBarStyle {
             layout.focused.titleTextAttributes = [.foregroundColor: UIColor.black, .font: font]
         }
         UITabBar.appearance().standardAppearance = appearance
+        for scene in UIApplication.shared.connectedScenes {
+            for window in (scene as? UIWindowScene)?.windows ?? [] {
+                tabBars(in: window).forEach { $0.standardAppearance = appearance }
+            }
+        }
+    }
+
+    private static func tabBars(in view: UIView) -> [UITabBar] {
+        if let bar = view as? UITabBar { return [bar] }
+        return view.subviews.flatMap(tabBars(in:))
     }
 }
 

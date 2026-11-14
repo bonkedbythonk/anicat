@@ -842,7 +842,12 @@ extension AppModel {
         async let profileTask = engine.viewerProfile()
 
         let trending = (try? await trendingTask) ?? []
-        var watching = (try? await watchingTask) ?? []
+        // A failed request is not an empty list. Read as one, a rate-limited
+        // AniList (429 after a few relaunches) emptied Up Next and the TV's
+        // Continue watching hero fell back to Trending; the last list stays.
+        var watching: [MediaSummary] = []
+        var watchingFailed = false
+        do { watching = try await watchingTask } catch { watchingFailed = true }
         let rewatching = (try? await rewatchingTask) ?? []
         let planning = (try? await planningTask) ?? []
         var profile = try? await profileTask
@@ -856,13 +861,15 @@ extension AppModel {
         }
         isSignedIn = profile != nil
         viewer = profile
-        watchingItems = watching.map(Self.card)
-        // Rewatches join the queue, not the Watching shelf: they have a next
-        // episode to play like any current show, and were otherwise reachable
-        // only from Library > Rewatching.
-        let currentIds = Set(watching.map(\.catalogId))
-        watchingSummaries = watching + rewatching.filter { !currentIds.contains($0.catalogId) }
-        rebuildUpNext()
+        if !watchingFailed {
+            watchingItems = watching.map(Self.card)
+            // Rewatches join the queue, not the Watching shelf: they have a next
+            // episode to play like any current show, and were otherwise reachable
+            // only from Library > Rewatching.
+            let currentIds = Set(watching.map(\.catalogId))
+            watchingSummaries = watching + rewatching.filter { !currentIds.contains($0.catalogId) }
+            rebuildUpNext()
+        }
 
         // Only shows AniList actually has an airing time for. A show with no
         // `nextAiringEpisode` is not on the schedule; it is finished, or

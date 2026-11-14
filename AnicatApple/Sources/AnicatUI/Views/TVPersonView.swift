@@ -22,10 +22,10 @@ struct TVPersonView: View {
         switch model.personPageStack.last {
         case .character:
             guard let c = model.loadedCharacter else { return nil }
-            return c.appearances.flatMap(\.voiceActors).first?.id ?? c.appearances.first?.catalogId
+            return c.appearances.flatMap(\.voiceActors).first?.id ?? Self.watchable(c.appearances).first?.catalogId
         case .staff:
             guard let s = model.loadedStaff else { return nil }
-            return s.characterCredits.first?.characters.first?.id ?? s.mediaCredits.first?.catalogId
+            return s.characterCredits.first?.characters.first?.id ?? Self.watchable(s.mediaCredits).first?.catalogId
         case .studio:
             return model.loadedStudio?.media.first?.catalogId
         default:
@@ -55,7 +55,7 @@ struct TVPersonView: View {
                         .padding(.top, 300)
                 }
             }
-            .padding(.vertical, 80)
+            .padding(.vertical, 40)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollClipDisabled()
@@ -95,9 +95,10 @@ struct TVPersonView: View {
             }
         }
 
-        if !c.appearances.isEmpty {
+        let appearances = Self.watchable(c.appearances)
+        if !appearances.isEmpty {
             row("Appears in") {
-                ForEach(c.appearances, id: \.catalogId) { a in
+                ForEach(appearances, id: \.catalogId) { a in
                     TVPersonCard(
                         imageURL: a.coverImage,
                         title: a.title,
@@ -111,6 +112,16 @@ struct TVPersonView: View {
                 }
             }
         }
+    }
+
+    /// Anime only: the TV has no reader, so a manga here opened a page with
+    /// nothing to play.
+    private static func watchable(_ items: [FfiCharacterAppearance]) -> [FfiCharacterAppearance] {
+        items.filter { $0.mediaType != "MANGA" }
+    }
+
+    private static func watchable(_ items: [FfiStaffMediaCredit]) -> [FfiStaffMediaCredit] {
+        items.filter { $0.mediaType != "MANGA" }
     }
 
     private static func unique(_ actors: [FfiVoiceActor]) -> [FfiVoiceActor] {
@@ -145,9 +156,10 @@ struct TVPersonView: View {
             }
         }
 
-        if !s.mediaCredits.isEmpty {
+        let work = Self.watchable(s.mediaCredits)
+        if !work.isEmpty {
             row("Staff work") {
-                ForEach(s.mediaCredits, id: \.catalogId) { m in
+                ForEach(work, id: \.catalogId) { m in
                     TVPersonCard(imageURL: m.coverImage, title: m.title, subtitle: m.staffRole, focus: roles.isEmpty ? $focused : nil, focusID: m.catalogId) {
                         model.openTitleFromPersonPage(id: m.catalogId, title: m.title, coverURL: URL(string: m.coverImage), isManga: m.mediaType == "MANGA")
                     }
@@ -186,9 +198,12 @@ struct TVPersonView: View {
             CachedAsyncImage(url: imageURL.flatMap(URL.init(string:)), maxPixelSize: 600) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                SumiTheme.card
+                TVMetrics.placeholder
             }
-            .frame(width: 300, height: 450)
+            // Small enough that the first row fits under it on a 1080pt
+            // screen. At 300x450 focus landing on the first card scrolled the
+            // page, and the name the viewer came for went off the top.
+            .frame(width: 200, height: 300)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 14) {
@@ -211,7 +226,7 @@ struct TVPersonView: View {
                         .font(.system(size: 24))
                         .lineSpacing(6)
                         .foregroundStyle(SumiTheme.foreground.opacity(0.85))
-                        .lineLimit(8)
+                        .lineLimit(4)
                         .frame(maxWidth: 1200, alignment: .leading)
                         .padding(.top, 10)
                 }
@@ -261,12 +276,12 @@ struct TVPersonCard: View {
     let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: TVMetrics.cardTitleGap) {
             focusable(Button(action: action) {
                 CachedAsyncImage(url: imageURL.flatMap(URL.init(string:)), maxPixelSize: 600) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    SumiTheme.card
+                    TVMetrics.placeholder
                 }
                 .frame(width: TVMetrics.posterWidth, height: TVMetrics.posterHeight)
                 .clipped()

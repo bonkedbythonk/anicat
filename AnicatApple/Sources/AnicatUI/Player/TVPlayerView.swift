@@ -371,6 +371,13 @@ struct TVPlayerView: View {
             // A submenu with its name and current value: inline, tvOS
             // listed every choice under one another with no heading.
             .pickerStyle(.menu)
+            // Auto-skip is on by default, and while it is the Skip pill never
+            // shows: the intro just goes. Here so it can be turned off for one
+            // show's opening without leaving the episode for Settings.
+            Toggle("Skip intros automatically", isOn: Binding(
+                get: { controller.autoSkipEnabled },
+                set: { on in if on != controller.autoSkipEnabled { controller.toggleAutoSkip() } }
+            ))
             if !controller.chapters.isEmpty {
                 Menu {
                     ForEach(controller.chapters) { chapter in

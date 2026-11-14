@@ -357,7 +357,7 @@ struct PlayerBottomBar: View {
                 // it sits beside upscaling.
                 if PlayerController.smoothMotionSupported {
                     Button(action: { controller.toggleSmoothMotion() }) {
-                        Image(systemName: "film.stack")
+                        Image(anicat: "film.stack")
                         .font(.system(size: 14))
                         .foregroundColor(controller.isInterpolationEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
                         .frame(width: 40, height: 40)

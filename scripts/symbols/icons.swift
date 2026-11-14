@@ -121,6 +121,8 @@ icons["rectangle.stack"] = [.s(tabP(3, 9.5, 18, 10.5, 3.5)), .s(P("M5 6.5H19")),
 icons["square.stack.3d.up"] = [.s(P("M12 4L18.4 7.2V8.8L12 12L4 8Z")), .s(P("M4 12L12 16L20 12")), .s(P("M4 16L12 20L20 16"))]
 icons["square.stack.3d.up.slash"] = icons["square.stack.3d.up"]! + [.x(P(slash)), .s(P(slash))]
 icons["list.and.film"] = [.s(tabP(3, 5, 8.5, 14, 2.5)), .s(P("M3 9.5H5.5M3 14.5H5.5")), .s(P("M15 7H21M15 12H21M15 17H21"))]
+// Smooth motion (owner's pick A): a frame gliding right, its trail behind it.
+icons["film.stack"] = [.s(tabP(8.5, 6, 12.5, 12, 3.5)), .s(P("M5.5 8.5V15.5")), .s(P("M2.5 10.5V13.5"))]
 icons["hourglass"] = [.s(P("M6 3.5H18M6 20.5H18")), .s(P("M7.5 3.5V6Q7.5 9 12 12Q16.5 15 16.5 18V20.5")), .s(P("M16.5 3.5V6Q16.5 9 12 12Q7.5 15 7.5 18V20.5"))]
 
 // MARK: Navigation and common

@@ -549,6 +549,21 @@ extension AppModel {
                 }
             }
 
+            // Anime ids in one request first. One `mediaDetail` per id cost
+            // twelve of AniList's 30-a-minute requests at a phone launch, on
+            // top of the home shelves and lists; the first detail page opened
+            // after that sat out a 57 s 429 cooldown. An id missing from the
+            // answer (a manga, an adult entry) is not "gone": it falls through
+            // to the per-id lookup below, which can tell.
+            if !preferManga, !unresolved.isEmpty,
+               let facts = try? await engine.mediaFacts(catalogIds: Array(unresolved.prefix(50))) {
+                for fact in facts {
+                    titles[fact.media.catalogId] = fact.media.title
+                    if let cover = URL(string: fact.media.coverImage) { covers[fact.media.catalogId] = cover }
+                }
+                unresolved.removeAll { titles[$0] != nil }
+            }
+
             // Four at a time rather than the whole pass at once: twenty
             // concurrent requests is the same burst `titleLookupsPerPass`
             // exists to keep off the client, just compressed into one moment.

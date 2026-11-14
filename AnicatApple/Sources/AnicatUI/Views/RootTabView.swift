@@ -27,6 +27,8 @@ public struct RootTabView: View {
     }
 
     @State private var showProfile = false
+    /// How far the person page has been dragged off by its left-edge swipe.
+    @State private var personSwipe: CGFloat = 0
     /// The Mac the open remote is driving, captured when it is opened rather
     /// than read live: `discoveredMacNode` goes nil the moment the Mac
     /// sleeps or leaves the Wi-Fi, and a cover bound to it snapped shut.
@@ -148,6 +150,29 @@ public struct RootTabView: View {
                 PersonPageView(model: model)
                     .id(page.id)
                     .background(SumiTheme.background.ignoresSafeArea())
+                    // A layer of this ZStack, not a navigation push, so the
+                    // system's edge swipe belongs to the detail page's stack
+                    // underneath and never reached the character on top.
+                    // A strip rather than a gesture on the page: a drag
+                    // recogniser over the whole page would claim the vertical
+                    // scroll and the sideways appearance shelves too.
+                    .overlay(alignment: .leading) {
+                        Color.clear
+                            .frame(width: 20)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 10)
+                                    .onChanged { personSwipe = max(0, $0.translation.width) }
+                                    .onEnded { value in
+                                        if value.translation.width > 100 || value.predictedEndTranslation.width > 250 {
+                                            model.closePersonPage()
+                                        }
+                                        withAnimation(.sumi(.page)) { personSwipe = 0 }
+                                    }
+                            )
+                            .ignoresSafeArea()
+                    }
+                    .offset(x: personSwipe)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                     .zIndex(34)
             }

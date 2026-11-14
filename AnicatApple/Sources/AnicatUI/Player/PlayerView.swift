@@ -48,7 +48,7 @@ public struct PlayerView: View {
     public let onCancelResolve: () -> Void
     @State private var showInfoMenu = false
     /// The chrome control under the pointer; see `ChromeName`.
-    @State private var chromeHover: ChromeName?
+    @State private var chromeHover = ChromeHoverState()
     @State private var isMiniHovered = false
     /// The skip window whose pill has timed out. A pill left up for a whole
     /// ninety-second opening sat over the picture the viewer had chosen to
@@ -707,7 +707,7 @@ public struct PlayerView: View {
 
                     Group {
                         if chromeShown {
-                            PlayerBottomBar(controller: controller, chromeHover: $chromeHover, showsHairline: geometry.bottomOverlay == 0 && !glowActive).padding(.horizontal, SumiTheme.spaceLg)
+                            PlayerBottomBar(controller: controller, chromeHover: chromeHover, showsHairline: geometry.bottomOverlay == 0 && !glowActive).padding(.horizontal, SumiTheme.spaceLg)
                                 .chromeLegibility()
                                 .transition(barTransition(from: .bottom))
                                 .chromeHoverPin(isOver: $controller.isPointerOverBottomBar, controller: controller)
@@ -1041,30 +1041,6 @@ public struct PlayerView: View {
     /// keyboard toggle just did. Kept in the bar, not on the picture: the
     /// confirmation printed over the video read to the owner as "kinda
     /// wacky".
-    @ViewBuilder
-    private var chromeNameSlot: some View {
-        Group {
-            if let name = chromeHover {
-                HStack(spacing: 0) {
-                    Text(name.text)
-                        .foregroundColor(PlayerChrome.muted)
-                    if let isOn = name.isOn {
-                        Text(isOn ? ": on" : ": off")
-                            .foregroundColor(isOn ? SumiTheme.indigo : PlayerChrome.muted)
-                    }
-                }
-                .id(name.id)
-            } else if let flash = controller.hudFlash {
-                Text(flash.text)
-                    .foregroundColor(PlayerChrome.foreground)
-                    .id(flash.token)
-            }
-        }
-        .font(.system(size: 12, weight: .medium))
-        .lineLimit(1)
-        .transition(.opacity)
-        .animation(.snappy(duration: 0.15), value: chromeHover)
-    }
 
     /// What the chrome bars sit on. See the top bar's comment.
     ///
@@ -1400,7 +1376,7 @@ public struct PlayerView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .chromeName("Close player", $chromeHover)
+            .chromeName("Close player", chromeHover)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(controller.title)
@@ -1425,7 +1401,7 @@ public struct PlayerView: View {
 
             Spacer(minLength: 12)
 
-            chromeNameSlot
+            ChromeNameSlot(hover: chromeHover, controller: controller)
 
             HStack(spacing: 2) {
                 // Minimize — backgrounds playback so the rest of the app is
@@ -1439,7 +1415,7 @@ public struct PlayerView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Minimize player", $chromeHover)
+                .chromeName("Minimize player", chromeHover)
                 .accessibilityLabel("Minimize Player")
 
                 // Auto-Play Next
@@ -1451,7 +1427,7 @@ public struct PlayerView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Autoplay next", isOn: controller.autoPlayNextEnabled, $chromeHover)
+                .chromeName("Autoplay next", isOn: controller.autoPlayNextEnabled, chromeHover)
                 .accessibilityLabel(controller.autoPlayNextEnabled ? "Auto-Play Next: On" : "Auto-Play Next: Off")
 
                 // Auto-Skip Intro/Outro — Settings has had a toggle for this
@@ -1466,7 +1442,7 @@ public struct PlayerView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName(autoSkipName, isOn: controller.autoSkipEnabled, $chromeHover)
+                .chromeName(autoSkipName, isOn: controller.autoSkipEnabled, chromeHover)
                 .accessibilityLabel(controller.autoSkipEnabled ? "Auto-Skip Intro/Outro: On" : "Auto-Skip Intro/Outro: Off")
 
                 // Discord presence, here as well as in Settings: whether the
@@ -1480,7 +1456,7 @@ public struct PlayerView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Discord status", isOn: discordPresence, $chromeHover)
+                .chromeName("Discord status", isOn: discordPresence, chromeHover)
                 .accessibilityLabel(discordPresence ? "Discord Rich Presence: On" : "Discord Rich Presence: Off")
 
                 // Episode List
@@ -1493,7 +1469,7 @@ public struct PlayerView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.sumiPressable)
-                    .chromeName("Episodes", $chromeHover)
+                    .chromeName("Episodes", chromeHover)
                     .accessibilityLabel("Episodes")
                     .sumiPopover(isPresented: $showEpisodeList, arrowEdge: .bottom) {
                         episodeListMenu
@@ -1510,7 +1486,7 @@ public struct PlayerView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Play on TV", $chromeHover)
+                .chromeName("Play on TV", chromeHover)
                 .accessibilityLabel("Play on TV")
                 .sumiPopover(isPresented: $showCastMenu, arrowEdge: .bottom) {
                     CastMenu(cast: controller.cast)
@@ -1530,7 +1506,7 @@ public struct PlayerView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Info and options", $chromeHover)
+                .chromeName("Info and options", chromeHover)
                 .accessibilityLabel("Info & Options")
                 .sumiPopover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
                     infoMenu
@@ -2191,5 +2167,35 @@ private struct AmbientGlowLayer: View {
                 reduceMotion: reduceMotion
             )
         }
+    }
+}
+
+/// The top bar's label slot, in its own view so a hover redraws only this.
+private struct ChromeNameSlot: View {
+    let hover: ChromeHoverState
+    let controller: PlayerController
+
+    var body: some View {
+        Group {
+            if let name = hover.name {
+                HStack(spacing: 0) {
+                    Text(name.text)
+                        .foregroundColor(PlayerChrome.muted)
+                    if let isOn = name.isOn {
+                        Text(isOn ? ": on" : ": off")
+                            .foregroundColor(isOn ? SumiTheme.indigo : PlayerChrome.muted)
+                    }
+                }
+                .id(name.id)
+            } else if let flash = controller.hudFlash {
+                Text(flash.text)
+                    .foregroundColor(PlayerChrome.foreground)
+                    .id(flash.token)
+            }
+        }
+        .font(.system(size: 12, weight: .medium))
+        .lineLimit(1)
+        .transition(.opacity)
+        .animation(.snappy(duration: 0.15), value: hover.name)
     }
 }

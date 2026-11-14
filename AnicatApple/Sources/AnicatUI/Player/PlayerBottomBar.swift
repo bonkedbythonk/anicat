@@ -6,7 +6,7 @@ import AppKit
 struct PlayerBottomBar: View {
     @Bindable var controller: PlayerController
     /// Named in the top bar's label slot; see `ChromeName`.
-    @Binding var chromeHover: ChromeName?
+    let chromeHover: ChromeHoverState
     @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
     /// The hairline exists to separate a bar sitting in solid letterbox
     /// black from the picture above it. When the bar overlays the picture
@@ -227,7 +227,7 @@ struct PlayerBottomBar: View {
             }
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasPreviousEpisode)
-            .chromeName("Previous episode (P)", $chromeHover)
+            .chromeName("Previous episode (P)", chromeHover)
             .accessibilityLabel("Previous Episode (P)")
 
             // Play / Pause — the one filled, colored control in the row:
@@ -251,7 +251,7 @@ struct PlayerBottomBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .chromeName(controller.isPlaying ? "Pause (Space)" : "Play (Space)", $chromeHover)
+            .chromeName(controller.isPlaying ? "Pause (Space)" : "Play (Space)", chromeHover)
             .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
 
             // Seek -5s
@@ -263,7 +263,7 @@ struct PlayerBottomBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .chromeName("Back 5 seconds", $chromeHover)
+            .chromeName("Back 5 seconds", chromeHover)
             .accessibilityLabel("Back 5 seconds")
 
             // Seek +5s
@@ -275,7 +275,7 @@ struct PlayerBottomBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .chromeName("Forward 5 seconds", $chromeHover)
+            .chromeName("Forward 5 seconds", chromeHover)
             .accessibilityLabel("Forward 5 seconds")
 
             // Next Episode
@@ -288,7 +288,7 @@ struct PlayerBottomBar: View {
             }
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasNextEpisode)
-            .chromeName("Next episode (N)", $chromeHover)
+            .chromeName("Next episode (N)", chromeHover)
             .accessibilityLabel("Next Episode (N)")
 
             // Time Display
@@ -324,7 +324,7 @@ struct PlayerBottomBar: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.sumiPressable)
-                    .chromeName(controller.isMuted ? "Unmute (M)" : "Mute (M)", $chromeHover)
+                    .chromeName(controller.isMuted ? "Unmute (M)" : "Mute (M)", chromeHover)
                     .accessibilityLabel(controller.isMuted ? "Unmute (M)" : "Mute (M)")
 
                     // `Slider` is not in the tvOS SDK; the TV's volume is
@@ -350,7 +350,7 @@ struct PlayerBottomBar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Upscaling", isOn: controller.isAnime4KEnabled, $chromeHover)
+                .chromeName("Upscaling", isOn: controller.isAnime4KEnabled, chromeHover)
                 .accessibilityLabel(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
 
                 // Ambient glow. The same key Settings writes; the player is
@@ -363,7 +363,7 @@ struct PlayerBottomBar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Ambient glow", isOn: ambientGlowEnabled, $chromeHover)
+                .chromeName("Ambient glow", isOn: ambientGlowEnabled, chromeHover)
                 .accessibilityLabel(ambientGlowEnabled ? "Ambient glow: On" : "Ambient glow: Off")
 
                 // Rotate 90 degrees (off / CW / CCW)
@@ -375,7 +375,7 @@ struct PlayerBottomBar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName(rotateHelpText, $chromeHover)
+                .chromeName(rotateHelpText, chromeHover)
                 .accessibilityLabel(rotateHelpText)
 
                 // Fullscreen. The whole control is compiled out on iOS
@@ -396,7 +396,7 @@ struct PlayerBottomBar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Fullscreen (F)", $chromeHover)
+                .chromeName("Fullscreen (F)", chromeHover)
                 .accessibilityLabel("Toggle Fullscreen (F)")
                 #endif
         }

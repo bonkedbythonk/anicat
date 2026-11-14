@@ -51,10 +51,19 @@ struct ChromeName: Equatable {
     let isOn: Bool?
 }
 
+/// The control under the pointer. An object, not `@State` in `PlayerView`: written through a
+/// binding, every hover redrew the whole player, and the bottom bar's buttons stopped taking
+/// clicks; they worked again with the hover labels switched off. Only the label slot reads
+/// it, so only the slot redraws.
+@MainActor @Observable
+final class ChromeHoverState {
+    var name: ChromeName?
+}
+
 private struct ChromeNameModifier: ViewModifier {
     let name: String
     let isOn: Bool?
-    @Binding var hovered: ChromeName?
+    let hovered: ChromeHoverState
     @State private var id = UUID()
     @State private var inside = false
 
@@ -74,15 +83,15 @@ private struct ChromeNameModifier: ViewModifier {
     // exit would then blank the label of the button the pointer is on.
     private func publish() {
         if inside {
-            hovered = ChromeName(id: id, text: name, isOn: isOn)
-        } else if hovered?.id == id {
-            hovered = nil
+            hovered.name = ChromeName(id: id, text: name, isOn: isOn)
+        } else if hovered.name?.id == id {
+            hovered.name = nil
         }
     }
 }
 
 extension View {
-    func chromeName(_ name: String, isOn: Bool? = nil, _ hovered: Binding<ChromeName?>) -> some View {
+    func chromeName(_ name: String, isOn: Bool? = nil, _ hovered: ChromeHoverState) -> some View {
         modifier(ChromeNameModifier(name: name, isOn: isOn, hovered: hovered))
     }
 

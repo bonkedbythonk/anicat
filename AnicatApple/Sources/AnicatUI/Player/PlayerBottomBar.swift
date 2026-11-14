@@ -353,6 +353,21 @@ struct PlayerBottomBar: View {
                 .chromeName("Upscaling", isOn: controller.isAnime4KEnabled, chromeHover)
                 .accessibilityLabel(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
 
+                // Smooth motion. Same key as Settings; judged on a pan, so
+                // it sits beside upscaling.
+                if PlayerController.smoothMotionSupported {
+                    Button(action: { controller.toggleSmoothMotion() }) {
+                        Image(systemName: "film.stack")
+                        .font(.system(size: 14))
+                        .foregroundColor(controller.isInterpolationEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.sumiPressable)
+                    .chromeName("Smooth motion", isOn: controller.isInterpolationEnabled, chromeHover)
+                    .accessibilityLabel(controller.isInterpolationEnabled ? "Smooth motion: On" : "Smooth motion: Off")
+                }
+
                 // Ambient glow. The same key Settings writes; the player is
                 // where the effect is judged, so the switch lives here too.
                 Button(action: { ambientGlowEnabled.toggle() }) {

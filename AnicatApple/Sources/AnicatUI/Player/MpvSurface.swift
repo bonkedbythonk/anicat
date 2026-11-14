@@ -538,6 +538,7 @@ public struct MpvSurface {
 
         coordinator.setPaused(!controller.isPlaying)
         coordinator.applyAnime4K(enabled: controller.isAnime4KEnabled)
+        coordinator.applyInterpolation(enabled: controller.isSmoothMotionActive)
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -568,6 +569,10 @@ public struct MpvSurface {
         private var lastLoadedURL: String?
         private var pendingStreamURL: String?
         private var lastAnime4KState: Bool?
+        private var lastInterpolationState: Bool?
+        /// HDR or above 1080p: the filter's 8-bit 4:2:0 input would flatten HDR, and
+        /// nothing anime ships above 1080p. Read from the decoder's own params.
+        private var smoothBlockedByContent = false
         private var sidewaysSavedHwdec: String?
         /// The `sid` the viewer picked from the subtitle list, so a later
         /// Sub/Dub toggle re-applies it rather than running the language
@@ -895,6 +900,7 @@ public struct MpvSurface {
             startEventLoop()
 
             applyAnime4K(enabled: controller.isAnime4KEnabled)
+            applyInterpolation(enabled: controller.isSmoothMotionActive)
             setPaused(!controller.isPlaying)
             setVolume(controller.volume)
             setMuted(controller.isMuted)
@@ -1178,8 +1184,9 @@ public struct MpvSurface {
             reconfigAttemptsForSize = 0
         }
 
-        func runCommand(_ args: [String], async: Bool = false) {
-            guard let mpv = mpv else { return }
+        @discardableResult
+        func runCommand(_ args: [String], async: Bool = false) -> Int32 {
+            guard let mpv = mpv else { return -1 }
             var cArgs = args.map { UnsafePointer<CChar>?(strdup($0)) }
             cArgs.append(nil)
             defer {
@@ -1187,7 +1194,7 @@ public struct MpvSurface {
                     if let a = arg { free(UnsafeMutableRawPointer(mutating: a)) }
                 }
             }
-            cArgs.withUnsafeMutableBufferPointer { ptr in
+            return cArgs.withUnsafeMutableBufferPointer { ptr in
                 // `mpv_command_async` copies the arguments before it returns,
                 // so the `defer` above may free them straight away.
                 let res = async ? mpv_command_async(mpv, 0, ptr.baseAddress) : mpv_command(mpv, ptr.baseAddress)
@@ -1195,6 +1202,7 @@ public struct MpvSurface {
                     let errStr = String(cString: mpv_error_string(res))
                     print("[libmpv] mpv_command(\(args.joined(separator: " "))) error: \(errStr) (\(res))")
                 }
+                return res
             }
         }
 
@@ -1364,6 +1372,10 @@ public struct MpvSurface {
         func cycleSideways() {
             guard let mpv = mpv else { return }
             let next = (controller.sidewaysState + 1) % 3
+            if next == 1 {
+                applyInterpolation(enabled: false)
+                lastInterpolationState = nil
+            }
             controller.sidewaysState = next
 
             if next == 1 && sidewaysSavedHwdec == nil {
@@ -1381,6 +1393,7 @@ public struct MpvSurface {
                     mpv_set_option_string(mpv, "hwdec", saved)
                     sidewaysSavedHwdec = nil
                 }
+                applyInterpolation(enabled: controller.isSmoothMotionActive)
             case 1:
                 runCommand(["vf", "set", "sub,lavfi=[transpose=clock]"])
             default:
@@ -1417,6 +1430,38 @@ public struct MpvSurface {
                 print("[libmpv] Applied Anime4K 6-shader pipeline")
             }
             #endif
+        }
+
+        /// Smooth motion: `smooth_vt` (our MPVKit fork's FFmpeg) generates frames across camera
+        /// moves only. Under its own label, so it comes and goes without touching the rest of
+        /// the chain.
+        @MainActor
+        func applyInterpolation(enabled: Bool) {
+            // Sideways mode owns the chain (`vf set`) and burns subtitles in ahead of the
+            // turn; interpolating those would smear the text. Re-applied when it ends.
+            let enabled = enabled && !smoothBlockedByContent
+            guard let mpv, controller.sidewaysState == 0, enabled != lastInterpolationState else { return }
+            let was = lastInterpolationState
+            lastInterpolationState = enabled
+            // Zero-copy VideoToolbox frames never reach a software filter: mpv kept the
+            // filter in the chain and went on showing 24 fps (estimated-vf-fps 23.976).
+            // The copy mode hands it the same hardware-decoded frames in memory.
+            let hwdec = stringProperty("hwdec")
+            if enabled {
+                if hwdec == "videotoolbox" { mpv_set_property_string(mpv, "hwdec", "videotoolbox-copy") }
+                if runCommand(["vf", "add", "@smooth:lavfi=[format=nv12,smooth_vt]"]) < 0 {
+                    // A libavfilter without the filter: back to zero-copy decoding.
+                    if hwdec == "videotoolbox" { mpv_set_property_string(mpv, "hwdec", "videotoolbox") }
+                    lastInterpolationState = false
+                    PlayerLog.write("[smooth] filter could not be added; playing without it")
+                } else {
+                    PlayerLog.write("[smooth] on (hwdec \(hwdec ?? "-") -> \(stringProperty("hwdec") ?? "-"))")
+                }
+            } else if was == true {
+                runCommand(["vf", "remove", "@smooth"])
+                if hwdec == "videotoolbox-copy" { mpv_set_property_string(mpv, "hwdec", "videotoolbox") }
+                PlayerLog.write("[smooth] off")
+            }
         }
 
         // Backward compatibility overload
@@ -1929,8 +1974,12 @@ public struct MpvSurface {
 
                     if ev.event_id == MPV_EVENT_LOG_MESSAGE, let data = ev.data {
                         let msg = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
-                        if let prefix = msg.prefix.map({ String(cString: $0) }), prefix.hasPrefix("ao"),
-                           let text = msg.text.map({ String(cString: $0) }) {
+                        // Audio output, and the smoothing filter's own lines (its fallbacks
+                        // and the per-file summary) plus filter-chain failures.
+                        if let prefix = msg.prefix.map({ String(cString: $0) }),
+                           let text = msg.text.map({ String(cString: $0) }),
+                           prefix.hasPrefix("ao") || text.contains("smooth_vt")
+                            || (prefix == "vf" && msg.log_level.rawValue <= MPV_LOG_LEVEL_WARN.rawValue) {
                             PlayerLog.write("[mpv/\(prefix)] \(text.trimmingCharacters(in: .newlines))")
                         }
                         continue
@@ -1942,6 +1991,16 @@ public struct MpvSurface {
                         self.rearmSizeCheck(after: "restart")
                     }
                     if ev.event_id == MPV_EVENT_VIDEO_RECONFIG {
+                        let gamma = self.stringProperty("video-params/gamma") ?? ""
+                        let vw = Int(self.stringProperty("video-params/w") ?? "") ?? 0
+                        let vh = Int(self.stringProperty("video-params/h") ?? "") ?? 0
+                        let blocked = gamma == "pq" || gamma == "hlg" || vw * vh > 1920 * 1088
+                        await MainActor.run {
+                            guard blocked != self.smoothBlockedByContent else { return }
+                            self.smoothBlockedByContent = blocked
+                            if blocked { PlayerLog.write("[smooth] off for this file: \(vw)x\(vh) \(gamma)") }
+                            self.applyInterpolation(enabled: self.controller.isSmoothMotionActive)
+                        }
                         PlayerLog.write(String(format: "[libmpv] video reconfig: out %@x%@ osd %@x%@ time-pos %@", self.stringProperty("video-out-params/dw") ?? "-", self.stringProperty("video-out-params/dh") ?? "-", self.stringProperty("osd-dimensions/w") ?? "-", self.stringProperty("osd-dimensions/h") ?? "-", self.stringProperty("time-pos") ?? "-"))
                         // Read here as well as from the property observer.
                         // `resolveAndPlay` clears the displayed size for every
@@ -2210,6 +2269,7 @@ public struct MpvSurface {
             lastLoadedURL = nil
             pendingStreamURL = nil
             lastAnime4KState = nil
+            lastInterpolationState = nil
             controller.isBuffering = false
             controller.bufferingPercent = nil
             controller.mpvBufferedRanges = []

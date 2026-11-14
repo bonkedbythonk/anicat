@@ -15,6 +15,7 @@ struct PlaybackTabSection: View {
     @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true
     @AppStorage("anicat_gpu_upscaling") private var gpuUpscaling: Bool = true
     @AppStorage("anicat_hardware_decoding") private var hardwareDecoding: Bool = true
+    @AppStorage("anicat_frame_interpolation") private var frameInterpolation: Bool = false
     @AppStorage("anicat_ambient_glow") private var ambientGlow: Bool = true
     @AppStorage("anicat_ambient_glow_windowed") private var ambientGlowWindowed: Bool = true
     // `PlayerController.isNextEpisodeCardEnabled` owns the reader and the
@@ -141,6 +142,15 @@ struct PlaybackTabSection: View {
                 description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
             ) {
                 SumiSwitch(isOn: $hardwareDecoding)
+            }
+
+            if PlayerController.smoothMotionSupported {
+                SettingField(
+                    label: "Smooth motion",
+                    description: "Draws in-between frames during camera pans so they glide instead of stepping. Characters, effects and cuts are left as animated. Uses more GPU while a pan is on screen."
+                ) {
+                    SumiSwitch(isOn: $frameInterpolation)
+                }
             }
 
             SettingField(

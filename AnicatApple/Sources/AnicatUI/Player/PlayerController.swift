@@ -2,6 +2,8 @@ import Foundation
 import SwiftUI
 import Observation
 import CoreGraphics
+import VideoToolbox
+import Libavfilter
 #if os(macOS)
 import AppKit
 
@@ -292,6 +294,27 @@ public final class PlayerController {
     // underlying mpv shader toggle stays, since Settings still reads/writes
     // the same `anicat_gpu_upscaling` default.
     public var isAnime4KEnabled: Bool = true
+
+    /// `anicat_frame_interpolation`, off unless the viewer turns it on.
+    public var isInterpolationEnabled: Bool = UserDefaults.standard.bool(forKey: "anicat_frame_interpolation")
+
+    /// VideoToolbox's frame-rate conversion and optical flow, which `smooth_vt` runs on:
+    /// macOS 26 and Apple silicon. The Mac player is the only one offering it.
+    /// The linked FFmpeg must carry the filter too: against a libavfilter without it,
+    /// `vf add` still returned success, the chain failed at the next reconfig ("No such
+    /// filter: 'smooth_vt'") and mpv played with no video output at all.
+    public static let smoothMotionSupported: Bool = {
+        #if os(macOS)
+        if #available(macOS 26.0, *) {
+            return avfilter_get_by_name("smooth_vt") != nil
+                && VTFrameRateConversionConfiguration.isSupported && VTOpticalFlowConfiguration.isSupported
+        }
+        #endif
+        return false
+    }()
+
+    /// Anime only, like Anime4K: interpolated live action reads as the soap-opera look.
+    public var isSmoothMotionActive: Bool { isInterpolationEnabled && Self.smoothMotionSupported && !isLiveAction }
 
     /// The playing title is a TMDB film or series, set by `AppModel` with
     /// the title. Anime4K's restore and upscale networks are trained on
@@ -923,6 +946,9 @@ public final class PlayerController {
                    d.bool(forKey: "anicat_gpu_upscaling") != self.isAnime4KEnabled {
                     self.isAnime4KEnabled = d.bool(forKey: "anicat_gpu_upscaling")
                 }
+                if d.bool(forKey: "anicat_frame_interpolation") != self.isInterpolationEnabled {
+                    self.isInterpolationEnabled = d.bool(forKey: "anicat_frame_interpolation")
+                }
             }
         }
     }
@@ -997,6 +1023,13 @@ public final class PlayerController {
             guard !Task.isCancelled else { return }
             self?.seekFlash = nil
         }
+    }
+
+    public func toggleSmoothMotion() {
+        isInterpolationEnabled.toggle()
+        UserDefaults.standard.set(isInterpolationEnabled, forKey: "anicat_frame_interpolation")
+        showControlsBriefly()
+        flashHUD(isInterpolationEnabled ? "Smooth motion on" : "Smooth motion off", symbol: "film.stack")
     }
 
     public func toggleAnime4K() {

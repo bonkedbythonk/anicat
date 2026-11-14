@@ -194,3 +194,25 @@ public extension PlatformImage {
         #endif
     }
 }
+
+extension NotificationCenter {
+    /// Runs `body` on the main actor after any `UserDefaults.standard` write.
+    ///
+    /// Not `queue: .main`: with a queue, the posting thread waits until the
+    /// block has run there. A defaults write off the main thread then blocks
+    /// on the main thread, and `+[NSFont initialize]` writes defaults: a
+    /// test touching `NSFont` on a background thread held the class lock
+    /// while waiting for main, the main-actor test touching `NSFont` waited
+    /// for that lock, and parallel `swift test` hung until CI's 15-minute
+    /// limit (sampled 2026-11-14). A main-thread write still runs `body`
+    /// inline, in the frame that made it; any other is handed over async.
+    func observeDefaultsChanges(_ body: @escaping @MainActor @Sendable () -> Void) -> NSObjectProtocol {
+        addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: nil) { _ in
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { body() }
+            } else {
+                DispatchQueue.main.async { MainActor.assumeIsolated { body() } }
+            }
+        }
+    }
+}

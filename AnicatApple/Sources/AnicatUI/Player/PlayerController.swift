@@ -928,35 +928,23 @@ public final class PlayerController {
         // auto-play in Settings mid-episode changed nothing in the player
         // until relaunch. Mirror the store back in when it changes; the
         // guards keep the didSet writes from ping-ponging.
-        defaultsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification,
-            object: UserDefaults.standard,
-            queue: .main
-        ) { [weak self] _ in
-            // `assumeIsolated`, not a `Task`: the observer is registered with
-            // `queue: .main`, so the block already runs on the main queue --
-            // the main actor's own executor -- and hopping through a task
-            // would defer these writes past the frame that asked for them.
-            // Swift 6.3 infers that and 6.0 does not, which is why the build
-            // was green here and red on CI's older toolchain.
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let d = UserDefaults.standard
-                if d.object(forKey: "anicat_autoplay_next") != nil,
-                   d.bool(forKey: "anicat_autoplay_next") != self.autoPlayNextEnabled {
-                    self.autoPlayNextEnabled = d.bool(forKey: "anicat_autoplay_next")
-                }
-                if d.object(forKey: "anicat_autoskip") != nil,
-                   d.bool(forKey: "anicat_autoskip") != self.autoSkipEnabled {
-                    self.autoSkipEnabled = d.bool(forKey: "anicat_autoskip")
-                }
-                if d.object(forKey: "anicat_gpu_upscaling") != nil,
-                   d.bool(forKey: "anicat_gpu_upscaling") != self.isAnime4KEnabled {
-                    self.isAnime4KEnabled = d.bool(forKey: "anicat_gpu_upscaling")
-                }
-                if d.bool(forKey: "anicat_frame_interpolation") != self.isInterpolationEnabled {
-                    self.isInterpolationEnabled = d.bool(forKey: "anicat_frame_interpolation")
-                }
+        defaultsObserver = NotificationCenter.default.observeDefaultsChanges { [weak self] in
+            guard let self else { return }
+            let d = UserDefaults.standard
+            if d.object(forKey: "anicat_autoplay_next") != nil,
+               d.bool(forKey: "anicat_autoplay_next") != self.autoPlayNextEnabled {
+                self.autoPlayNextEnabled = d.bool(forKey: "anicat_autoplay_next")
+            }
+            if d.object(forKey: "anicat_autoskip") != nil,
+               d.bool(forKey: "anicat_autoskip") != self.autoSkipEnabled {
+                self.autoSkipEnabled = d.bool(forKey: "anicat_autoskip")
+            }
+            if d.object(forKey: "anicat_gpu_upscaling") != nil,
+               d.bool(forKey: "anicat_gpu_upscaling") != self.isAnime4KEnabled {
+                self.isAnime4KEnabled = d.bool(forKey: "anicat_gpu_upscaling")
+            }
+            if d.bool(forKey: "anicat_frame_interpolation") != self.isInterpolationEnabled {
+                self.isInterpolationEnabled = d.bool(forKey: "anicat_frame_interpolation")
             }
         }
     }

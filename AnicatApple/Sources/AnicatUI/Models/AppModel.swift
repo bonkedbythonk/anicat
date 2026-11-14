@@ -974,40 +974,30 @@ public final class AppModel {
         // only thing separating a presence toggle from every other setting
         // written while the app runs — without it, changing the theme would
         // reconnect Discord.
-        defaultsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification,
-            object: UserDefaults.standard,
-            queue: .main
-        ) { [weak self] _ in
-            // Registered with `queue: .main`, so this block runs on the main
-            // actor's own executor and the assumption holds. Swift 6.3 works
-            // that out on its own; the toolchain CI runs does not, and the
-            // build was green here and red there until this was spelled out.
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let detail = AppModel.discordPresenceDetail
-                if detail != self.lastDiscordPresenceDetail {
-                    self.lastDiscordPresenceDetail = detail
-                    self.engine?.discordSetDetail(detail: detail)
-                }
-                // Same edge check for the Lnori switch: a novel's page keeps
-                // whatever it showed until something asks again, and the
-                // switch can be flipped from Settings with that page open.
-                let lnori = AppModel.isLnoriEnabled
-                if lnori != self.lastLnoriEnabled {
-                    self.lastLnoriEnabled = lnori
-                    self.reloadNovelVolumes()
-                }
-                let sharing = AppModel.isLanSharingEnabled
-                if sharing != self.lastLanSharingEnabled {
-                    self.lastLanSharingEnabled = sharing
-                    self.applyLanSharingSetting(sharing)
-                }
-                let enabled = AppModel.isDiscordPresenceEnabled
-                guard enabled != self.lastDiscordPresenceEnabled else { return }
-                self.lastDiscordPresenceEnabled = enabled
-                self.applyDiscordPresenceSetting(enabled)
+        defaultsObserver = NotificationCenter.default.observeDefaultsChanges { [weak self] in
+            guard let self else { return }
+            let detail = AppModel.discordPresenceDetail
+            if detail != self.lastDiscordPresenceDetail {
+                self.lastDiscordPresenceDetail = detail
+                self.engine?.discordSetDetail(detail: detail)
             }
+            // Same edge check for the Lnori switch: a novel's page keeps
+            // whatever it showed until something asks again, and the
+            // switch can be flipped from Settings with that page open.
+            let lnori = AppModel.isLnoriEnabled
+            if lnori != self.lastLnoriEnabled {
+                self.lastLnoriEnabled = lnori
+                self.reloadNovelVolumes()
+            }
+            let sharing = AppModel.isLanSharingEnabled
+            if sharing != self.lastLanSharingEnabled {
+                self.lastLanSharingEnabled = sharing
+                self.applyLanSharingSetting(sharing)
+            }
+            let enabled = AppModel.isDiscordPresenceEnabled
+            guard enabled != self.lastDiscordPresenceEnabled else { return }
+            self.lastDiscordPresenceEnabled = enabled
+            self.applyDiscordPresenceSetting(enabled)
         }
     }
 

@@ -232,6 +232,14 @@ final class AmbientGlowBandLayer: CAGradientLayer {
     enum Edge { case top, bottom, left, right }
 
     private let fade = CAGradientLayer()
+    /// The bar's average colour, transparent at the picture and opaque at
+    /// the window edge, between the band and the falloff. Without it each
+    /// zone's colour ran unchanged to the edge of the window, so a bright
+    /// object at the picture's edge was a hard patch the full depth of the
+    /// bar; light that has travelled further is more mixed. Plain alpha in
+    /// the colours, no mask or layer opacity, so it stays off the
+    /// offscreen path the falloff comment describes.
+    private let blend = CAGradientLayer()
 
     init(axis: Axis, brightEdge: Edge) {
         super.init()
@@ -253,21 +261,41 @@ final class AmbientGlowBandLayer: CAGradientLayer {
         // is c*(1-a), so a = 1 - o*m. o is the 0.6 the blurred version
         // used; m runs from 1 at the picture to the 0.2 floor that keeps
         // the far edge of a deep bar from reading as unlit black.
+        //
+        // m follows 0.2 + 0.8 * e^(-2t) across the bar, not a straight
+        // line: the two-stop linear ramp read as a flat painted band, where
+        // light thrown on a wall drops steeply near the screen and then
+        // trails off. e^(-4t) was the steeper first pick and gave about a
+        // third less light than the linear ramp (mean m 0.40 against 0.60),
+        // which on a MacBook's 66 pt fullscreen bars read as the glow going
+        // dim; e^(-2t) keeps the curve at mean 0.55.
         opacity = 1
         let o = CGFloat(AmbientGlowView.opacity)
-        fade.colors = [CGColor(gray: 0, alpha: 1 - o), CGColor(gray: 0, alpha: 1 - o * 0.2)]
-        switch brightEdge {
-        case .top:
-            fade.startPoint = CGPoint(x: 0.5, y: 0); fade.endPoint = CGPoint(x: 0.5, y: 1)
-        case .bottom:
-            fade.startPoint = CGPoint(x: 0.5, y: 1); fade.endPoint = CGPoint(x: 0.5, y: 0)
-        case .left:
-            fade.startPoint = CGPoint(x: 0, y: 0.5); fade.endPoint = CGPoint(x: 1, y: 0.5)
-        case .right:
-            fade.startPoint = CGPoint(x: 1, y: 0.5); fade.endPoint = CGPoint(x: 0, y: 0.5)
+        fade.locations = Self.depthStops.map { NSNumber(value: Double($0)) }
+        fade.colors = Self.depthStops.map { t in
+            CGColor(gray: 0, alpha: 1 - o * (0.2 + 0.8 * exp(-2 * t)))
         }
-        addSublayer(fade)
+        blend.locations = fade.locations
+        for layer in [blend, fade] {
+            switch brightEdge {
+            case .top:
+                layer.startPoint = CGPoint(x: 0.5, y: 0); layer.endPoint = CGPoint(x: 0.5, y: 1)
+            case .bottom:
+                layer.startPoint = CGPoint(x: 0.5, y: 1); layer.endPoint = CGPoint(x: 0.5, y: 0)
+            case .left:
+                layer.startPoint = CGPoint(x: 0, y: 0.5); layer.endPoint = CGPoint(x: 1, y: 0.5)
+            case .right:
+                layer.startPoint = CGPoint(x: 1, y: 0.5); layer.endPoint = CGPoint(x: 0, y: 0.5)
+            }
+            addSublayer(layer)
+        }
     }
+
+    /// Where across the bar's depth (0 at the picture, 1 at the window
+    /// edge) the falloff and the blend are sampled. Denser near the picture,
+    /// where the exponential bends; the gradient interpolates linearly
+    /// between them.
+    private static let depthStops: [CGFloat] = [0, 0.08, 0.18, 0.3, 0.45, 0.65, 1]
 
     override init(layer: Any) {
         super.init(layer: layer)
@@ -276,6 +304,7 @@ final class AmbientGlowBandLayer: CAGradientLayer {
     required init?(coder: NSCoder) { nil }
 
     func layoutMask() {
+        blend.frame = bounds
         fade.frame = bounds
     }
 
@@ -286,19 +315,36 @@ final class AmbientGlowBandLayer: CAGradientLayer {
     /// through 60 steps instead of 120 is not visible; the GPU cost of the
     /// glow was (26% against 19% without it, 2026-09-20).
     func setColors(_ colors: [CGColor], duration: CFTimeInterval) {
+        Self.ease(self, to: colors, duration: duration)
+        // Smoothstep from clear to the bar's mean, so the blend is still
+        // nothing just off the picture, where the zone colour has to line
+        // up with what it touches.
+        var mean: [CGFloat] = [0, 0, 0]
+        for color in colors {
+            let c = color.components ?? []
+            guard c.count >= 3 else { continue }
+            for i in 0..<3 { mean[i] += c[i] / CGFloat(colors.count) }
+        }
+        let blendColors = Self.depthStops.map { t in
+            CGColor(srgbRed: mean[0], green: mean[1], blue: mean[2], alpha: t * t * (3 - 2 * t))
+        }
+        Self.ease(blend, to: blendColors, duration: duration)
+    }
+
+    private static func ease(_ layer: CAGradientLayer, to colors: [CGColor], duration: CFTimeInterval) {
         if duration > 0 {
             let ease = CABasicAnimation(keyPath: "colors")
             // From wherever the previous ease has got to, not from its end:
             // samples arrive faster than an ease finishes.
-            ease.fromValue = presentation()?.colors ?? self.colors
+            ease.fromValue = layer.presentation()?.colors ?? layer.colors
             ease.toValue = colors
             ease.duration = duration
             ease.timingFunction = CAMediaTimingFunction(name: .linear)
             ease.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-            add(ease, forKey: "colors")
+            layer.add(ease, forKey: "colors")
         } else {
-            removeAnimation(forKey: "colors")
+            layer.removeAnimation(forKey: "colors")
         }
-        self.colors = colors
+        layer.colors = colors
     }
 }

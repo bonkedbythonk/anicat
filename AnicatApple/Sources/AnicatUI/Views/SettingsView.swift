@@ -213,7 +213,7 @@ public struct SettingsView: View {
                         searchQuery = ""
                     } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: hit.tab.iconName)
+                            Image(anicat: hit.tab.iconName)
                                 .font(.system(size: 11))
                                 .foregroundColor(SumiTheme.muted)
                                 .frame(width: 16)
@@ -245,7 +245,7 @@ public struct SettingsView: View {
             Spacer()
 
             HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
+                Image(anicat: "magnifyingglass")
                     .font(.system(size: 11))
                     .foregroundColor(SumiTheme.muted)
                 TextField("Search settings", text: $searchQuery)
@@ -255,7 +255,7 @@ public struct SettingsView: View {
                     .frame(width: 150)
                 if !searchQuery.isEmpty {
                     Button { searchQuery = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(anicat: "xmark.circle.fill")
                             .font(.system(size: 11))
                             .foregroundColor(SumiTheme.muted)
                     }
@@ -271,7 +271,7 @@ public struct SettingsView: View {
 
             if let copyFeedback {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(anicat: "checkmark.circle.fill")
                         .font(.system(size: 12))
                         .foregroundColor(SumiTheme.successLight)
                     Text(copyFeedback)
@@ -295,7 +295,7 @@ public struct SettingsView: View {
                     }
                 } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: tab.iconName)
+                        Image(anicat: tab.iconName)
                             .font(.system(size: 15, weight: isActive ? .semibold : .regular))
                             .frame(width: 20, alignment: .center)
 

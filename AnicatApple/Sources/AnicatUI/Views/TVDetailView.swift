@@ -88,7 +88,7 @@ struct TVDetailView: View {
                 Button {
                     play(resume)
                 } label: {
-                    Label("Resume episode \(resume)", systemImage: "play.fill")
+                    Label("Resume episode \(resume)", anicat: "play.fill")
                         .fontWeight(.semibold)
                 }
                 .sumiPrimaryButton()
@@ -98,7 +98,7 @@ struct TVDetailView: View {
                 Button {
                     play(first.number)
                 } label: {
-                    Label("Play episode \(first.number)", systemImage: "play.fill")
+                    Label("Play episode \(first.number)", anicat: "play.fill")
                         .fontWeight(.semibold)
                 }
                 .sumiPrimaryButton()
@@ -120,13 +120,13 @@ struct TVDetailView: View {
                         Text("Dropped").tag("DROPPED")
                     }
                 } label: {
-                    Label(details.listStatus.map(TVDetailView.listStatus) ?? "Add to list", systemImage: "list.bullet")
+                    Label(details.listStatus.map(TVDetailView.listStatus) ?? "Add to list", anicat: "list.bullet")
                 }
 
                 Button {
                     Task { await model.toggleFavourite() }
                 } label: {
-                    Image(systemName: details.isFavourite ? "heart.fill" : "heart")
+                    Image(anicat: details.isFavourite ? "heart.fill" : "heart")
                 }
             }
             Spacer()
@@ -461,7 +461,7 @@ struct TVDetailView: View {
 
                         if episode.isWatched {
                             Color.black.opacity(0.45)
-                            Image(systemName: "checkmark.circle.fill")
+                            Image(anicat: "checkmark.circle.fill")
                                 .font(.system(size: 40))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)

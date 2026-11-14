@@ -47,6 +47,8 @@ public struct PlayerView: View {
     /// and covered the picture to do it.
     public let onCancelResolve: () -> Void
     @State private var showInfoMenu = false
+    /// The chrome control under the pointer; see `ChromeName`.
+    @State private var chromeHover: ChromeName?
     @State private var isMiniHovered = false
     /// The skip window whose pill has timed out. A pill left up for a whole
     /// ninety-second opening sat over the picture the viewer had chosen to
@@ -632,7 +634,7 @@ public struct PlayerView: View {
 
                 // Paused Overlay Icon
                 if !controller.isBuffering && !controller.isPlaying && controller.areControlsVisible {
-                    Image(systemName: "play.circle.fill")
+                    Image(anicat: "play.circle.fill")
                         .font(.system(size: 72))
                         .foregroundColor(Color.white.opacity(0.85))
                         .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
@@ -655,19 +657,6 @@ public struct PlayerView: View {
                             insertion: .scale(scale: 0.6).combined(with: .opacity),
                             removal: .scale(scale: 1.15).combined(with: .opacity)
                         ))
-                        .allowsHitTesting(false)
-                }
-
-                // Toggle confirmation, top left of the picture under the top
-                // bar, as bare OSD text the way mpv and VLC print it. A
-                // centred glass pill with an indigo symbol sliding in read
-                // to the owner as "ai".
-                if let hud = controller.hudFlash {
-                    hudBadge(hud)
-                        .id(hud.token)
-                        .frame(width: max(0, videoRect.width - 48), alignment: .leading)
-                        .position(x: videoRect.midX, y: videoRect.minY + 72)
-                        .transition(.opacity)
                         .allowsHitTesting(false)
                 }
 
@@ -718,7 +707,7 @@ public struct PlayerView: View {
 
                     Group {
                         if chromeShown {
-                            PlayerBottomBar(controller: controller, showsHairline: geometry.bottomOverlay == 0 && !glowActive).padding(.horizontal, SumiTheme.spaceLg)
+                            PlayerBottomBar(controller: controller, chromeHover: $chromeHover, showsHairline: geometry.bottomOverlay == 0 && !glowActive).padding(.horizontal, SumiTheme.spaceLg)
                                 .chromeLegibility()
                                 .transition(barTransition(from: .bottom))
                                 .chromeHoverPin(isOver: $controller.isPointerOverBottomBar, controller: controller)
@@ -791,7 +780,7 @@ public struct PlayerView: View {
                     // which nobody looked for while a video was on screen.
                     if isMiniHovered {
                         Button(action: controller.togglePlayPause) {
-                            Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                            Image(anicat: controller.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(.white)
                                 .frame(width: 44, height: 44)
@@ -802,7 +791,7 @@ public struct PlayerView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     }
                     Button(action: onClose) {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(anicat: "xmark.circle.fill")
                             .font(.system(size: 16))
                             .foregroundColor(.white)
                             .background(Circle().fill(Color.black.opacity(0.55)))
@@ -1036,7 +1025,7 @@ public struct PlayerView: View {
 
     private func seekFlashBadge(_ flash: PlayerController.SeekFlash) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: flash.delta < 0 ? "gobackward" : "goforward")
+            Image(anicat: flash.delta < 0 ? "gobackward" : "goforward")
                 .font(.system(size: 22, weight: .semibold))
             Text("\(Int(abs(flash.delta).rounded()))s")
                 .sumiTabularMono(size: 16, weight: .semibold)
@@ -1047,12 +1036,34 @@ public struct PlayerView: View {
         .playerScrim(Capsule())
     }
 
-    private func hudBadge(_ hud: PlayerController.HUDFlash) -> some View {
-        Text(hud.text)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundColor(.white)
-            .lineLimit(1)
-            .chromeLegibility()
+    /// The top bar's one line of text beside the icons: the name of the
+    /// control under the pointer, or, with the pointer elsewhere, what a
+    /// keyboard toggle just did. Kept in the bar, not on the picture: the
+    /// confirmation printed over the video read to the owner as "kinda
+    /// wacky".
+    @ViewBuilder
+    private var chromeNameSlot: some View {
+        Group {
+            if let name = chromeHover {
+                HStack(spacing: 0) {
+                    Text(name.text)
+                        .foregroundColor(PlayerChrome.muted)
+                    if let isOn = name.isOn {
+                        Text(isOn ? ": on" : ": off")
+                            .foregroundColor(isOn ? SumiTheme.indigo : PlayerChrome.muted)
+                    }
+                }
+                .id(name.id)
+            } else if let flash = controller.hudFlash {
+                Text(flash.text)
+                    .foregroundColor(PlayerChrome.foreground)
+                    .id(flash.token)
+            }
+        }
+        .font(.system(size: 12, weight: .medium))
+        .lineLimit(1)
+        .transition(.opacity)
+        .animation(.snappy(duration: 0.15), value: chromeHover)
     }
 
     /// What the chrome bars sit on. See the top bar's comment.
@@ -1324,7 +1335,7 @@ public struct PlayerView: View {
                 VStack(alignment: .trailing, spacing: 8) {
                     if let flash = controller.skipFlashLabel {
                         HStack(spacing: 6) {
-                            Image(systemName: "forward.fill")
+                            Image(anicat: "forward.fill")
                                 .font(.system(size: 10))
                             Text("Skipped \(flash)")
                                 .sumiTabularMono(size: 11, weight: .medium)
@@ -1341,7 +1352,7 @@ public struct PlayerView: View {
                                 controller.skipPendingWindow()
                             }
                         } label: {
-                            Label(window.label, systemImage: "forward.fill")
+                            Label(window.label, anicat: "forward.fill")
                         }
                         // The app's own primary shape; it was a capsule with a
                         // drop shadow and a return-key glyph, the one place
@@ -1380,7 +1391,7 @@ public struct PlayerView: View {
     private func topBar(showsHairline: Bool) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Button(action: onClose) {
-                Image(systemName: "chevron.left")
+                Image(anicat: "chevron.left")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(PlayerChrome.foreground)
                     // 44pt, the platform minimum, on a glyph in the far
@@ -1389,6 +1400,7 @@ public struct PlayerView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
+            .chromeName("Close player", $chromeHover)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(controller.title)
@@ -1413,31 +1425,33 @@ public struct PlayerView: View {
 
             Spacer(minLength: 12)
 
+            chromeNameSlot
+
             HStack(spacing: 2) {
                 // Minimize — backgrounds playback so the rest of the app is
                 // reachable again, rather than the player sitting over
                 // everything until it's stopped outright.
                 Button(action: onMinimize) {
-                    Image(systemName: "pip.enter")
+                    Image(anicat: "pip.enter")
                         .font(.system(size: 13))
                         .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help("Minimize Player")
+                .chromeName("Minimize player", $chromeHover)
                 .accessibilityLabel("Minimize Player")
 
                 // Auto-Play Next
                 Button(action: { controller.toggleAutoPlayNext() }) {
-                    Image(systemName: controller.autoPlayNextEnabled ? "play.square.stack.fill" : "play.square.stack")
+                    Image(anicat: controller.autoPlayNextEnabled ? "play.square.stack.fill" : "play.square.stack")
                         .font(.system(size: 13))
                         .foregroundColor(controller.autoPlayNextEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help(controller.autoPlayNextEnabled ? "Auto-Play Next: On" : "Auto-Play Next: Off")
+                .chromeName("Autoplay next", isOn: controller.autoPlayNextEnabled, $chromeHover)
                 .accessibilityLabel(controller.autoPlayNextEnabled ? "Auto-Play Next: On" : "Auto-Play Next: Off")
 
                 // Auto-Skip Intro/Outro — Settings has had a toggle for this
@@ -1445,45 +1459,41 @@ public struct PlayerView: View {
                 // did, which read as "the feature doesn't have a switch" even
                 // though one existed a page away.
                 Button(action: { controller.toggleAutoSkip() }) {
-                    Image(systemName: controller.autoSkipEnabled ? "forward.circle.fill" : "forward.circle")
+                    Image(anicat: controller.autoSkipEnabled ? "forward.circle.fill" : "forward.circle")
                         .font(.system(size: 13))
                         .foregroundColor(controller.autoSkipEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help(autoSkipHelp)
+                .chromeName(autoSkipName, isOn: controller.autoSkipEnabled, $chromeHover)
                 .accessibilityLabel(controller.autoSkipEnabled ? "Auto-Skip Intro/Outro: On" : "Auto-Skip Intro/Outro: Off")
 
                 // Discord presence, here as well as in Settings: whether the
                 // profile says what is on is decided per episode, and Settings
                 // meant leaving the player to change it.
-                Button(action: {
-                    discordPresence.toggle()
-                    controller.flashHUD(discordPresence ? "Discord status on" : "Discord status off",
-                                        symbol: discordPresence ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
-                }) {
-                    Image(systemName: discordPresence ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
+                Button(action: { discordPresence.toggle() }) {
+                    Image(anicat: discordPresence ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
                         .font(.system(size: 13))
                         .foregroundColor(discordPresence ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help(discordPresence ? "Discord Rich Presence: On" : "Discord Rich Presence: Off")
+                .chromeName("Discord status", isOn: discordPresence, $chromeHover)
                 .accessibilityLabel(discordPresence ? "Discord Rich Presence: On" : "Discord Rich Presence: Off")
 
                 // Episode List
                 if !controller.episodeList.isEmpty {
                     Button(action: { showEpisodeList = true }) {
-                        Image(systemName: "list.bullet")
+                        Image(anicat: "list.bullet")
                             .font(.system(size: 13))
                             .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                             .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.sumiPressable)
-                    .help("Episodes")
+                    .chromeName("Episodes", $chromeHover)
                     .accessibilityLabel("Episodes")
                     .sumiPopover(isPresented: $showEpisodeList, arrowEdge: .bottom) {
                         episodeListMenu
@@ -1493,14 +1503,14 @@ public struct PlayerView: View {
                 #if os(macOS)
                 // Play on TV
                 Button(action: { showCastMenu = true }) {
-                    Image(systemName: "tv")
+                    Image(anicat: "tv")
                         .font(.system(size: 13))
                         .foregroundColor(controller.cast.isActive ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help("Play on TV")
+                .chromeName("Play on TV", $chromeHover)
                 .accessibilityLabel("Play on TV")
                 .sumiPopover(isPresented: $showCastMenu, arrowEdge: .bottom) {
                     CastMenu(cast: controller.cast)
@@ -1513,14 +1523,14 @@ public struct PlayerView: View {
                     loadReleases()
                     showInfoMenu = true
                 }) {
-                    Image(systemName: "info.circle")
+                    Image(anicat: "info.circle")
                         .font(.system(size: 13))
                         .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help("Info & Options")
+                .chromeName("Info and options", $chromeHover)
                 .accessibilityLabel("Info & Options")
                 .sumiPopover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
                     infoMenu
@@ -1560,7 +1570,7 @@ public struct PlayerView: View {
                                     .lineLimit(1)
                                 Spacer()
                                 if episode.isWatched {
-                                    Image(systemName: "checkmark")
+                                    Image(anicat: "checkmark")
                                         .font(.system(size: 10))
                                         .foregroundColor(SumiTheme.muted)
                                 }
@@ -1769,14 +1779,14 @@ public struct PlayerView: View {
         .scrollBounceBehavior(.basedOnSize)
     }
 
-    /// The toggle's tooltip, which also says when there is nothing to skip:
+    /// The toggle's name, which also says when there is nothing to skip:
     /// an "On" over an episode with no skip times read as the feature being
     /// broken.
-    private var autoSkipHelp: String {
-        let state = controller.autoSkipEnabled ? "Auto-Skip Intro/Outro: On" : "Auto-Skip Intro/Outro: Off"
+    private var autoSkipName: String {
+        let name = "Auto-skip intro and outro"
         guard controller.skipWindows.isEmpty, let status = controller.aniSkipStatus,
-              !status.hasPrefix("Asking"), !status.hasPrefix("Waiting") else { return state }
-        return "\(state). No skip times for this episode (AniSkip: \(status))"
+              !status.hasPrefix("Asking"), !status.hasPrefix("Waiting") else { return name }
+        return "\(name) (no skip times for this episode, AniSkip: \(status))"
     }
 
     /// Everything the player knows about what it is playing and why it will
@@ -1793,7 +1803,7 @@ public struct PlayerView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(SumiTheme.muted)
                     Spacer()
-                    Image(systemName: showStreamDetails ? "chevron.up" : "chevron.down")
+                    Image(anicat: showStreamDetails ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(SumiTheme.muted)
                 }
@@ -1926,7 +1936,7 @@ public struct PlayerView: View {
                     } label: {
                         // A verb, not a verdict: "Wrong episode" read as the
                         // player saying the viewer was watching the wrong one.
-                        Label("Block & find another", systemImage: "arrow.triangle.2.circlepath")
+                        Label("Block & find another", anicat: "arrow.triangle.2.circlepath")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(SumiTheme.dangerLight)
                             .padding(.horizontal, 8)
@@ -1983,7 +1993,7 @@ public struct PlayerView: View {
                                             .fixedSize(horizontal: false, vertical: true)
                                         Spacer(minLength: 6)
                                         if isCurrent {
-                                            Image(systemName: "checkmark")
+                                            Image(anicat: "checkmark")
                                                 .font(.system(size: 10, weight: .semibold))
                                                 .foregroundColor(SumiTheme.indigo)
                                         }
@@ -2093,7 +2103,7 @@ public struct PlayerView: View {
                         .foregroundColor(rows.isEmpty ? SumiTheme.muted : SumiTheme.foreground)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    Image(anicat: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundColor(SumiTheme.muted)
                 }
@@ -2118,7 +2128,7 @@ public struct PlayerView: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                     Spacer(minLength: 8)
                                     if track.isSelected {
-                                        Image(systemName: "checkmark")
+                                        Image(anicat: "checkmark")
                                             .font(.system(size: 10, weight: .semibold))
                                             .foregroundColor(SumiTheme.indigo)
                                     }

@@ -300,7 +300,7 @@ struct PhoneSettingsView: View {
     private var cinema: some View {
         Section("Films & TV") {
             if model.cinemaAvailable {
-                Label("TMDB connected", systemImage: "checkmark.circle")
+                Label("TMDB connected", anicat: "checkmark.circle")
                     .font(.system(size: 13))
                     .foregroundStyle(SumiTheme.muted)
             } else {
@@ -412,7 +412,7 @@ struct PhoneSettingsView: View {
     private var logs: some View {
         Section("Logs") {
             ShareLink(item: AppLog.fileURL) {
-                Label("Share Log File", systemImage: "doc.text")
+                Label("Share Log File", anicat: "doc.text")
             }
             Button {
                 let report = """
@@ -429,7 +429,7 @@ struct PhoneSettingsView: View {
                 }
             } label: {
                 HStack {
-                    Label("Copy Debug Report", systemImage: "doc.on.doc")
+                    Label("Copy Debug Report", anicat: "doc.on.doc")
                     Spacer()
                     if let copyFeedback {
                         Text(copyFeedback)

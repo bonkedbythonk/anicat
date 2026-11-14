@@ -251,7 +251,7 @@ struct SumiDropdown: View {
                     selected = option
                 } label: {
                     if option == selected {
-                        Label(option, systemImage: "checkmark")
+                        Label(option, anicat: "checkmark")
                     } else {
                         Text(option)
                     }

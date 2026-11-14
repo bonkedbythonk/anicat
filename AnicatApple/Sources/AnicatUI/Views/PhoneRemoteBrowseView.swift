@@ -35,7 +35,7 @@ struct PhoneRemoteBrowseView: View {
             List {
                 if let sentTitle {
                     Section {
-                        Label("Sent \(sentTitle) to \(node.name)", systemImage: "checkmark.circle")
+                        Label("Sent \(sentTitle) to \(node.name)", anicat: "checkmark.circle")
                             .foregroundStyle(SumiTheme.muted)
                     }
                 }
@@ -122,7 +122,7 @@ struct PhoneRemoteBrowseView: View {
                         .foregroundStyle(SumiTheme.muted)
                 }
                 Spacer()
-                Image(systemName: "play.circle")
+                Image(anicat: "play.circle")
                     .foregroundStyle(SumiTheme.indigo)
             }
         }

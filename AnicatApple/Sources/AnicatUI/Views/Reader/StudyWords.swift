@@ -315,7 +315,7 @@ struct StudyWordsView: View {
 
     private func listenButton(_ label: String, text: String) -> some View {
         Button { StudySpeech.shared.speak(text) } label: {
-            Label(label, systemImage: "speaker.wave.2")
+            Label(label, anicat: "speaker.wave.2")
                 .labelStyle(.iconOnly)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(SumiTheme.indigo)

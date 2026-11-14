@@ -799,7 +799,7 @@ public struct MediaDetailView: View {
             VStack(alignment: .leading) {
                 Button(action: onClose) {
                     HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
+                        Image(anicat: "chevron.left")
                             .font(.system(size: 13, weight: .semibold))
                         Text("Back")
                             .font(.system(size: 12.5, weight: .medium))
@@ -953,7 +953,7 @@ public struct MediaDetailView: View {
                 Button {
                     startingPlayback { onPlayEpisode(episode) }
                 } label: {
-                    Label(compactActionLabel, systemImage: "play.fill")
+                    Label(compactActionLabel, anicat: "play.fill")
                         .fontWeight(.semibold)
                 }
                 .sumiPrimaryButton()
@@ -1138,7 +1138,7 @@ public struct MediaDetailView: View {
                             Text("More from \(studio.name)")
                                 .sumiTabularMono(size: 11)
                                 .foregroundColor(SumiTheme.indigo)
-                            Image(systemName: "chevron.right")
+                            Image(anicat: "chevron.right")
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundColor(SumiTheme.indigo.opacity(0.7))
                         }
@@ -1343,7 +1343,7 @@ public struct MediaDetailView: View {
                 Button {
                     if let episode = resumeTarget { startingPlayback { onPlayEpisode(episode) } }
                 } label: {
-                    Label { primaryActionTitle } icon: { Image(systemName: "play.fill") }
+                    Label { primaryActionTitle } icon: { Image(anicat: "play.fill") }
                 }
                 .sumiPrimaryButton()
                 .controlSize(.large)
@@ -1364,7 +1364,7 @@ public struct MediaDetailView: View {
                     // already draws the same distinction by unit.
                     Label(isContinuingChapters
                           ? "Continue Ch \(target.number)"
-                          : "Read Ch \(target.number)", systemImage: "book.fill")
+                          : "Read Ch \(target.number)", anicat: "book.fill")
                 }
                 .sumiPrimaryButton()
                 .controlSize(.large)
@@ -1421,7 +1421,7 @@ public struct MediaDetailView: View {
                 actionDivider
 
                 Button(action: onToggleFavourite) {
-                    Image(systemName: details.isFavourite ? "heart.fill" : "heart")
+                    Image(anicat: details.isFavourite ? "heart.fill" : "heart")
                         .font(.system(size: 15))
                         .foregroundColor(details.isFavourite ? SumiTheme.favourite : SumiTheme.muted)
                         .frame(width: 28, height: 34)
@@ -1439,11 +1439,11 @@ public struct MediaDetailView: View {
             if details.mediaCatalog == .anilist {
                 Menu {
                     Button(role: .destructive, action: onRemoveFromList) {
-                        Label("Remove from AniList", systemImage: "trash")
+                        Label("Remove from AniList", anicat: "trash")
                     }
                     .disabled(details.listEntryId == nil)
                 } label: {
-                    Image(systemName: "ellipsis")
+                    Image(anicat: "ellipsis")
                         .font(.system(size: 15))
                 }
                 .menuStyle(.borderlessButton)
@@ -1692,7 +1692,7 @@ public struct MediaDetailView: View {
             } label: {
                 HStack(spacing: 5) {
                     Text(isSynopsisExpanded ? "Show less" : "Read more")
-                    Image(systemName: isSynopsisExpanded ? "chevron.up" : "chevron.down")
+                    Image(anicat: isSynopsisExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 11, weight: .bold))
                 }
                 .font(.system(size: 11, weight: .bold))
@@ -1722,7 +1722,7 @@ public struct MediaDetailView: View {
             } label: {
                 HStack(spacing: 10) {
                     if leading {
-                        Image(systemName: "chevron.left")
+                        Image(anicat: "chevron.left")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(SumiTheme.muted)
                         Rectangle()
@@ -1780,7 +1780,7 @@ public struct MediaDetailView: View {
                             }
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 6))
-                        Image(systemName: "chevron.right")
+                        Image(anicat: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(SumiTheme.muted)
                     }
@@ -2101,7 +2101,7 @@ public struct MediaDetailView: View {
         private var offlineControl: some View {
             switch offline {
             case .stored:
-                Image(systemName: "arrow.down.circle.fill")
+                Image(anicat: "arrow.down.circle.fill")
                     .font(.system(size: 13))
                     .foregroundColor(SumiTheme.indigo)
                     .onTapGesture { onDeleteDownload?() }
@@ -2119,14 +2119,14 @@ public struct MediaDetailView: View {
                     .scaleEffect(0.7)
                     .frame(width: 16, height: 16)
             case .failed:
-                Image(systemName: "exclamationmark.circle")
+                Image(anicat: "exclamationmark.circle")
                     .font(.system(size: 13))
                     .foregroundColor(SumiTheme.warning)
                     .onTapGesture { onDownload?() }
                     .help("Download failed — click to retry")
             case .none:
                 if isHovered, onDownload != nil {
-                    Image(systemName: "arrow.down.circle")
+                    Image(anicat: "arrow.down.circle")
                         .font(.system(size: 13))
                         .foregroundColor(SumiTheme.muted)
                         .onTapGesture { onDownload?() }
@@ -2734,7 +2734,7 @@ private struct EpisodeRow: View, Equatable {
             .buttonStyle(.sumiPressable)
 
             Button(action: onOpenServerPicker) {
-                Image(systemName: "server.rack")
+                Image(anicat: "server.rack")
                     .font(.system(size: 14))
                     .foregroundColor(SumiTheme.muted.opacity(0.6))
                     .frame(width: 24, height: 24)
@@ -2807,7 +2807,7 @@ private struct EpisodeRow: View, Equatable {
         switch downloadState {
         case .notStarted:
             Button(action: onDownload) {
-                Image(systemName: "arrow.down.circle")
+                Image(anicat: "arrow.down.circle")
                     .font(.system(size: 15))
                     .foregroundColor(SumiTheme.muted.opacity(0.6))
                     .frame(width: 24, height: 24)
@@ -2829,14 +2829,14 @@ private struct EpisodeRow: View, Equatable {
             .help("Downloading… \(Int(percent))%")
             .transition(Self.downloadStateSwap)
         case .done:
-            Image(systemName: "checkmark.circle.fill")
+            Image(anicat: "checkmark.circle.fill")
                 .font(.system(size: 15))
                 .foregroundColor(SumiTheme.successLight)
                 .help("Downloaded")
                 .transition(Self.downloadStateSwap)
         case .failed(let message):
             Button(action: onDownload) {
-                Image(systemName: "exclamationmark.circle")
+                Image(anicat: "exclamationmark.circle")
                     .font(.system(size: 15))
                     .foregroundColor(SumiTheme.dangerLight)
                     .frame(width: 24, height: 24)
@@ -2980,7 +2980,7 @@ private struct EpisodeProgressBar: View {
 /// The tick on an episode row's mark-watched control.
 ///
 /// A stroked path with an animated `trim` rather than
-/// `Image(systemName: "checkmark.circle.fill")`: an episode crosses 85% while
+/// `Image(anicat: "checkmark.circle.fill")`: an episode crosses 85% while
 /// its own row is on screen, and a symbol can only pop into place there.
 private struct WatchedTick: View {
     let isWatched: Bool

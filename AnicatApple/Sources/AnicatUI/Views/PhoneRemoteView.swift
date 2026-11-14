@@ -90,7 +90,7 @@ struct PhoneRemoteView: View {
                             node = host
                         } label: {
                             if host.id == node.id {
-                                Label(host.name, systemImage: "checkmark")
+                                Label(host.name, anicat: "checkmark")
                             } else {
                                 Text(host.name)
                             }
@@ -104,7 +104,7 @@ struct PhoneRemoteView: View {
                         Button {
                             showingBrowse = true
                         } label: {
-                            Image(systemName: "list.and.film")
+                            Image(anicat: "list.and.film")
                         }
                     }
                 }
@@ -275,14 +275,14 @@ struct PhoneRemoteView: View {
                             client.send(.setPlaybackRate(rate))
                         } label: {
                             if abs(state.playbackRate - rate) < 0.01 {
-                                Label(Self.speedLabel(rate), systemImage: "checkmark")
+                                Label(Self.speedLabel(rate), anicat: "checkmark")
                             } else {
                                 Text(Self.speedLabel(rate))
                             }
                         }
                     }
                 } label: {
-                    Label(Self.speedLabel(state.playbackRate), systemImage: "speedometer")
+                    Label(Self.speedLabel(state.playbackRate), anicat: "speedometer")
                         .font(.system(size: 14))
                         .foregroundStyle(SumiTheme.muted)
                 }
@@ -296,7 +296,7 @@ struct PhoneRemoteView: View {
                     client.send(.requestTracks)
                     showingTracks = true
                 } label: {
-                    Label("Tracks", systemImage: "captions.bubble")
+                    Label("Tracks", anicat: "captions.bubble")
                         .font(.system(size: 14))
                         .foregroundStyle(SumiTheme.muted)
                 }
@@ -307,7 +307,7 @@ struct PhoneRemoteView: View {
                     client.send(.setUpscaling(!state.upscalingEnabled))
                 } label: {
                     // The Mac bar's glyph; "sparkles" reads as an AI feature.
-                    Label("Upscale", systemImage: "4k.tv")
+                    Label("Upscale", anicat: "4k.tv")
                         .font(.system(size: 14))
                         .foregroundStyle(state.upscalingEnabled ? SumiTheme.indigo : SumiTheme.muted)
                 }
@@ -319,7 +319,7 @@ struct PhoneRemoteView: View {
                 } label: {
                     Label(
                         "Autoplay",
-                        systemImage: state.autoPlayNextEnabled
+                        anicat: state.autoPlayNextEnabled
                             ? "play.square.stack.fill"
                             : "play.square.stack"
                     )
@@ -392,7 +392,7 @@ struct PhoneRemoteView: View {
                 }
                 Spacer()
                 if isSelected {
-                    Image(systemName: "checkmark").foregroundStyle(SumiTheme.indigo)
+                    Image(anicat: "checkmark").foregroundStyle(SumiTheme.indigo)
                 }
             }
         }
@@ -418,7 +418,7 @@ struct PhoneRemoteView: View {
             Button {
                 client.send(.toggleMute)
             } label: {
-                Image(systemName: state.isMuted ? "speaker.slash.fill" : "speaker.fill")
+                Image(anicat: state.isMuted ? "speaker.slash.fill" : "speaker.fill")
                     .font(.system(size: 15))
                     .foregroundStyle(SumiTheme.muted)
             }
@@ -457,7 +457,7 @@ struct PhoneRemoteView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
+            Image(anicat: symbol)
                 .font(.system(size: size))
                 .foregroundStyle(enabled ? SumiTheme.foreground : SumiTheme.muted.opacity(0.4))
                 // At least 44: a 22pt glyph plus 14 made a 36pt target.
@@ -475,7 +475,7 @@ struct PhoneRemoteView: View {
         showsRetry: Bool = false
     ) -> some View {
         VStack(spacing: 10) {
-            Image(systemName: symbol)
+            Image(anicat: symbol)
                 .font(.system(size: 34))
                 .foregroundStyle(SumiTheme.muted)
             Text(title)

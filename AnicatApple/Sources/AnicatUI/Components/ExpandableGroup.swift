@@ -15,7 +15,7 @@ struct ExpandableGroup<Content: View>: View {
                 withAnimation(.snappy) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
+                    Image(anicat: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     Text(title)

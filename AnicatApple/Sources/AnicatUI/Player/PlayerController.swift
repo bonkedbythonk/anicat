@@ -442,8 +442,7 @@ public final class PlayerController {
     public private(set) var seekFlash: SeekFlash?
     private var seekFlashTask: Task<Void, Never>?
     private var seekFlashCount = 0
-    /// What a toggle in the bar just did, shown over the picture for a
-    /// moment. The icon's tint change alone went unnoticed ("i need some
+    /// What a toggle just did, shown in the top bar for a moment. The icon's tint change alone went unnoticed ("i need some
     /// visual confirmation"): the icons are 14 pt in a corner and the eye
     /// is on the picture.
     public struct HUDFlash: Equatable, Sendable {
@@ -456,6 +455,9 @@ public final class PlayerController {
     private var hudFlashCount = 0
 
     public func flashHUD(_ text: String, symbol: String) {
+        // The message is shown in the top bar now, so the bar has to be up
+        // for a keyboard toggle made with the controls hidden.
+        showControlsBriefly()
         hudFlashCount += 1
         hudFlash = HUDFlash(symbol: symbol, text: text, token: hudFlashCount)
         hudFlashTask?.cancel()

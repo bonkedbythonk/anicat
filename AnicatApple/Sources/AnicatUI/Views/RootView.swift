@@ -167,7 +167,7 @@ public struct RootView: View {
                     // never use was down, on every launch of an outage.
                     if model.isAniListDown, model.appMode == .anime {
                         HStack(spacing: 12) {
-                            Image(systemName: "exclamationmark.triangle.fill")
+                            Image(anicat: "exclamationmark.triangle.fill")
                                 .foregroundColor(SumiTheme.warning)
                                 .font(.system(size: 14))
 

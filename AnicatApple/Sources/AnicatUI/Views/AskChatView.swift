@@ -88,7 +88,7 @@ struct AskChatView: View {
                         .focused($focused)
                         .onSubmit(send)
                     Button(action: send) {
-                        Image(systemName: "arrow.up.circle.fill")
+                        Image(anicat: "arrow.up.circle.fill")
                             .font(.system(size: 20))
                             .foregroundColor(canSend ? SumiTheme.indigo : SumiTheme.muted)
                     }

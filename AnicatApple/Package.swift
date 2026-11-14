@@ -72,6 +72,7 @@ let package = Package(
             resources: [
                 .copy("Resources/Shaders"),
                 .process("Resources/Images"),
+                .process("Resources/Symbols.xcassets"),
                 .copy("Resources/Fonts"),
                 // Per-skin pictures, looked up by SkinArt after the owner's
                 // own folder. Copied, not processed: they are already JPEGs.

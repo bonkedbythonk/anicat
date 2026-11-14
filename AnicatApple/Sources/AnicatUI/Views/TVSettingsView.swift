@@ -73,7 +73,7 @@ struct TVSettingsView: View {
 
     private var identity: some View {
         VStack(spacing: 20) {
-            Image(systemName: "pawprint.fill")
+            Image(anicat: "pawprint.fill")
                 .font(.system(size: 160))
                 .foregroundStyle(SumiTheme.foreground.opacity(0.12))
                 .padding(.bottom, 20)
@@ -167,7 +167,7 @@ struct TVSettingsView: View {
             .frame(width: 64, height: 64)
             .clipShape(Circle())
         } else {
-            Image(systemName: "person.crop.circle")
+            Image(anicat: "person.crop.circle")
                 .font(.system(size: 56))
                 .foregroundStyle(.secondary)
         }
@@ -236,7 +236,7 @@ struct TVSettingsView: View {
                 .font(.system(size: 20))
                 .foregroundStyle(.secondary)
             if let name = RemoteHost.shared.attachedRemoteName {
-                Label("\(name) connected", systemImage: "iphone")
+                Label("\(name) connected", anicat: "iphone")
                     .foregroundStyle(.secondary)
             }
             if pairedCount > 0 {
@@ -285,7 +285,7 @@ struct TVSettingsView: View {
     private var cinema: some View {
         TVSection("Films & TV") {
             if model.cinemaAvailable {
-                Label("TMDB connected", systemImage: "checkmark.circle")
+                Label("TMDB connected", anicat: "checkmark.circle")
                     .foregroundStyle(.secondary)
             } else {
                 Text("Add a TMDB API key to browse films and series. Free from themoviedb.org.")

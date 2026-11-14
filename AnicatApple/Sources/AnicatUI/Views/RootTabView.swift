@@ -50,19 +50,19 @@ public struct RootTabView: View {
         ZStack {
             TabView(selection: $tab) {
                 UpNextTab(model: model, showDetail: scoped(to: .upNext))
-                    .tabItem { Label("Up Next", systemImage: "play.circle") }
+                    .tabItem { Label("Up Next", anicat: "play.circle") }
                     .tag(Tab.upNext)
 
                 LibraryTab(model: model, showDetail: scoped(to: .library))
-                    .tabItem { Label("Library", systemImage: "rectangle.stack") }
+                    .tabItem { Label("Library", anicat: "rectangle.stack") }
                     .tag(Tab.library)
 
                 PhoneReadTab(model: model, showDetail: scoped(to: .read))
-                    .tabItem { Label("Read", systemImage: "book") }
+                    .tabItem { Label("Read", anicat: "book") }
                     .tag(Tab.read)
 
                 SearchTab(model: model, showDetail: scoped(to: .search))
-                    .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                    .tabItem { Label("Search", anicat: "magnifyingglass") }
                     .tag(Tab.search)
             }
             .environment(\.openProfile) { showProfile = true }
@@ -656,7 +656,7 @@ struct AiringTodayStrip: View {
                 } label: {
                     HStack(spacing: 3) {
                         Text("Schedule")
-                        Image(systemName: "chevron.right")
+                        Image(anicat: "chevron.right")
                             .font(.system(size: 11, weight: .semibold))
                     }
                     .font(.system(size: 13, weight: .medium))
@@ -808,7 +808,7 @@ struct ContinueWatchingRow: View {
                                         )
                                     }
                                 } label: {
-                                    Label("Play Ep \(entry.nextEpisodeOrChapter)", systemImage: "play.fill")
+                                    Label("Play Ep \(entry.nextEpisodeOrChapter)", anicat: "play.fill")
                                 }
                             }
                         }
@@ -915,7 +915,7 @@ struct NewEpisodeRow: View {
                         .foregroundStyle(SumiTheme.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right")
+                Image(anicat: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(SumiTheme.muted)
             }
@@ -1207,7 +1207,7 @@ private struct LibraryTab: View {
                     .foregroundStyle(SumiTheme.foreground)
                 Spacer()
                 if selected {
-                    Image(systemName: "checkmark")
+                    Image(anicat: "checkmark")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(SumiTheme.indigo)
                 }
@@ -1286,7 +1286,7 @@ struct PosterList: View {
                             .foregroundStyle(SumiTheme.muted)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "chevron.right")
+                        Image(anicat: "chevron.right")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(SumiTheme.muted)
                     }
@@ -1338,7 +1338,7 @@ private struct SearchTab: View {
                             Button {
                                 showFilters = true
                             } label: {
-                                Image(systemName: filters.isActive
+                                Image(anicat: filters.isActive
                                       ? "line.3.horizontal.decrease.circle.fill"
                                       : "line.3.horizontal.decrease.circle")
                                     .font(.system(size: 24))
@@ -1440,7 +1440,7 @@ private struct SearchTab: View {
                     .controlSize(.small)
                     .frame(width: 18)
             } else {
-                Image(systemName: "magnifyingglass")
+                Image(anicat: "magnifyingglass")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(SumiTheme.muted)
                     .frame(width: 18)
@@ -1459,7 +1459,7 @@ private struct SearchTab: View {
                 Button {
                     query = ""
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
+                    Image(anicat: "xmark.circle.fill")
                         .font(.system(size: 16))
                         .foregroundStyle(SumiTheme.muted)
                 }
@@ -1509,7 +1509,7 @@ private struct SearchTab: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Text(chip.label)
-                                Image(systemName: "xmark")
+                                Image(anicat: "xmark")
                                     .font(.system(size: 9, weight: .bold))
                             }
                             .font(.system(size: 12.5, weight: .medium))
@@ -1585,7 +1585,7 @@ private struct SearchTab: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let trailing {
-                    Image(systemName: trailing)
+                    Image(anicat: trailing)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(SumiTheme.muted)
                 }
@@ -1872,7 +1872,7 @@ private struct PhoneErrorToast: View {
     var body: some View {
         VStack {
             HStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(anicat: "exclamationmark.triangle.fill")
                     .foregroundStyle(SumiTheme.warning)
                     .font(.system(size: 14))
 
@@ -1898,7 +1898,7 @@ private struct PhoneErrorToast: View {
                 }
 
                 Button(action: dismiss) {
-                    Image(systemName: "xmark")
+                    Image(anicat: "xmark")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(SumiTheme.muted)
                         // 44pt target: the Mac's 4pt padding is a click

@@ -182,7 +182,7 @@ public struct CalendarView: View {
             guard let next = Calendar.current.date(byAdding: .month, value: months, to: month) else { return }
             withAnimation(.sumi(.pop)) { month = next }
         } label: {
-            Image(systemName: systemName)
+            Image(anicat: systemName)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(SumiTheme.muted)
                 .frame(width: 26, height: 26)
@@ -318,7 +318,7 @@ public struct CalendarView: View {
                 Button {
                     selectedDay = nil
                 } label: {
-                    Image(systemName: "xmark")
+                    Image(anicat: "xmark")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(SumiTheme.muted)
                         .frame(width: 18, height: 18)

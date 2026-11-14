@@ -91,7 +91,7 @@ public struct SyosetuReaderView: View {
                         .keyboardType(.URL)
                         #endif
                     Button(action: load) {
-                        Label("Open", systemImage: "book").fontWeight(.semibold)
+                        Label("Open", anicat: "book").fontWeight(.semibold)
                     }
                     .sumiPrimaryButton()
                     .disabled(urlField.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -427,7 +427,7 @@ public struct SyosetuReaderView: View {
             Button {
                 jump(session, by: -1)
             } label: {
-                Label("Previous", systemImage: "chevron.left")
+                Label("Previous", anicat: "chevron.left")
             }
             .disabled(session.currentChapterIndex <= 0)
 
@@ -442,7 +442,7 @@ public struct SyosetuReaderView: View {
             Button {
                 jump(session, by: 1)
             } label: {
-                Label("Next", systemImage: "chevron.right")
+                Label("Next", anicat: "chevron.right")
             }
             .disabled((session.info?.chapters.count ?? 0) <= session.currentChapterIndex + 1)
         }

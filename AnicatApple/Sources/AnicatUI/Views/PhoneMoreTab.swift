@@ -85,7 +85,7 @@ struct PhoneProfileView: View {
         LabeledContent {
             if let value { Text(value).monospacedDigit() }
         } label: {
-            Label(title, systemImage: icon)
+            Label(title, anicat: icon)
         }
     }
 }
@@ -106,7 +106,7 @@ struct AccountAvatar: View {
             .frame(width: size, height: size)
             .clipShape(Circle())
         } else {
-            Image(systemName: "person.crop.circle")
+            Image(anicat: "person.crop.circle")
                 .font(.system(size: size * 0.9))
                 .foregroundStyle(SumiTheme.muted)
         }
@@ -176,7 +176,7 @@ struct PhoneScheduleView: View {
                     withAnimation(.snappy) { watchingOnly.toggle() }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: watchingOnly ? "checkmark.circle.fill" : "circle")
+                        Image(anicat: watchingOnly ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 13, weight: .semibold))
                         Text("Only what I am watching")
                             .font(.system(size: 13, weight: .medium))
@@ -279,7 +279,7 @@ private struct ScheduleRow: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right")
+            Image(anicat: "chevron.right")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SumiTheme.muted)
         }
@@ -349,7 +349,7 @@ struct PhoneHistoryView: View {
                                         Button(role: .destructive) {
                                             Task { await model.removeWatch(row) }
                                         } label: {
-                                            Label("Remove", systemImage: "trash")
+                                            Label("Remove", anicat: "trash")
                                         }
                                     }
                             }
@@ -427,7 +427,7 @@ private struct HistoryRowView: View {
                     .foregroundStyle(SumiTheme.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right")
+            Image(anicat: "chevron.right")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SumiTheme.muted)
         }

@@ -137,7 +137,7 @@ struct PersonPageScaffold<Content: View>: View {
         SumiPage {
             Button(action: onBack) {
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.left")
+                    Image(anicat: "chevron.left")
                         .font(.system(size: 13, weight: .semibold))
                     Text("Back")
                         .font(.system(size: 12.5, weight: .medium))
@@ -157,7 +157,7 @@ struct PersonPageScaffold<Content: View>: View {
                 } label: {
                     HStack(spacing: 5) {
                         Text("Open on AniList")
-                        Image(systemName: "arrow.up.right")
+                        Image(anicat: "arrow.up.right")
                             .font(.system(size: 9, weight: .semibold))
                     }
                     .sumiTabularMono(size: 10)

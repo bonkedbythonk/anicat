@@ -140,7 +140,7 @@ private struct ThreadCommentRow: View {
 
                     if comment.likeCount > 0 {
                         HStack(spacing: 3) {
-                            Image(systemName: "heart.fill")
+                            Image(anicat: "heart.fill")
                                 .font(.system(size: 8))
                             Text("\(comment.likeCount)")
                         }

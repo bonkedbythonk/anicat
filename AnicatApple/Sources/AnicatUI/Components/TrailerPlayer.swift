@@ -179,7 +179,7 @@ private struct TrailerBlockedView: View {
                     Button {
                         Platform.openExternal(watchURL)
                     } label: {
-                        Label("Watch on \(siteName)", systemImage: "play.fill")
+                        Label("Watch on \(siteName)", anicat: "play.fill")
                             .fontWeight(.semibold)
                     }
                     .sumiPrimaryButton()

@@ -225,7 +225,7 @@ struct PhonePlayerView: View {
                 controller.togglePlayPause()
                 AppHaptics.play(.transport)
             } label: {
-                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                Image(anicat: controller.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(SumiTheme.foreground)
                     .frame(width: 44, height: 44)
@@ -241,7 +241,7 @@ struct PhonePlayerView: View {
                 AppHaptics.play(.transport)
                 controller.seekRelative(by: 5)
             } label: {
-                Image(systemName: "goforward.5")
+                Image(anicat: "goforward.5")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(SumiTheme.foreground)
                     .frame(width: 44, height: 44)
@@ -270,7 +270,7 @@ struct PhonePlayerView: View {
         .onTapGesture(perform: onRestore)
         .contextMenu {
             Button(role: .destructive, action: onClose) {
-                Label("Stop", systemImage: "xmark")
+                Label("Stop", anicat: "xmark")
             }
         }
         .padding(.horizontal, 16)
@@ -367,7 +367,7 @@ struct PhonePlayerView: View {
             // Minimise, not stop: the system player's chevron shrinks the
             // picture and keeps it going. Stop is the X at the other end.
             Button(action: onMinimize) {
-                Image(systemName: "chevron.down")
+                Image(anicat: "chevron.down")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
@@ -399,7 +399,7 @@ struct PhonePlayerView: View {
                 Button {
                     openPanel(.tracks)
                 } label: {
-                    Image(systemName: "captions.bubble")
+                    Image(anicat: "captions.bubble")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
@@ -410,7 +410,7 @@ struct PhonePlayerView: View {
                     Button {
                         showEpisodes = true
                     } label: {
-                        Image(systemName: "rectangle.stack")
+                        Image(anicat: "rectangle.stack")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: 44, height: 44)
@@ -421,7 +421,7 @@ struct PhonePlayerView: View {
                 Button {
                     openPanel(.options)
                 } label: {
-                    Image(systemName: "ellipsis")
+                    Image(anicat: "ellipsis")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
@@ -435,7 +435,7 @@ struct PhonePlayerView: View {
             // corner from the chevron, so minimise and stop are not one
             // mis-tap apart.
             Button(action: onClose) {
-                Image(systemName: "xmark")
+                Image(anicat: "xmark")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
@@ -514,7 +514,7 @@ struct PhonePlayerView: View {
                 )
                 AppModel.shared?.stopPlayback()
             } label: {
-                Label("Continue on \(node.name)", systemImage: "macbook.and.iphone")
+                Label("Continue on \(node.name)", anicat: "macbook.and.iphone")
             }
         }
     }
@@ -674,7 +674,7 @@ struct PhonePlayerView: View {
                     .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Image(systemName: "chevron.right")
+                Image(anicat: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.5))
             }
@@ -737,7 +737,7 @@ struct PhonePlayerView: View {
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 if selected {
-                    Image(systemName: "checkmark")
+                    Image(anicat: "checkmark")
                         .font(.system(size: 13, weight: .semibold))
                 }
             }
@@ -750,7 +750,7 @@ struct PhonePlayerView: View {
     private func panelAction(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: systemImage)
+                Image(anicat: systemImage)
                     .font(.system(size: 14, weight: .semibold))
                     .frame(width: 20)
                 Text(title)
@@ -811,9 +811,9 @@ struct PhonePlayerView: View {
                 if isLoadingReleases {
                     ProgressView("Searching indexers")
                 } else if let releaseFailure {
-                    ContentUnavailableView("Could not list releases", systemImage: "exclamationmark.triangle", description: Text(releaseFailure))
+                    ContentUnavailableView("Could not list releases", anicat: "exclamationmark.triangle", description: Text(releaseFailure))
                 } else if releases.isEmpty {
-                    ContentUnavailableView("No other releases", systemImage: "square.stack.3d.up.slash")
+                    ContentUnavailableView("No other releases", anicat: "square.stack.3d.up.slash")
                 } else {
                     List(releases) { release in
                         Button {
@@ -843,7 +843,7 @@ struct PhonePlayerView: View {
                                 }
                                 Spacer(minLength: 8)
                                 if release.name == controller.currentReleaseName {
-                                    Image(systemName: "checkmark")
+                                    Image(anicat: "checkmark")
                                         .foregroundStyle(.tint)
                                 }
                             }
@@ -975,7 +975,7 @@ struct PhonePlayerView: View {
 
     private func edgeBar(symbol: String, fraction: Double, edge: HorizontalEdge) -> some View {
         VStack(spacing: 10) {
-            Image(systemName: symbol)
+            Image(anicat: symbol)
                 .font(.system(size: 15, weight: .semibold))
                 .frame(height: 18)
             Capsule()
@@ -998,7 +998,7 @@ struct PhonePlayerView: View {
     @ViewBuilder
     private func centredHud(_ hud: Hud) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: hud.symbol)
+            Image(anicat: hud.symbol)
                 .font(.system(size: 26, weight: .regular))
             Text(hud.text)
                 .sumiTabularMono(size: 12, weight: .semibold)
@@ -1065,7 +1065,7 @@ struct PhonePlayerView: View {
     private var transport: some View {
         HStack(spacing: Self.transportGap) {
             Button { seek(by: -5) } label: {
-                Image(systemName: "gobackward.5")
+                Image(anicat: "gobackward.5")
                     .font(.system(size: 36, weight: .regular))
                     .frame(width: Self.skipCell, height: Self.skipCell)
             }
@@ -1083,14 +1083,14 @@ struct PhonePlayerView: View {
                         .tint(.white)
                         .frame(width: Self.playCell, height: Self.playCell)
                 } else {
-                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                    Image(anicat: controller.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 50, weight: .regular))
                         .contentTransition(.symbolEffect(.replace))
                         .frame(width: Self.playCell, height: Self.playCell)
                 }
             }
             Button { seek(by: 5) } label: {
-                Image(systemName: "goforward.5")
+                Image(anicat: "goforward.5")
                     .font(.system(size: 36, weight: .regular))
                     .frame(width: Self.skipCell, height: Self.skipCell)
             }
@@ -1200,7 +1200,7 @@ struct PhonePlayerView: View {
                         HStack(spacing: 8) {
                             Text(window.label)
                                 .font(.system(size: 14, weight: .semibold))
-                            Image(systemName: "forward.end.fill")
+                            Image(anicat: "forward.end.fill")
                                 .font(.system(size: 12, weight: .semibold))
                         }
                         .foregroundStyle(.white)
@@ -1470,7 +1470,7 @@ struct PhonePlayerView: View {
     private func seekFlash(symbol: String, trailing: Bool) -> some View {
         HStack {
             if trailing { Spacer() }
-            Image(systemName: symbol)
+            Image(anicat: symbol)
                 .font(.system(size: 34, weight: .regular))
                 .foregroundStyle(.white)
                 .padding(26)
@@ -1535,7 +1535,7 @@ struct PhonePlayerView: View {
                             Button {
                                 showReleases = true
                             } label: {
-                                Label("Switch release", systemImage: "square.stack.3d.up")
+                                Label("Switch release", anicat: "square.stack.3d.up")
                                     .font(.system(size: 13, weight: .semibold))
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 8)
@@ -1612,13 +1612,13 @@ private struct PlayerEpisodeRow: View {
                 .clipped()
                 if isCurrent {
                     Color.black.opacity(0.45)
-                    Image(systemName: "play.fill")
+                    Image(anicat: "play.fill")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if episode.isWatched {
                     Color.black.opacity(0.45)
-                    Image(systemName: "checkmark")
+                    Image(anicat: "checkmark")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

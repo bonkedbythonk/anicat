@@ -90,7 +90,7 @@ struct MangaTabSection: View {
         HStack(spacing: 12) {
             Button { onReadVolume?(volume) } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: state == .stored ? "book.closed.fill" : "book.closed")
+                    Image(anicat: state == .stored ? "book.closed.fill" : "book.closed")
                         .font(.system(size: 13))
                         .foregroundColor(state == .stored ? SumiTheme.indigo : SumiTheme.muted)
                         .frame(width: 20)
@@ -152,7 +152,7 @@ struct MangaTabSection: View {
                 if busy {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: systemImage)
+                    Image(anicat: systemImage)
                         .font(.system(size: 13))
                         .foregroundColor(tint)
                 }

@@ -29,7 +29,7 @@ struct AccountTabSection: View {
                         } else {
                             ZStack {
                                 SumiTheme.card
-                                Image(systemName: "person.fill")
+                                Image(anicat: "person.fill")
                                     .font(.system(size: 24))
                                     .foregroundColor(SumiTheme.muted)
                             }

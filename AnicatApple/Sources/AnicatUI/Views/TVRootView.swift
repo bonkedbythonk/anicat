@@ -1017,7 +1017,7 @@ struct TVErrorCard: View {
 
     var body: some View {
         HStack(spacing: 24) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(anicat: "exclamationmark.triangle.fill")
                 .font(.system(size: 28))
                 .foregroundStyle(SumiTheme.warning)
             Text(message)

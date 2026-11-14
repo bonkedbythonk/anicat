@@ -329,7 +329,7 @@ public struct OnboardingView: View {
             // screen showed the paste form regardless, so the one action on
             // screen was one that had already been done.
             HStack(spacing: 12) {
-                Image(systemName: "checkmark.circle.fill")
+                Image(anicat: "checkmark.circle.fill")
                     .font(.system(size: 18))
                     .foregroundColor(SumiTheme.indigo)
                 VStack(alignment: .leading, spacing: 2) {
@@ -621,7 +621,7 @@ public struct OnboardingView: View {
     /// caution card in the middle of first run reads as one.
     private func note(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 7) {
-            Image(systemName: "info.circle")
+            Image(anicat: "info.circle")
                 .font(.system(size: 10))
                 .foregroundColor(SumiTheme.muted.opacity(0.8))
                 .padding(.top, 1)
@@ -829,7 +829,7 @@ private struct MockPresence: View {
                 .fill(SumiTheme.indigo.opacity(0.35))
                 .frame(width: 34, height: 34)
                 .overlay(alignment: .bottomTrailing) {
-                    Image(systemName: "pawprint.fill")
+                    Image(anicat: "pawprint.fill")
                         .font(.system(size: 7, weight: .bold))
                         .foregroundColor(SumiTheme.indigo)
                         .padding(3)

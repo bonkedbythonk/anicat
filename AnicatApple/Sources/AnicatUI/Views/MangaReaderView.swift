@@ -776,7 +776,7 @@ public struct MangaReaderView: View {
                             .fill(SumiTheme.card)
                             .frame(height: 300)
                             .overlay(
-                                Image(systemName: "exclamationmark.triangle")
+                                Image(anicat: "exclamationmark.triangle")
                                     .foregroundColor(SumiTheme.warning)
                             )
                     }
@@ -855,7 +855,7 @@ public struct MangaReaderView: View {
         ) {
             ProgressView()
         } failure: {
-            Image(systemName: "exclamationmark.triangle")
+            Image(anicat: "exclamationmark.triangle")
                 .foregroundColor(SumiTheme.warning)
         }
         .id(pageURLs[index])
@@ -973,7 +973,7 @@ public struct MangaReaderView: View {
     }
 
     private func barGlyph(_ systemName: String, isOn: Bool = false) -> some View {
-        Image(systemName: systemName)
+        Image(anicat: systemName)
             .font(.system(size: 13, weight: .medium))
             .foregroundColor(isOn ? SumiTheme.indigo : SumiTheme.foreground.opacity(0.8))
             .frame(width: Self.glyphHit, height: Self.glyphHit)

@@ -5,6 +5,8 @@ import AppKit
 
 struct PlayerBottomBar: View {
     @Bindable var controller: PlayerController
+    /// Named in the top bar's label slot; see `ChromeName`.
+    @Binding var chromeHover: ChromeName?
     @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
     /// The hairline exists to separate a bar sitting in solid letterbox
     /// black from the picture above it. When the bar overlays the picture
@@ -26,9 +28,9 @@ struct PlayerBottomBar: View {
 
     private var rotateHelpText: String {
         switch controller.sidewaysState {
-            case 1: return "Rotate: 90 CW (Shift+V)"
-            case 2: return "Rotate: 90 CCW (Shift+V)"
-            default: return "Rotate Video (Shift+V)"
+            case 1: return "Rotated 90 clockwise (Shift+V)"
+            case 2: return "Rotated 90 counterclockwise (Shift+V)"
+            default: return "Rotate video (Shift+V)"
         }
     }
 
@@ -217,7 +219,7 @@ struct PlayerBottomBar: View {
         HStack(spacing: 2) {
             // Previous Episode
             Button(action: { controller.previousEpisode() }) {
-                Image(systemName: "backward.end.fill")
+                Image(anicat: "backward.end.fill")
                 .font(.system(size: 14))
                 .foregroundColor(controller.hasPreviousEpisode ? PlayerChrome.foreground.opacity(0.8) : PlayerChrome.muted.opacity(0.4))
                 .frame(width: 40, height: 40)
@@ -225,7 +227,7 @@ struct PlayerBottomBar: View {
             }
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasPreviousEpisode)
-            .help("Previous Episode (P)")
+            .chromeName("Previous episode (P)", $chromeHover)
             .accessibilityLabel("Previous Episode (P)")
 
             // Play / Pause — the one filled, colored control in the row:
@@ -235,7 +237,7 @@ struct PlayerBottomBar: View {
             // real weight (the detail page's "Play Episode" button, the
             // AniSkip pill).
             Button(action: { controller.togglePlayPause() }) {
-                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                Image(anicat: controller.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 14, weight: .bold))
                     .contentTransition(.symbolEffect(.replace))
                     .animation(.snappy(duration: 0.25), value: controller.isPlaying)
@@ -249,36 +251,36 @@ struct PlayerBottomBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .help(controller.isPlaying ? "Pause (Space)" : "Play (Space)")
+            .chromeName(controller.isPlaying ? "Pause (Space)" : "Play (Space)", $chromeHover)
             .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
 
             // Seek -5s
             Button(action: { controller.seekRelative(by: -5) }) {
-                Image(systemName: "gobackward.5")
+                Image(anicat: "gobackward.5")
                 .font(.system(size: 15))
                 .foregroundColor(PlayerChrome.foreground.opacity(0.8))
                 .frame(width: 40, height: 40)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .help("Back 5 seconds")
+            .chromeName("Back 5 seconds", $chromeHover)
             .accessibilityLabel("Back 5 seconds")
 
             // Seek +5s
             Button(action: { controller.seekRelative(by: 5) }) {
-                Image(systemName: "goforward.5")
+                Image(anicat: "goforward.5")
                 .font(.system(size: 15))
                 .foregroundColor(PlayerChrome.foreground.opacity(0.8))
                 .frame(width: 40, height: 40)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
-            .help("Forward 5 seconds")
+            .chromeName("Forward 5 seconds", $chromeHover)
             .accessibilityLabel("Forward 5 seconds")
 
             // Next Episode
             Button(action: { controller.nextEpisode() }) {
-                Image(systemName: "forward.end.fill")
+                Image(anicat: "forward.end.fill")
                 .font(.system(size: 14))
                 .foregroundColor(controller.hasNextEpisode ? PlayerChrome.foreground.opacity(0.8) : PlayerChrome.muted.opacity(0.4))
                 .frame(width: 40, height: 40)
@@ -286,7 +288,7 @@ struct PlayerBottomBar: View {
             }
             .buttonStyle(.sumiPressable)
             .disabled(!controller.hasNextEpisode)
-            .help("Next Episode (N)")
+            .chromeName("Next episode (N)", $chromeHover)
             .accessibilityLabel("Next Episode (N)")
 
             // Time Display
@@ -315,14 +317,14 @@ struct PlayerBottomBar: View {
             // Volume
                 HStack(spacing: 6) {
                     Button(action: { controller.toggleMute() }) {
-                        Image(systemName: volumeIcon)
+                        Image(anicat: volumeIcon)
                         .font(.system(size: 14))
                         .foregroundColor(PlayerChrome.foreground.opacity(0.8))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.sumiPressable)
-                    .help(controller.isMuted ? "Unmute (M)" : "Mute (M)")
+                    .chromeName(controller.isMuted ? "Unmute (M)" : "Mute (M)", $chromeHover)
                     .accessibilityLabel(controller.isMuted ? "Unmute (M)" : "Mute (M)")
 
                     // `Slider` is not in the tvOS SDK; the TV's volume is
@@ -341,42 +343,39 @@ struct PlayerBottomBar: View {
                 Button(action: { controller.toggleAnime4K() }) {
                     // Rejected before this one: "sparkles" (reads as an AI
                     // feature), "camera.filters" and an outlined "A4K" chip.
-                    Image(systemName: "4k.tv")
+                    Image(anicat: "4k.tv")
                     .font(.system(size: 14))
                     .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
+                .chromeName("Upscaling", isOn: controller.isAnime4KEnabled, $chromeHover)
                 .accessibilityLabel(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
 
                 // Ambient glow. The same key Settings writes; the player is
                 // where the effect is judged, so the switch lives here too.
-                Button(action: {
-                    ambientGlowEnabled.toggle()
-                    controller.flashHUD(ambientGlowEnabled ? "Ambient glow on" : "Ambient glow off", symbol: "light.max")
-                }) {
-                    Image(systemName: ambientGlowEnabled ? "light.max" : "light.min")
+                Button(action: { ambientGlowEnabled.toggle() }) {
+                    Image(anicat: ambientGlowEnabled ? "light.max" : "light.min")
                     .font(.system(size: 14))
                     .foregroundColor(ambientGlowEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help(ambientGlowEnabled ? "Ambient glow: On" : "Ambient glow: Off")
+                .chromeName("Ambient glow", isOn: ambientGlowEnabled, $chromeHover)
                 .accessibilityLabel(ambientGlowEnabled ? "Ambient glow: On" : "Ambient glow: Off")
 
                 // Rotate 90 degrees (off / CW / CCW)
                 Button(action: { controller.cycleSideways() }) {
-                    Image(systemName: "rotate.right")
+                    Image(anicat: "rotate.right")
                     .font(.system(size: 14))
                     .foregroundColor(controller.sidewaysState != 0 ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help(rotateHelpText)
+                .chromeName(rotateHelpText, $chromeHover)
                 .accessibilityLabel(rotateHelpText)
 
                 // Fullscreen. The whole control is compiled out on iOS
@@ -390,14 +389,14 @@ struct PlayerBottomBar: View {
                             FullScreenGuard.toggle(on: window)
                         }
                 }) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    Image(anicat: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 14))
                     .foregroundColor(PlayerChrome.foreground.opacity(0.8))
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .help("Toggle Fullscreen (F)")
+                .chromeName("Fullscreen (F)", $chromeHover)
                 .accessibilityLabel("Toggle Fullscreen (F)")
                 #endif
         }

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="3300" height="2200">
+ <g id="Notes">
+  <text id="template-version" x="3036" y="1933" style="font-family:'LucidaGrande';font-size:13">Template v.3.0</text>
+ </g>
+ <g id="Guides">
+  <line id="Baseline-S" style="fill:none;stroke:#27AAE1;stroke-width:0.5" x1="263" x2="3036" y1="696" y2="696"/>
+  <line id="Capline-S" style="fill:none;stroke:#27AAE1;stroke-width:0.5" x1="263" x2="3036" y1="625.541" y2="625.541"/>
+  <line id="Baseline-M" style="fill:none;stroke:#27AAE1;stroke-width:0.5" x1="263" x2="3036" y1="1126" y2="1126"/>
+  <line id="Capline-M" style="fill:none;stroke:#27AAE1;stroke-width:0.5" x1="263" x2="3036" y1="1055.54" y2="1055.54"/>
+  <line id="Baseline-L" style="fill:none;stroke:#27AAE1;stroke-width:0.5" x1="263" x2="3036" y1="1556" y2="1556"/>
+  <line id="Capline-L" style="fill:none;stroke:#27AAE1;stroke-width:0.5" x1="263" x2="3036" y1="1485.54" y2="1485.54"/>
+  <line id="left-margin-Ultralight-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="263.0" x2="263.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Ultralight-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="333.20120000000003" x2="333.20120000000003" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Thin-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="563.0" x2="563.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Thin-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="634.2212" x2="634.2212" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Light-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="863.0" x2="863.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Light-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="935.7512" x2="935.7512" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1163.0" x2="1163.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1237.5362" x2="1237.5362" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Medium-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1463.0" x2="1463.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Medium-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1538.5562" x2="1538.5562" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Semibold-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1763.0" x2="1763.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Semibold-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1839.5762" x2="1839.5762" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Bold-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2063.0" x2="2063.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Bold-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2140.8512" x2="2140.8512" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Heavy-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2363.0" x2="2363.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Heavy-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2442.3812" x2="2442.3812" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Black-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2663.0" x2="2663.0" y1="601.0" y2="720.0"/>
+  <line id="right-margin-Black-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2743.9112" x2="2743.9112" y1="601.0" y2="720.0"/>
+  <line id="left-margin-Ultralight-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="263.0" x2="263.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Ultralight-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="348.695" x2="348.695" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Thin-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="563.0" x2="563.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Thin-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="649.715" x2="649.715" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Light-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="863.0" x2="863.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Light-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="951.245" x2="951.245" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Regular-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1163.0" x2="1163.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Regular-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1253.03" x2="1253.03" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Medium-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1463.0" x2="1463.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Medium-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1554.05" x2="1554.05" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Semibold-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1763.0" x2="1763.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Semibold-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1855.07" x2="1855.07" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Bold-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2063.0" x2="2063.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Bold-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2156.345" x2="2156.345" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Heavy-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2363.0" x2="2363.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Heavy-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2457.875" x2="2457.875" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Black-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2663.0" x2="2663.0" y1="1031.0" y2="1150.0"/>
+  <line id="right-margin-Black-M" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2759.405" x2="2759.405" y1="1031.0" y2="1150.0"/>
+  <line id="left-margin-Ultralight-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="263.0" x2="263.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Ultralight-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="369.40099999999995" x2="369.40099999999995" y1="1461.0" y2="1580.0"/>
+  <line id="left-margin-Thin-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="563.0" x2="563.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Thin-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="670.421" x2="670.421" y1="1461.0" y2="1580.0"/>
+  <line id="left-margin-Light-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="863.0" x2="863.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Light-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="971.951" x2="971.951" y1="1461.0" y2="1580.0"/>
+  <line id="left-margin-Regular-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1163.0" x2="1163.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Regular-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1273.7359999999999" x2="1273.7359999999999" y1="1461.0" y2="1580.0"/>
+  <line id="left-margin-Medium-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1463.0" x2="1463.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Medium-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1574.756" x2="1574.756" y1="1461.0" y2="1580.0"/>
+  <line id="left-margin-Semibold-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1763.0" x2="1763.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Semibold-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="1875.776" x2="1875.776" y1="1461.0" y2="1580.0"/>
+  <line id="left-margin-Bold-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2063.0" x2="2063.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Bold-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2177.051" x2="2177.051" y1="1461.0" y2="1580.0"/>
+  <line id="left-margin-Heavy-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2363.0" x2="2363.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Heavy-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2478.581" x2="2478.581" y1="1461.0" y2="1580.0"/>
+  <line id="left-margin-Black-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2663.0" x2="2663.0" y1="1461.0" y2="1580.0"/>
+  <line id="right-margin-Black-L" style="fill:none;stroke:#00AEEF;stroke-width:0.5" x1="2780.111" x2="2780.111" y1="1461.0" y2="1580.0"/>
+ </g>
+ <g id="Symbols">
+  <g id="Ultralight-S" transform="matrix(1 0 0 1 263.0 696.0)">
+   <path d="M6.34 -48.40L34.29 -20.44C34.74 -19.99 35.46 -19.99 35.91 -20.44L63.87 -48.40C64.31 -48.84 64.31 -49.57 63.87 -50.02C63.42 -50.47 62.69 -50.47 62.24 -50.02L34.29 -22.06L35.91 -22.06L7.96 -50.02C7.51 -50.47 6.78 -50.47 6.34 -50.02C5.89 -49.57 5.89 -48.84 6.34 -48.40Z"/>
+  </g>
+  <g id="Thin-S" transform="matrix(1 0 0 1 563.0 696.0)">
+   <path d="M6.49 -48.03L34.44 -20.08C35.09 -19.43 36.14 -19.43 36.78 -20.08L64.74 -48.03C65.38 -48.68 65.38 -49.73 64.74 -50.38C64.09 -51.03 63.04 -51.03 62.39 -50.38L34.44 -22.43L36.78 -22.43L8.83 -50.38C8.18 -51.03 7.13 -51.03 6.49 -50.38C5.84 -49.73 5.84 -48.68 6.49 -48.03Z"/>
+  </g>
+  <g id="Light-S" transform="matrix(1 0 0 1 863.0 696.0)">
+   <path d="M6.71 -47.49L34.66 -19.54C35.61 -18.59 37.14 -18.59 38.09 -19.54L66.04 -47.49C66.99 -48.44 66.99 -49.97 66.04 -50.92C65.10 -51.87 63.56 -51.87 62.62 -50.92L34.66 -22.97L38.09 -22.97L10.14 -50.92C9.19 -51.87 7.66 -51.87 6.71 -50.92C5.76 -49.97 5.76 -48.44 6.71 -47.49Z"/>
+  </g>
+  <g id="Regular-S" transform="matrix(1 0 0 1 1163.0 696.0)">
+   <path d="M6.97 -46.86L34.92 -18.91C36.22 -17.61 38.32 -17.61 39.61 -18.91L67.57 -46.86C68.86 -48.16 68.86 -50.26 67.57 -51.55C66.27 -52.85 64.17 -52.85 62.88 -51.55L34.92 -23.60L39.61 -23.60L11.66 -51.55C10.36 -52.85 8.27 -52.85 6.97 -51.55C5.68 -50.26 5.68 -48.16 6.97 -46.86Z"/>
+  </g>
+  <g id="Medium-S" transform="matrix(1 0 0 1 1463.0 696.0)">
+   <path d="M7.12 -46.50L35.07 -18.55C36.57 -17.06 38.99 -17.06 40.48 -18.55L68.44 -46.50C69.93 -48.00 69.93 -50.42 68.44 -51.91C66.94 -53.40 64.52 -53.40 63.03 -51.91L35.07 -23.96L40.48 -23.96L12.53 -51.91C11.04 -53.40 8.61 -53.40 7.12 -51.91C5.63 -50.42 5.63 -48.00 7.12 -46.50Z"/>
+  </g>
+  <g id="Semibold-S" transform="matrix(1 0 0 1 1763.0 696.0)">
+   <path d="M7.27 -46.14L35.22 -18.19C36.92 -16.50 39.66 -16.50 41.35 -18.19L69.31 -46.14C71.00 -47.83 71.00 -50.58 69.31 -52.27C67.61 -53.96 64.87 -53.96 63.18 -52.27L35.22 -24.32L41.35 -24.32L13.40 -52.27C11.71 -53.96 8.96 -53.96 7.27 -52.27C5.58 -50.58 5.58 -47.83 7.27 -46.14Z"/>
+  </g>
+  <g id="Bold-S" transform="matrix(1 0 0 1 2063.0 696.0)">
+   <path d="M7.46 -45.69L35.41 -17.74C37.35 -15.80 40.50 -15.80 42.44 -17.74L70.39 -45.69C72.34 -47.63 72.34 -50.78 70.39 -52.72C68.45 -54.66 65.30 -54.66 63.36 -52.72L35.41 -24.77L42.44 -24.77L14.49 -52.72C12.55 -54.66 9.40 -54.66 7.46 -52.72C5.51 -50.78 5.51 -47.63 7.46 -45.69Z"/>
+  </g>
+  <g id="Heavy-S" transform="matrix(1 0 0 1 2363.0 696.0)">
+   <path d="M7.68 -45.15L35.63 -17.20C37.87 -14.96 41.51 -14.96 43.75 -17.20L71.70 -45.15C73.94 -47.39 73.94 -51.02 71.70 -53.26C69.46 -55.50 65.83 -55.50 63.59 -53.26L35.63 -25.31L43.75 -25.31L15.79 -53.26C13.55 -55.50 9.92 -55.50 7.68 -53.26C5.44 -51.02 5.44 -47.39 7.68 -45.15Z"/>
+  </g>
+  <g id="Black-S" transform="matrix(1 0 0 1 2663.0 696.0)">
+   <path d="M7.90 -44.61L35.86 -16.66C38.40 -14.12 42.51 -14.12 45.05 -16.66L73.01 -44.61C75.55 -47.15 75.55 -51.27 73.01 -53.80C70.47 -56.34 66.35 -56.34 63.81 -53.80L35.86 -25.85L45.05 -25.85L17.10 -53.80C14.56 -56.34 10.44 -56.34 7.90 -53.80C5.37 -51.27 5.37 -47.15 7.90 -44.61Z"/>
+  </g>
+  <g id="Ultralight-M" transform="matrix(1 0 0 1 263.0 1126.0)">
+   <path d="M6.34 -52.27L42.04 -16.57C42.48 -16.12 43.21 -16.12 43.66 -16.57L79.36 -52.27C79.81 -52.72 79.81 -53.44 79.36 -53.89C78.91 -54.34 78.18 -54.34 77.74 -53.89L42.04 -18.19L43.66 -18.19L7.96 -53.89C7.51 -54.34 6.78 -54.34 6.34 -53.89C5.89 -53.44 5.89 -52.72 6.34 -52.27Z"/>
+  </g>
+  <g id="Thin-M" transform="matrix(1 0 0 1 563.0 1126.0)">
+   <path d="M6.49 -51.91L42.19 -16.21C42.83 -15.56 43.88 -15.56 44.53 -16.21L80.23 -51.91C80.88 -52.56 80.88 -53.60 80.23 -54.25C79.58 -54.90 78.53 -54.90 77.89 -54.25L42.19 -18.55L44.53 -18.55L8.83 -54.25C8.18 -54.90 7.13 -54.90 6.49 -54.25C5.84 -53.60 5.84 -52.56 6.49 -51.91Z"/>
+  </g>
+  <g id="Light-M" transform="matrix(1 0 0 1 863.0 1126.0)">
+   <path d="M6.71 -51.37L42.41 -15.67C43.36 -14.72 44.89 -14.72 45.84 -15.67L81.54 -51.37C82.48 -52.31 82.48 -53.85 81.54 -54.79C80.59 -55.74 79.06 -55.74 78.11 -54.79L42.41 -19.09L45.84 -19.09L10.14 -54.79C9.19 -55.74 7.66 -55.74 6.71 -54.79C5.76 -53.85 5.76 -52.31 6.71 -51.37Z"/>
+  </g>
+  <g id="Regular-M" transform="matrix(1 0 0 1 1163.0 1126.0)">
+   <path d="M6.97 -50.74L42.67 -15.04C43.97 -13.74 46.06 -13.74 47.36 -15.04L83.06 -50.74C84.35 -52.03 84.35 -54.13 83.06 -55.42C81.76 -56.72 79.67 -56.72 78.37 -55.42L42.67 -19.72L47.36 -19.72L11.66 -55.42C10.36 -56.72 8.27 -56.72 6.97 -55.42C5.68 -54.13 5.68 -52.03 6.97 -50.74Z"/>
+  </g>
+  <g id="Medium-M" transform="matrix(1 0 0 1 1463.0 1126.0)">
+   <path d="M7.12 -50.38L42.82 -14.68C44.31 -13.18 46.74 -13.18 48.23 -14.68L83.93 -50.38C85.42 -51.87 85.42 -54.29 83.93 -55.78C82.44 -57.28 80.01 -57.28 78.52 -55.78L42.82 -20.08L48.23 -20.08L12.53 -55.78C11.04 -57.28 8.61 -57.28 7.12 -55.78C5.63 -54.29 5.63 -51.87 7.12 -50.38Z"/>
+  </g>
+  <g id="Semibold-M" transform="matrix(1 0 0 1 1763.0 1126.0)">
+   <path d="M7.27 -50.01L42.97 -14.31C44.66 -12.62 47.41 -12.62 49.10 -14.31L84.80 -50.01C86.49 -51.71 86.49 -54.45 84.80 -56.15C83.11 -57.84 80.36 -57.84 78.67 -56.15L42.97 -20.45L49.10 -20.45L13.40 -56.15C11.71 -57.84 8.96 -57.84 7.27 -56.15C5.58 -54.45 5.58 -51.71 7.27 -50.01Z"/>
+  </g>
+  <g id="Bold-M" transform="matrix(1 0 0 1 2063.0 1126.0)">
+   <path d="M7.46 -49.56L43.16 -13.86C45.10 -11.92 48.25 -11.92 50.19 -13.86L85.89 -49.56C87.83 -51.51 87.83 -54.65 85.89 -56.60C83.95 -58.54 80.80 -58.54 78.86 -56.60L43.16 -20.90L50.19 -20.90L14.49 -56.60C12.55 -58.54 9.40 -58.54 7.46 -56.60C5.51 -54.65 5.51 -51.51 7.46 -49.56Z"/>
+  </g>
+  <g id="Heavy-M" transform="matrix(1 0 0 1 2363.0 1126.0)">
+   <path d="M7.68 -49.02L43.38 -13.32C45.62 -11.08 49.25 -11.08 51.49 -13.32L87.19 -49.02C89.44 -51.26 89.44 -54.90 87.19 -57.14C84.95 -59.38 81.32 -59.38 79.08 -57.14L43.38 -21.44L51.49 -21.44L15.79 -57.14C13.55 -59.38 9.92 -59.38 7.68 -57.14C5.44 -54.90 5.44 -51.26 7.68 -49.02Z"/>
+  </g>
+  <g id="Black-M" transform="matrix(1 0 0 1 2663.0 1126.0)">
+   <path d="M7.90 -48.48L43.60 -12.78C46.14 -10.24 50.26 -10.24 52.80 -12.78L88.50 -48.48C91.04 -51.02 91.04 -55.14 88.50 -57.68C85.96 -60.22 81.84 -60.22 79.30 -57.68L43.60 -21.98L52.80 -21.98L17.10 -57.68C14.56 -60.22 10.44 -60.22 7.90 -57.68C5.37 -55.14 5.37 -51.02 7.90 -48.48Z"/>
+  </g>
+  <g id="Ultralight-L" transform="matrix(1 0 0 1 263.0 1556.0)">
+   <path d="M6.34 -57.45L52.39 -11.39C52.84 -10.94 53.56 -10.94 54.01 -11.39L100.06 -57.45C100.51 -57.89 100.51 -58.62 100.06 -59.07C99.62 -59.52 98.89 -59.52 98.44 -59.07L52.39 -13.01L54.01 -13.01L7.96 -59.07C7.51 -59.52 6.78 -59.52 6.34 -59.07C5.89 -58.62 5.89 -57.89 6.34 -57.45Z"/>
+  </g>
+  <g id="Thin-L" transform="matrix(1 0 0 1 563.0 1556.0)">
+   <path d="M6.49 -57.08L52.54 -11.03C53.19 -10.38 54.24 -10.38 54.88 -11.03L100.94 -57.08C101.58 -57.73 101.58 -58.78 100.94 -59.43C100.29 -60.08 99.24 -60.08 98.59 -59.43L52.54 -13.38L54.88 -13.38L8.83 -59.43C8.18 -60.08 7.13 -60.08 6.49 -59.43C5.84 -58.78 5.84 -57.73 6.49 -57.08Z"/>
+  </g>
+  <g id="Light-L" transform="matrix(1 0 0 1 863.0 1556.0)">
+   <path d="M6.71 -56.54L52.76 -10.49C53.71 -9.54 55.24 -9.54 56.19 -10.49L102.24 -56.54C103.19 -57.49 103.19 -59.02 102.24 -59.97C101.30 -60.92 99.76 -60.92 98.82 -59.97L52.76 -13.92L56.19 -13.92L10.14 -59.97C9.19 -60.92 7.66 -60.92 6.71 -59.97C5.76 -59.02 5.76 -57.49 6.71 -56.54Z"/>
+  </g>
+  <g id="Regular-L" transform="matrix(1 0 0 1 1163.0 1556.0)">
+   <path d="M6.97 -55.91L53.02 -9.86C54.32 -8.56 56.42 -8.56 57.71 -9.86L103.77 -55.91C105.06 -57.21 105.06 -59.31 103.77 -60.60C102.47 -61.90 100.37 -61.90 99.08 -60.60L53.02 -14.55L57.71 -14.55L11.66 -60.60C10.36 -61.90 8.27 -61.90 6.97 -60.60C5.68 -59.31 5.68 -57.21 6.97 -55.91Z"/>
+  </g>
+  <g id="Medium-L" transform="matrix(1 0 0 1 1463.0 1556.0)">
+   <path d="M7.12 -55.55L53.17 -9.50C54.67 -8.01 57.09 -8.01 58.58 -9.50L104.64 -55.55C106.13 -57.05 106.13 -59.47 104.64 -60.96C103.14 -62.45 100.72 -62.45 99.23 -60.96L53.17 -14.91L58.58 -14.91L12.53 -60.96C11.04 -62.45 8.61 -62.45 7.12 -60.96C5.63 -59.47 5.63 -57.05 7.12 -55.55Z"/>
+  </g>
+  <g id="Semibold-L" transform="matrix(1 0 0 1 1763.0 1556.0)">
+   <path d="M7.27 -55.19L53.32 -9.14C55.02 -7.45 57.76 -7.45 59.45 -9.14L105.51 -55.19C107.20 -56.88 107.20 -59.63 105.51 -61.32C103.81 -63.01 101.07 -63.01 99.38 -61.32L53.32 -15.27L59.45 -15.27L13.40 -61.32C11.71 -63.01 8.96 -63.01 7.27 -61.32C5.58 -59.63 5.58 -56.88 7.27 -55.19Z"/>
+  </g>
+  <g id="Bold-L" transform="matrix(1 0 0 1 2063.0 1556.0)">
+   <path d="M7.46 -54.74L53.51 -8.69C55.45 -6.75 58.60 -6.75 60.54 -8.69L106.59 -54.74C108.54 -56.68 108.54 -59.83 106.59 -61.77C104.65 -63.71 101.50 -63.71 99.56 -61.77L53.51 -15.72L60.54 -15.72L14.49 -61.77C12.55 -63.71 9.40 -63.71 7.46 -61.77C5.51 -59.83 5.51 -56.68 7.46 -54.74Z"/>
+  </g>
+  <g id="Heavy-L" transform="matrix(1 0 0 1 2363.0 1556.0)">
+   <path d="M7.68 -54.20L53.73 -8.15C55.97 -5.91 59.61 -5.91 61.85 -8.15L107.90 -54.20C110.14 -56.44 110.14 -60.07 107.90 -62.31C105.66 -64.55 102.03 -64.55 99.79 -62.31L53.73 -16.26L61.85 -16.26L15.79 -62.31C13.55 -64.55 9.92 -64.55 7.68 -62.31C5.44 -60.07 5.44 -56.44 7.68 -54.20Z"/>
+  </g>
+  <g id="Black-L" transform="matrix(1 0 0 1 2663.0 1556.0)">
+   <path d="M7.90 -53.66L53.96 -7.61C56.50 -5.07 60.61 -5.07 63.15 -7.61L109.21 -53.66C111.75 -56.20 111.75 -60.32 109.21 -62.85C106.67 -65.39 102.55 -65.39 100.01 -62.85L53.96 -16.80L63.15 -16.80L17.10 -62.85C14.56 -65.39 10.44 -65.39 7.90 -62.85C5.37 -60.32 5.37 -56.20 7.90 -53.66Z"/>
+  </g>
+ </g>
+</svg>

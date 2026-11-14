@@ -224,7 +224,7 @@ public struct SumiOutlineButton: View {
             HStack(spacing: 6) {
                 Text(title)
                 if let systemImage {
-                    Image(systemName: systemImage)
+                    Image(anicat: systemImage)
                 }
             }
         }
@@ -260,7 +260,7 @@ public struct SumiFilterDropdown: View {
                     HStack {
                         Text(option.label)
                         if option.value == selected {
-                            Image(systemName: "checkmark")
+                            Image(anicat: "checkmark")
                         }
                     }
                 }
@@ -277,7 +277,7 @@ public struct SumiFilterDropdown: View {
                 (Text(label).foregroundColor(SumiTheme.muted)
                     + Text(" " + selectedLabel)
                         .foregroundColor(selected.isEmpty ? SumiTheme.foreground.opacity(0.6) : SumiTheme.indigo))
-                Image(systemName: "chevron.up.chevron.down")
+                Image(anicat: "chevron.up.chevron.down")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(SumiTheme.muted)
             }

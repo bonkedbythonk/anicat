@@ -175,7 +175,7 @@ struct PhoneDetailView: View {
                             .foregroundStyle(SumiTheme.foreground)
                         Spacer()
                         if status == current {
-                            Image(systemName: "checkmark")
+                            Image(anicat: "checkmark")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(SumiTheme.indigo)
                         }
@@ -202,7 +202,7 @@ struct PhoneDetailView: View {
                 Task { await model.toggleFavourite() }
             } label: {
                 Label(details?.isFavourite == true ? "Remove from favourites" : "Add to favourites",
-                      systemImage: details?.isFavourite == true ? "heart.fill" : "heart")
+                      anicat: details?.isFavourite == true ? "heart.fill" : "heart")
             }
             // Not for Films & TV: `details.id` is a TMDB id there, and the
             // AniList address built below opened an unrelated title or a 404.
@@ -212,11 +212,11 @@ struct PhoneDetailView: View {
                 // someone without it.
                 ShareLink(item: URL(string: "https://anilist.co/\(isManga ? "manga" : "anime")/\(details.id)")!,
                           subject: Text(details.title)) {
-                    Label("Share", systemImage: "square.and.arrow.up")
+                    Label("Share", anicat: "square.and.arrow.up")
                 }
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(anicat: "ellipsis.circle")
         }
         .disabled(details == nil)
     }
@@ -354,13 +354,13 @@ struct PhoneDetailView: View {
                     switch offline {
                     case .stored:
                         Button(role: .destructive) { model.deleteNovelVolumeDownload(volume) } label: {
-                            Label("Remove Download", systemImage: "trash")
+                            Label("Remove Download", anicat: "trash")
                         }
                     case .downloading, .exporting:
                         EmptyView()
                     default:
                         Button { model.downloadNovelVolume(volume) } label: {
-                            Label("Download", systemImage: "arrow.down.circle")
+                            Label("Download", anicat: "arrow.down.circle")
                         }
                     }
                 }
@@ -373,13 +373,13 @@ struct PhoneDetailView: View {
     private func offlineGlyph(_ state: MediaDetailView.ChapterOfflineState) -> some View {
         switch state {
         case .stored:
-            Image(systemName: "arrow.down.circle.fill")
+            Image(anicat: "arrow.down.circle.fill")
                 .font(.system(size: 14))
                 .foregroundStyle(SumiTheme.indigo)
         case .downloading, .exporting:
             ProgressView().controlSize(.small)
         case .failed:
-            Image(systemName: "exclamationmark.circle")
+            Image(anicat: "exclamationmark.circle")
                 .font(.system(size: 14))
                 .foregroundStyle(SumiTheme.warning)
         case .none:
@@ -391,7 +391,7 @@ struct PhoneDetailView: View {
     private func downloadGlyph(_ state: MediaDetailView.EpisodeDownloadState?) -> some View {
         switch state {
         case .done?:
-            Image(systemName: "arrow.down.circle.fill")
+            Image(anicat: "arrow.down.circle.fill")
                 .font(.system(size: 14))
                 .foregroundStyle(SumiTheme.indigo)
         case .downloading(let percent)?:
@@ -399,7 +399,7 @@ struct PhoneDetailView: View {
                 .font(.system(size: 12)).monospacedDigit()
                 .foregroundStyle(SumiTheme.muted)
         case .failed?:
-            Image(systemName: "exclamationmark.circle")
+            Image(anicat: "exclamationmark.circle")
                 .font(.system(size: 14))
                 .foregroundStyle(SumiTheme.warning)
         case .notStarted?, nil:
@@ -453,7 +453,7 @@ struct PhoneDetailView: View {
             Button {
                 Task { await model.startDownload(episode: episode.number) }
             } label: {
-                Label("Download", systemImage: "arrow.down.circle")
+                Label("Download", anicat: "arrow.down.circle")
             }
         }
         // The phone had no way to take a watch back. A
@@ -463,8 +463,8 @@ struct PhoneDetailView: View {
             Task { await model.setEpisodeWatched(episode.number, watched: !episode.isWatched) }
         } label: {
             episode.isWatched
-                ? Label("Mark as Unwatched", systemImage: "minus.circle")
-                : Label("Mark as Watched", systemImage: "checkmark.circle")
+                ? Label("Mark as Unwatched", anicat: "minus.circle")
+                : Label("Mark as Watched", anicat: "checkmark.circle")
         }
     }
 
@@ -473,13 +473,13 @@ struct PhoneDetailView: View {
         switch offline {
         case .stored:
             Button(role: .destructive) { model.deleteChapterDownload(chapter) } label: {
-                Label("Remove Download", systemImage: "trash")
+                Label("Remove Download", anicat: "trash")
             }
         case .downloading, .exporting:
             EmptyView()
         default:
             Button { model.downloadChapter(chapter) } label: {
-                Label("Download", systemImage: "arrow.down.circle")
+                Label("Download", anicat: "arrow.down.circle")
             }
         }
     }
@@ -500,7 +500,7 @@ struct PhoneDetailView: View {
                 let link = DeepLink.play(id: details.id, episode: number)
                 RemoteClient.shared.send(.open(link: link.url.absoluteString), to: node)
             } label: {
-                Label("Play on \(node.name)", systemImage: "macbook")
+                Label("Play on \(node.name)", anicat: "macbook")
             }
         }
     }
@@ -534,7 +534,7 @@ struct PhoneDetailView: View {
             Button {
                 model.playGuardedByCellular { play(target.number) }
             } label: {
-                Label(label, systemImage: "play.fill")
+                Label(label, anicat: "play.fill")
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
             }
@@ -558,7 +558,7 @@ struct PhoneDetailView: View {
             Button {
                 showTrailer = true
             } label: {
-                Label("Trailer", systemImage: "play.rectangle")
+                Label("Trailer", anicat: "play.rectangle")
                     .fontWeight(.semibold)
             }
             .sumiSecondaryButton()
@@ -851,7 +851,7 @@ struct PhoneDetailView: View {
                                         .lineLimit(1)
                                 }
                                 Spacer(minLength: 8)
-                                Image(systemName: "chevron.right")
+                                Image(anicat: "chevron.right")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(SumiTheme.muted)
                             }
@@ -900,7 +900,7 @@ struct PhoneDetailView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
+                Image(anicat: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(SumiTheme.muted)
             }
@@ -1029,7 +1029,7 @@ struct PhoneDetailView: View {
                     .clipped()
                     if episode.isWatched {
                         Color.black.opacity(0.45)
-                        Image(systemName: "checkmark")
+                        Image(anicat: "checkmark")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(.white)
                     }
@@ -1079,7 +1079,7 @@ private extension View {
             Menu {
                 actions()
             } label: {
-                Image(systemName: "ellipsis")
+                Image(anicat: "ellipsis")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(SumiTheme.muted)
                     .frame(width: 44, height: 44)

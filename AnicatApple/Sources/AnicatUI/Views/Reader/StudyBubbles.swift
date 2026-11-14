@@ -291,7 +291,7 @@ struct StudyTextPanel: View {
                     .foregroundColor(SumiTheme.muted)
                 Spacer()
                 Button(action: onClose) {
-                    Image(systemName: "xmark")
+                    Image(anicat: "xmark")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(SumiTheme.foreground.opacity(0.8))
                         .frame(width: 24, height: 24)

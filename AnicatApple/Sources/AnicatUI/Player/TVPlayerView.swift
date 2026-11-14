@@ -161,7 +161,7 @@ struct TVPlayerView: View {
                 Button {
                     withAnimation(.smooth) { controller.playNextEpisodeNow() }
                 } label: {
-                    Label("Play now", systemImage: "play.fill")
+                    Label("Play now", anicat: "play.fill")
                 }
                 .focused($focus, equals: .playNextNow)
                 Button("Cancel") {
@@ -283,7 +283,7 @@ struct TVPlayerView: View {
     private var transport: some View {
         HStack(spacing: 40) {
             Button { seek(by: -10) } label: {
-                Image(systemName: "gobackward.10")
+                Image(anicat: "gobackward.10")
             }
             .focused($focus, equals: .back)
 
@@ -291,12 +291,12 @@ struct TVPlayerView: View {
                 controller.togglePlayPause()
                 controller.showControlsBriefly()
             } label: {
-                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                Image(anicat: controller.isPlaying ? "pause.fill" : "play.fill")
             }
             .focused($focus, equals: .playPause)
 
             Button { seek(by: 10) } label: {
-                Image(systemName: "goforward.10")
+                Image(anicat: "goforward.10")
             }
             .focused($focus, equals: .forward)
 
@@ -306,7 +306,7 @@ struct TVPlayerView: View {
                 Button {
                     controller.nextEpisode()
                 } label: {
-                    Label("Next episode", systemImage: "forward.end.fill")
+                    Label("Next episode", anicat: "forward.end.fill")
                 }
                 .focused($focus, equals: .next)
             }
@@ -380,20 +380,20 @@ struct TVPlayerView: View {
                         }
                     }
                 } label: {
-                    Label("Chapters", systemImage: "list.number")
+                    Label("Chapters", anicat: "list.number")
                 }
             }
             Button {
                 showReleases = true
             } label: {
-                Label("Release", systemImage: "square.stack.3d.up")
+                Label("Release", anicat: "square.stack.3d.up")
             }
             if controller.hasPreviousEpisode {
                 Button("Previous episode") { controller.previousEpisode() }
             }
             Button("Close player", role: .destructive, action: onClose)
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(anicat: "ellipsis.circle")
         }
         // A menu open on tvOS is a modal; the chrome under it must not time
         // out and drop focus from under the picker.
@@ -411,9 +411,9 @@ struct TVPlayerView: View {
                 if isLoadingReleases {
                     ProgressView("Searching indexers")
                 } else if let releaseFailure {
-                    ContentUnavailableView("Could not list releases", systemImage: "exclamationmark.triangle", description: Text(releaseFailure))
+                    ContentUnavailableView("Could not list releases", anicat: "exclamationmark.triangle", description: Text(releaseFailure))
                 } else if releases.isEmpty {
-                    ContentUnavailableView("No other releases", systemImage: "square.stack.3d.up.slash")
+                    ContentUnavailableView("No other releases", anicat: "square.stack.3d.up.slash")
                 } else {
                     List(releases) { release in
                         Button {
@@ -436,7 +436,7 @@ struct TVPlayerView: View {
                                 }
                                 Spacer(minLength: 8)
                                 if release.name == controller.currentReleaseName {
-                                    Image(systemName: "checkmark")
+                                    Image(anicat: "checkmark")
                                         .foregroundStyle(.tint)
                                 }
                             }

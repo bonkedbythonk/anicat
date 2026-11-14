@@ -30,7 +30,7 @@ struct CastMenu: View {
                 let isCurrent = cast.device?.id == device.id
                 Button(action: { if !isCurrent { cast.start(device) } }) {
                     HStack(spacing: 10) {
-                        Image(systemName: "tv")
+                        Image(anicat: "tv")
                             .font(.system(size: 12))
                             .foregroundColor(isCurrent ? SumiTheme.indigo : SumiTheme.muted)
                         Text(device.name)
@@ -137,7 +137,7 @@ struct CastRemoteView: View {
             CachedAsyncImage(url: controller.coverURL, maxPixelSize: 480) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                Image(systemName: "tv")
+                Image(anicat: "tv")
                     .font(.system(size: 40, weight: .light))
                     .foregroundColor(PlayerChrome.foreground.opacity(0.5))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

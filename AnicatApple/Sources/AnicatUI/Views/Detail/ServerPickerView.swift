@@ -77,7 +77,7 @@ struct ServerPickerView: View {
                                         ReleaseStatsLine(item: candidate)
                                     }
                                     Spacer(minLength: 8)
-                                    Image(systemName: "play.fill")
+                                    Image(anicat: "play.fill")
                                         .font(.system(size: 10))
                                         .foregroundColor(SumiTheme.muted.opacity(0.5))
                                 }

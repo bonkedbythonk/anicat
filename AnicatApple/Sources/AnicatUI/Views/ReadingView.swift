@@ -180,7 +180,7 @@ public struct ReadingView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Button(action: action) {
-                    Label("Open a Syosetu URL", systemImage: "link")
+                    Label("Open a Syosetu URL", anicat: "link")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(SumiTheme.muted)
                         .padding(.vertical, 4)

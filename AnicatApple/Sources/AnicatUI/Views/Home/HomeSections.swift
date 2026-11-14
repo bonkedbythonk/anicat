@@ -98,7 +98,7 @@ struct HomeSectionView: View {
                                 HStack(spacing: 6) {
                                     Text(upNextExpanded ? "Show fewer" : "Show all \(model.upNextItems.count)")
                                         .font(.system(size: 12.5, weight: .semibold))
-                                    Image(systemName: upNextExpanded ? "chevron.up" : "chevron.down")
+                                    Image(anicat: upNextExpanded ? "chevron.up" : "chevron.down")
                                         .font(.system(size: 10, weight: .semibold))
                                 }
                                 .foregroundColor(SumiTheme.muted)

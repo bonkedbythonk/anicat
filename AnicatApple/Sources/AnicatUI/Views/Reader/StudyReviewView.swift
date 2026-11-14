@@ -61,7 +61,7 @@ struct StudyReviewView: View {
                             .font(.system(size: 30, weight: .bold))
                             .foregroundColor(SumiTheme.foreground)
                         Button { StudySpeech.shared.speak(card.reading) } label: {
-                            Label("Listen to the word", systemImage: "speaker.wave.2")
+                            Label("Listen to the word", anicat: "speaker.wave.2")
                                 .labelStyle(.iconOnly)
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(SumiTheme.indigo)

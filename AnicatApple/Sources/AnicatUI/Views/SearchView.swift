@@ -342,7 +342,7 @@ public struct SearchView: View {
                     }
 
                     HStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass")
+                        Image(anicat: "magnifyingglass")
                             .font(.system(size: 16))
                             .foregroundColor(SumiTheme.muted)
 
@@ -370,7 +370,7 @@ public struct SearchView: View {
 
                         if !searchText.isEmpty {
                             Button(action: { searchText = "" }) {
-                                Image(systemName: "xmark.circle.fill")
+                                Image(anicat: "xmark.circle.fill")
                                     .foregroundColor(SumiTheme.muted)
                                     .padding(4)
                                     .contentShape(Rectangle())

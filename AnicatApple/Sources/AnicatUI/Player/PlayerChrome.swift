@@ -38,7 +38,54 @@ extension View {
 }
 
 
+/// The control under the pointer, named in the top bar's label slot.
+///
+/// Not `.help`: the system tooltip waits about 1.5 s and the chrome hides
+/// 2 s after the pointer stops, so the owner never saw one and called the
+/// icons "unclear". A toggle carries its state, so clicking it rewrites the
+/// label under the pointer, which is the on/off confirmation; the old one
+/// was white text printed over the picture.
+struct ChromeName: Equatable {
+    let id: UUID
+    let text: String
+    let isOn: Bool?
+}
+
+private struct ChromeNameModifier: ViewModifier {
+    let name: String
+    let isOn: Bool?
+    @Binding var hovered: ChromeName?
+    @State private var id = UUID()
+    @State private var inside = false
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content
+            .onHover { inside = $0; publish() }
+            .onChange(of: isOn) { publish() }
+            .onChange(of: name) { publish() }
+        #else
+        content
+        #endif
+    }
+
+    // Cleared by id, not by "pointer left": moving straight from one button
+    // to the next can deliver the new enter before the old exit, and the
+    // exit would then blank the label of the button the pointer is on.
+    private func publish() {
+        if inside {
+            hovered = ChromeName(id: id, text: name, isOn: isOn)
+        } else if hovered?.id == id {
+            hovered = nil
+        }
+    }
+}
+
 extension View {
+    func chromeName(_ name: String, isOn: Bool? = nil, _ hovered: Binding<ChromeName?>) -> some View {
+        modifier(ChromeNameModifier(name: name, isOn: isOn, hovered: hovered))
+    }
+
     /// Contrast for a bar with nothing painted behind it.
     ///
     /// Two shadows, not one: the tight pass darkens the pixel a glyph's

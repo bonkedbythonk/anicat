@@ -138,7 +138,7 @@ struct TVShowcaseHero: View {
                 .lineLimit(1)
             HStack(spacing: 24) {
                 Button(action: primary) {
-                    Label(primaryLabel, systemImage: "play.fill")
+                    Label(primaryLabel, anicat: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(SumiTheme.indigo)

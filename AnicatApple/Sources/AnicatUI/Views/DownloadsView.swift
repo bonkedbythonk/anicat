@@ -371,7 +371,7 @@ private struct DownloadRow: View {
                 Button {
                     removeConfirming = true
                 } label: {
-                    Image(systemName: "trash")
+                    Image(anicat: "trash")
                         .font(.system(size: 11.5))
                         .foregroundColor(SumiTheme.muted)
                         .frame(width: Self.iconHit, height: Self.iconHit)
@@ -394,7 +394,7 @@ private struct DownloadRow: View {
 
     private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: systemName)
+            Image(anicat: systemName)
                 .font(.system(size: 11.5))
                 .foregroundColor(SumiTheme.muted)
                 .frame(width: Self.iconHit, height: Self.iconHit)

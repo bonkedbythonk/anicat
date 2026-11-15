@@ -175,6 +175,30 @@ else
     exit 1
 fi
 
+# Xcode 26's SwiftPM (the macos-26 runner) copies Symbols.xcassets into a flat
+# resource bundle uncompiled and writes no Info.plist; the 1.1.1 nightlies
+# shipped that way and every Image(anicat:) drew nothing. Xcode 27 compiles
+# the catalog itself, so this only runs on the older toolchain. Bundle lookup
+# needs both the Assets.car and an Info.plist: with the car alone the probe
+# still found no symbol.
+PACKAGED_RB="$APP/Contents/Resources/AnicatApple_AnicatUI.bundle"
+if [ -d "$PACKAGED_RB/Symbols.xcassets" ]; then
+    echo "=== Compiling Symbols.xcassets (SwiftPM left it raw) ==="
+    xcrun actool "$PACKAGED_RB/Symbols.xcassets" --compile "$PACKAGED_RB" \
+        --platform macosx --minimum-deployment-target 15.0 \
+        --output-partial-info-plist "$BUILD_DIR/symbols-partial.plist" \
+        --errors --warnings
+    if [ ! -f "$PACKAGED_RB/Assets.car" ]; then
+        echo "package-anicat-macos-app: actool produced no Assets.car; every icon would be blank" >&2
+        exit 1
+    fi
+    rm -rf "$PACKAGED_RB/Symbols.xcassets"
+    if [ ! -f "$PACKAGED_RB/Info.plist" ]; then
+        plutil -create xml1 "$PACKAGED_RB/Info.plist"
+        plutil -insert CFBundleIdentifier -string anicatapple.AnicatUI.resources "$PACKAGED_RB/Info.plist"
+    fi
+fi
+
 # Ad-hoc unless told otherwise. macOS keys the privacy database to the code
 # signature, and an ad-hoc one gets a fresh cdhash on every build -- so every
 # rebuild looked like a different app and re-asked for Documents and

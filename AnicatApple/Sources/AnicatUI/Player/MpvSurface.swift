@@ -1413,10 +1413,11 @@ public struct MpvSurface {
 
         @MainActor
         func applyAnime4K(enabled: Bool) {
-            #if !os(macOS)
-            // iOS does not upscale, by decision: the shader chain is tuned
-            // for a MacBook's thermals and the setting is not offered there,
-            // so nothing on iOS ever sends `glsl-shaders`.
+            #if os(iOS)
+            // iOS does not upscale, by decision: a phone screen gains nothing
+            // a viewer can see and the setting is not offered there, so
+            // nothing on iOS ever sends `glsl-shaders`. tvOS runs a lighter
+            // chain (`Anime4KPreset.tvShaderFileNames`).
             _ = enabled
             #else
             // The toggle is the user's wish; anime-only is the file's say.
@@ -1437,7 +1438,7 @@ public struct MpvSurface {
             if shaderString.isEmpty {
                 print(enabled ? "[libmpv] Anime4K off: live action" : "[libmpv] Anime4K disabled")
             } else {
-                print("[libmpv] Applied Anime4K 6-shader pipeline")
+                print("[libmpv] Applied Anime4K \(Anime4KPreset.on.shaderFileNames.count)-shader pipeline")
             }
             #endif
         }

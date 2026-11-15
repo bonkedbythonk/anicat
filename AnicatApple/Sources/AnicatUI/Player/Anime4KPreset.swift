@@ -23,13 +23,29 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
         "Anime4K_Upscale_CNN_x2_S.glsl"
     ]
 
+    /// The Apple TV's chain: the Mac's minus its two M-size stages, with
+    /// the small Restore. Restore is where the visible gain is: upscalers
+    /// alone (FSR, RAVU-lite, Anime4K x2_S) looked the same as mpv's
+    /// lanczos at 1080p to 4K, and the Mac's six-shader chain is too much
+    /// for a fanless A15. Picked by the owner from side-by-side renders;
+    /// its frame rate on a real box is unmeasured.
+    public static let tvShaderFileNames: [String] = [
+        "Anime4K_Clamp_Highlights.glsl",
+        "Anime4K_Restore_CNN_S.glsl",
+        "Anime4K_Upscale_CNN_x2_S.glsl"
+    ]
+
     /// Returns the ordered list of GLSL shader file names for this state.
     public var shaderFileNames: [String] {
         switch self {
         case .off:
             return []
         case .on:
+            #if os(tvOS)
+            return Self.tvShaderFileNames
+            #else
             return Self.shaderFileNames
+            #endif
         }
     }
 

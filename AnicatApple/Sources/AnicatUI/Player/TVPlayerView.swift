@@ -378,6 +378,12 @@ struct TVPlayerView: View {
                 get: { controller.autoSkipEnabled },
                 set: { on in if on != controller.autoSkipEnabled { controller.toggleAutoSkip() } }
             ))
+            // In the player, not Settings: whether the box keeps up is only
+            // known mid-episode, and a stutter should be one click from off.
+            Toggle("Upscaling", isOn: Binding(
+                get: { controller.isAnime4KEnabled },
+                set: { on in if on != controller.isAnime4KEnabled { controller.toggleAnime4K() } }
+            ))
             if !controller.chapters.isEmpty {
                 Menu {
                     ForEach(controller.chapters) { chapter in

@@ -100,10 +100,13 @@ public struct HistoryView: View {
 
     /// The last 30 days as labelled bars. Absolute counts, not a heat scale —
     /// a colour ramp needs a legend to decode and a bar does not.
+    ///
+    /// Parses every row, so `body` computes it once and derives the week and
+    /// month totals from that; read through two computed totals and the
+    /// chart it ran three times per body, each with a new `DateFormatter`.
     private var bars: [Bar] {
         var counts: [String: Int] = [:]
-        let key = DateFormatter()
-        key.dateFormat = "yyyy-MM-dd"
+        let key = Self.dayKey
         for row in activity {
             guard let date = Self.parser.date(from: row.watchedAt) else { continue }
             counts[key.string(from: date), default: 0] += 1
@@ -125,10 +128,15 @@ public struct HistoryView: View {
         }
     }
 
-    private var thisWeek: Int { bars.suffix(7).reduce(0) { $0 + $1.count } }
-    private var thisMonth: Int { bars.reduce(0) { $0 + $1.count } }
+    /// The local calendar day a bar counts under.
+    private static let dayKey: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     public var body: some View {
+        let bars = bars
         SumiPage {
             if let viewer {
                 profileHeader(viewer)
@@ -142,9 +150,9 @@ public struct HistoryView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SumiSectionHeader(
                     "Last 30 days",
-                    trailing: "\(thisWeek) this week · \(thisMonth) this month"
+                    trailing: "\(bars.suffix(7).reduce(0) { $0 + $1.count }) this week · \(bars.reduce(0) { $0 + $1.count }) this month"
                 )
-                chart
+                chart(bars)
             }
             .padding(.top, 12)
 
@@ -252,8 +260,7 @@ public struct HistoryView: View {
         return parts.joined(separator: " · ")
     }
 
-    private var chart: some View {
-        let rows = bars
+    private func chart(_ rows: [Bar]) -> some View {
         let peak = max(rows.map(\.count).max() ?? 1, 1)
         return VStack(spacing: 8) {
             HStack(alignment: .bottom, spacing: 4) {
@@ -297,7 +304,7 @@ public struct HistoryView: View {
 
     private var log: some View {
         let stamp = SumiTimeFormatter.historyDateFormatter(timeFormat: timeFormat)
-        let entries = mergedLog.prefix(60)
+        let entries = mergedLog(limit: 60)
         return VStack(spacing: 0) {
             ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                 switch entry {
@@ -330,9 +337,15 @@ public struct HistoryView: View {
     /// Episodes and chapters in one list, newest first. Both are "what was
     /// read or watched on this device", and two separate logs would make
     /// answering "what was I doing on Tuesday" a comparison between them.
-    private var mergedLog: [LogEntry] {
-        (activity.map(LogEntry.watched) + reading.map(LogEntry.read))
+    ///
+    /// Only the newest `limit` of each source go into the sort: both arrive
+    /// newest first (the registry's `ORDER BY ... DESC`), so nothing past
+    /// that can reach the top `limit`, and the stable sort orders ties the
+    /// same way. Sorting all 620 rows to show 60 ran on every body.
+    private func mergedLog(limit: Int) -> ArraySlice<LogEntry> {
+        (activity.prefix(limit).map(LogEntry.watched) + reading.prefix(limit).map(LogEntry.read))
             .sorted { $0.timestamp > $1.timestamp }
+            .prefix(limit)
     }
 
     /// A chapter's line. `CH` rather than `EP`, and the number as text

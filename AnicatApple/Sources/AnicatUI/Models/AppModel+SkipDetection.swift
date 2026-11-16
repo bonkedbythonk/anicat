@@ -120,7 +120,10 @@ extension AppModel {
         let title = currentPlaybackTitle
         let previous = skipDetectionTask
         skipDetectionTask = Task { [weak self] in
-            await previous?.value
+            // Cancelling the episode's search cancels only the newest task;
+            // the one it waits on is the one extracting, and kept reading the
+            // swarm of an episode nobody was watching.
+            await withTaskCancellationHandler { await previous?.value } onCancel: { previous?.cancel() }
             let hasOpening = await Task.detached(priority: .utility) {
                 engine.hasSkipReference(catalog: .anilist, catalogId: catalogId, kind: "op")
             }.value
@@ -263,7 +266,7 @@ extension AppModel {
         skipDetectionTask = Task { [weak self] in
             // Same rule as the preload path: an opening search still decoding
             // finishes rather than being cancelled out from under itself.
-            await previous?.value
+            await withTaskCancellationHandler { await previous?.value } onCancel: { previous?.cancel() }
             let hasEnding = await Task.detached(priority: .utility) {
                 engine.hasSkipReference(catalog: .anilist, catalogId: catalogId, kind: "ed")
             }.value
@@ -331,7 +334,7 @@ extension AppModel {
         let previous = skipDetectionTask
         skipDetectionTask = Task { [weak self] in
             // Let an opening search still decoding finish rather than cancel it.
-            await previous?.value
+            await withTaskCancellationHandler { await previous?.value } onCancel: { previous?.cancel() }
             let (hasOpening, hasEnding) = await Task.detached(priority: .utility) {
                 (engine.hasSkipReference(catalog: .anilist, catalogId: catalogId, kind: "op"),
                  engine.hasSkipReference(catalog: .anilist, catalogId: catalogId, kind: "ed"))

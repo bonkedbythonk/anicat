@@ -27,12 +27,12 @@ enum AudioExtractor {
         to output: URL,
         timeout: TimeInterval = 180
     ) async -> Bool {
-        await Task.detached(priority: .utility) {
-            run(url: url, start: start, length: length, preferDub: preferDub, output: output, timeout: timeout)
-        }.value
+        await ExtractionCancel.run { cancel in
+            run(url: url, start: start, length: length, preferDub: preferDub, output: output, timeout: timeout, cancel: cancel)
+        }
     }
 
-    private static func run(url: String, start: Double, length: Double, preferDub: Bool, output: URL, timeout: TimeInterval) -> Bool {
+    private static func run(url: String, start: Double, length: Double, preferDub: Bool, output: URL, timeout: TimeInterval, cancel: ExtractionCancel) -> Bool {
         try? FileManager.default.removeItem(at: output)
         guard let mpv = mpv_create() else { return false }
         defer { mpv_terminate_destroy(mpv) }
@@ -72,7 +72,7 @@ enum AudioExtractor {
 
         let deadline = Date().addingTimeInterval(timeout)
         var finished = false
-        while Date() < deadline {
+        while Date() < deadline, !cancel.isCancelled {
             guard let event = mpv_wait_event(mpv, 0.5) else { continue }
             if event.pointee.event_id == MPV_EVENT_END_FILE || event.pointee.event_id == MPV_EVENT_SHUTDOWN {
                 finished = true
@@ -80,7 +80,9 @@ enum AudioExtractor {
             }
         }
         guard finished else {
-            print("[skipdetect] audio extraction timed out after \(Int(timeout))s")
+            if !cancel.isCancelled {
+                print("[skipdetect] audio extraction timed out after \(Int(timeout))s")
+            }
             return false
         }
         let bytes = (try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? Int) ?? 0
@@ -88,5 +90,26 @@ enum AudioExtractor {
         // that ended early or never opened; fingerprinting it would compare
         // a fragment and call the result an opening.
         return bytes >= Int(length * 0.5) * sampleRate * 2
+    }
+}
+
+/// Cancellation for an extraction that runs synchronously on a detached
+/// task. Cancelling the skip search never reached the loop inside, so an
+/// abandoned episode's extraction kept pulling pieces off its swarm until
+/// the 180 s deadline, and the next episode's search queued behind it.
+final class ExtractionCancel: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool { lock.withLock { cancelled } }
+
+    /// `work` off the caller's thread, told when the caller is cancelled.
+    static func run<T: Sendable>(_ work: @escaping @Sendable (ExtractionCancel) -> T) async -> T {
+        let cancel = ExtractionCancel()
+        return await withTaskCancellationHandler {
+            await Task.detached(priority: .utility) { work(cancel) }.value
+        } onCancel: {
+            cancel.lock.withLock { cancel.cancelled = true }
+        }
     }
 }

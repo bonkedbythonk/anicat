@@ -23,9 +23,21 @@ enum SubtitleExtractor {
     /// when the file could not be read in `timeout`. A file with no ASS track
     /// answers an empty list, not nil.
     static func extract(url: String, start: Double, length: Double, timeout: TimeInterval = 90) async -> [Track]? {
-        await Task.detached(priority: .utility) {
-            run(url: url, start: start, end: start + length, timeout: timeout)
-        }.value
+        await ExtractionCancel.run { cancel in
+            run(url: url, start: start, end: start + length, timeout: timeout, cancel: cancel)
+        }
+    }
+
+    /// What libavformat's interrupt callback reads: a C function pointer
+    /// captures nothing, so both reasons to stop travel through `opaque`.
+    private final class Interrupt {
+        let deadline: TimeInterval
+        let cancel: ExtractionCancel
+        init(deadline: TimeInterval, cancel: ExtractionCancel) {
+            self.deadline = deadline
+            self.cancel = cancel
+        }
+        var shouldStop: Bool { cancel.isCancelled || Date().timeIntervalSince1970 > deadline }
     }
 
     /// The track to judge by: the English one with the most dialogue. Packs
@@ -39,20 +51,19 @@ enum SubtitleExtractor {
             .max { $0.1.count < $1.1.count }
     }
 
-    private static func run(url: String, start: Double, end: Double, timeout: TimeInterval) -> [Track]? {
+    private static func run(url: String, start: Double, end: Double, timeout: TimeInterval, cancel: ExtractionCancel) -> [Track]? {
         guard var context = avformat_alloc_context() else { return nil }
         // A stalled read over HTTP blocks inside libavformat with no
         // deadline of its own; this is what lets it give up. The caller's
         // task chain waits on it, and the ending search queues behind it.
-        let deadline = UnsafeMutablePointer<Double>.allocate(capacity: 1)
-        deadline.pointee = Date().addingTimeInterval(timeout).timeIntervalSince1970
-        defer { deadline.deallocate() }
+        let interrupt = Interrupt(deadline: Date().addingTimeInterval(timeout).timeIntervalSince1970, cancel: cancel)
+        defer { withExtendedLifetime(interrupt) {} }
         context.pointee.interrupt_callback = AVIOInterruptCB(
             callback: { opaque in
                 guard let opaque else { return 0 }
-                return Date().timeIntervalSince1970 > opaque.assumingMemoryBound(to: Double.self).pointee ? 1 : 0
+                return Unmanaged<Interrupt>.fromOpaque(opaque).takeUnretainedValue().shouldStop ? 1 : 0
             },
-            opaque: UnsafeMutableRawPointer(deadline)
+            opaque: Unmanaged.passUnretained(interrupt).toOpaque()
         )
         var options: OpaquePointer?
         av_dict_set(&options, "rw_timeout", "20000000", 0)
@@ -125,7 +136,7 @@ enum SubtitleExtractor {
         // Stopped by the deadline, not by the window's end or the file's:
         // what was read is a prefix, and a prefix has no holes it can vouch
         // for.
-        if !reachedEnd, Date().timeIntervalSince1970 > deadline.pointee { return nil }
+        if !reachedEnd, interrupt.shouldStop { return nil }
         return tracks.keys.sorted().compactMap { tracks[$0] }
     }
 }

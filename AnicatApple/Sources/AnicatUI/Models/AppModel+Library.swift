@@ -124,6 +124,9 @@ extension AppModel {
                 continuation.resume()
             }
         }
+        // A read started before the clear would otherwise land after it.
+        Self.activityGeneration += 1
+        Self.cinemaActivityGeneration += 1
         activity = []
         cinemaActivity = []
         loadWatchStats()
@@ -144,6 +147,8 @@ extension AppModel {
         let gone: (ActivityRow) -> Bool = {
             $0.catalog == catalog && $0.catalogId == id && $0.episodeNumber == episode
         }
+        Self.activityGeneration += 1
+        Self.cinemaActivityGeneration += 1
         activity.removeAll(where: gone)
         cinemaActivity.removeAll(where: gone)
         loadWatchStats()
@@ -475,8 +480,7 @@ extension AppModel {
             isSignedIn = true
             return
         }
-        activity = Self.anilistActivity((try? engine.watchActivity(limit: 500)) ?? [])
-        resolveMissingTitles(activity.map(\.catalogId))
+        await reloadActivity(engine)
         viewer = try? await engine.viewerProfile()
         isSignedIn = viewer != nil
     }
@@ -493,7 +497,27 @@ extension AppModel {
             activity = ScreenshotFixtures.activity(for: ScreenshotFixtures.watching(from: trending))
             return
         }
-        activity = Self.anilistActivity((try? engine.watchActivity(limit: 500)) ?? [])
+        await reloadActivity(engine)
+    }
+
+    /// Bumped by every watch-log read and every local edit of the log. Static
+    /// because an extension cannot add a stored property to `AppModel`, and
+    /// the app has one model.
+    private static var activityGeneration = 0
+
+    /// The watch log, read off the main actor: 500 registry rows as a
+    /// synchronous FFI call on the actor after every player close. Off it,
+    /// two reads can overlap (`refreshAll`'s batch and the close's
+    /// `loadHistory`), and the older one landing last put back rows the
+    /// newer read, or a clear in between, had already dropped.
+    private func reloadActivity(_ engine: AnicatEngine) async {
+        Self.activityGeneration += 1
+        let generation = Self.activityGeneration
+        let rows = await Task.detached(priority: .userInitiated) {
+            (try? engine.watchActivity(limit: 500)) ?? []
+        }.value
+        guard generation == Self.activityGeneration else { return }
+        activity = Self.anilistActivity(rows)
         resolveMissingTitles(activity.map(\.catalogId))
     }
 

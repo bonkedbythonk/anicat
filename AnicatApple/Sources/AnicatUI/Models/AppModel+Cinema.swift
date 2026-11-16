@@ -695,6 +695,10 @@ extension AppModel {
 }
 
 extension AppModel {
+    /// See `loadCinemaLibrary`. Static: an extension cannot add a stored
+    /// property to `AppModel`, and the app has one model.
+    static var cinemaActivityGeneration = 0
+
     /// Continue-watching and history for cinema mode, out of the local
     /// registry.
     ///
@@ -705,8 +709,15 @@ extension AppModel {
     /// TMDB detail, cached for a day, and only for rows actually shown.
     public func loadCinemaLibrary() async {
         guard let engine, cinemaAvailable else { return }
-        let rows = ((try? engine.watchActivity(limit: 200)) ?? [])
-            .filter { $0.catalog != .anilist }
+        // Off the main actor, as `reloadActivity` does for the anime log, and
+        // guarded the same way: an older read landing after a newer one or a
+        // clear put dropped rows back.
+        Self.cinemaActivityGeneration += 1
+        let generation = Self.cinemaActivityGeneration
+        let rows = await Task.detached(priority: .userInitiated) {
+            ((try? engine.watchActivity(limit: 200)) ?? []).filter { $0.catalog != .anilist }
+        }.value
+        guard generation == Self.cinemaActivityGeneration else { return }
         cinemaActivity = rows
 
         // Newest first, one entry per title: a binge leaves ten rows for one

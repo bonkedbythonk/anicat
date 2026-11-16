@@ -74,9 +74,26 @@ extension AppModel {
         // answering about anime while the app is showing films is not a
         // mixed view, it is a wrong one -- the registry holds both.
         let catalogs: [FfiCatalog] = appMode == .cinema ? [.tmdbMovie, .tmdbTv] : [.anilist]
-        watchStatsSnapshot = try? engine.watchStats(days: 365, catalogs: catalogs)
-        watchStatsRecentSnapshot = try? engine.watchStats(days: 30, catalogs: catalogs)
+        // Off the main actor: two registry aggregations as synchronous FFI
+        // calls on it after every player close. Off it, an anime read still
+        // running when the mode switches to cinema would land last and put
+        // anime numbers on the Films page; only the newest read publishes.
+        Self.statsGeneration += 1
+        let generation = Self.statsGeneration
+        Task {
+            let (year, recent) = await Task.detached(priority: .userInitiated) {
+                (try? engine.watchStats(days: 365, catalogs: catalogs),
+                 try? engine.watchStats(days: 30, catalogs: catalogs))
+            }.value
+            guard generation == Self.statsGeneration else { return }
+            watchStatsSnapshot = year
+            watchStatsRecentSnapshot = recent
+        }
     }
+
+    /// See `loadWatchStats`. Static: an extension cannot add a stored
+    /// property to `AppModel`, and the app has one model.
+    private static var statsGeneration = 0
 
     /// Fetches the title and cover of a registry row no shelf has loaded, so
     /// the Stats page can name it instead of printing "AniList #177552".

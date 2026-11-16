@@ -34,183 +34,6 @@ struct PlayerBottomBar: View {
         }
     }
 
-    /// The scrubber, extracted so it can sit in the middle of the single
-    /// transport row below instead of its own stacked row above it — the
-    /// two-row layout this used to be needed more vertical height than the
-    /// video's own letterbox gap reliably has, and got clipped at the
-    /// bottom in windowed sizes with a smaller gap.
-    /// Where the pointer is along the bar, 0...1, or nil when it is not over
-    /// it. The tooltip is the whole of what this drives; scrubbing has its
-    /// own drag state and does not read this.
-    @State private var hoverFraction: Double?
-
-    /// Where the last scrub tick put the playhead, so the next one can tell
-    /// which boundaries it swept over. Nil outside a drag: a stale value
-    /// from the previous scrub would fire against every boundary between
-    /// the two, which is most of them.
-    @State private var lastScrubTime: Double?
-
-    @State private var tooltipWidth: CGFloat = 0
-
-    /// Time, and the chapter that time is inside. There is no frame preview
-    /// here and deliberately so: the only way to render one without seeking
-    /// the instance that is playing is a second libmpv on the same stream
-    /// URL, which is a second HTTP client pulling pieces from the range
-    /// server. Core pins exactly one playing file and keeps two selected
-    /// files at a time (`SELECTED_FILES_KEPT`), already spent on the playing
-    /// episode and the N+1 preload; a preview client requesting pieces
-    /// nobody is watching is the mid-playback eviction that pin exists to
-    /// prevent, and core cannot tell those reads are speculative.
-    @ViewBuilder
-    private func seekTooltip(width: CGFloat) -> some View {
-        if let hoverFraction, controller.duration > 0 {
-            let time = hoverFraction * controller.duration
-            let chapter = PlayerChapters.chapter(at: time, in: controller.chapters)
-            VStack(spacing: 2) {
-                Text(PlayerController.formatTimestamp(time))
-                    .sumiTabularMono(size: 11, weight: .semibold)
-                    .foregroundColor(PlayerChrome.foreground)
-                if let chapter, !chapter.title.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text(chapter.title)
-                        .font(.system(size: 10))
-                        .foregroundColor(PlayerChrome.muted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .fixedSize()
-            // Sized to its text and drawn as glass: the fixed-width
-            // near-black slab read as a bar sitting on the picture.
-            .playerScrim(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
-            .allowsHitTesting(false)
-            // Clamped to the bar rather than centred on the pointer at the
-            // ends, where centring would hang it off the window.
-            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { tooltipWidth = $0 }
-            // Centred on the pointer by the tooltip's real width. It used a
-            // fixed 150 after the tooltip became sized to its text (~50 pt
-            // for "04:21"), so it sat well left of the mouse.
-            .offset(
-                x: min(max(hoverFraction * width - tooltipWidth / 2, 0), max(width - tooltipWidth, 0)),
-                y: -46
-            )
-        }
-    }
-
-    /// Whether a scrub from `from` to `to` swept over a chapter mark or the
-    /// edge of a skip window — the marks the bar already draws, so the tick
-    /// lands on something the viewer can see. Direction-agnostic: dragging
-    /// back over the opening is the same boundary as dragging forward over
-    /// it.
-    private func crossesBoundary(from: Double, to: Double) -> Bool {
-        guard controller.duration > 0, from != to else { return false }
-        let lower = min(from, to)
-        let upper = max(from, to)
-        let boundaries = controller.chapters.map(\.time)
-            + controller.skipWindows.flatMap { [$0.start, $0.end] }
-        return boundaries.contains { $0 > lower && $0 <= upper }
-    }
-
-    /// The bar is 4 pt at rest and 6 pt with a knob while the pointer is
-    /// over it or a scrub is in progress, so the thing about to be dragged
-    /// announces itself before the drag; a constant 4 pt line gave no cue
-    /// that it was live at all.
-    private var scrubberIsLive: Bool {
-        hoverFraction != nil || controller.isScrubbing
-    }
-
-    private var scrubber: some View {
-        GeometryReader { geo in
-            let thickness: CGFloat = scrubberIsLive ? 6 : 4
-            let playhead = geo.size.width * CGFloat(controller.progressFraction)
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(0.2))
-                    .frame(height: thickness)
-                // What is already fetched, under the played part: the
-                // viewer can see how far a seek can land without a stall.
-                if controller.duration > 0 {
-                    ForEach(Array(controller.bufferedRanges.enumerated()), id: \.offset) { _, span in
-                        let x0 = geo.size.width * CGFloat(min(max(span.start / controller.duration, 0), 1))
-                        let x1 = geo.size.width * CGFloat(min(max(span.end / controller.duration, 0), 1))
-                        Capsule()
-                            .fill(Color.white.opacity(0.28))
-                            .frame(width: max(x1 - x0, 0), height: thickness)
-                            .offset(x: x0)
-                    }
-                    .allowsHitTesting(false)
-                    .animation(.sumi(.tab), value: controller.bufferedRanges)
-                }
-                Capsule()
-                    .fill(SumiTheme.indigo)
-                    .frame(width: playhead, height: thickness)
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 12, height: 12)
-                    .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
-                    .scaleEffect(scrubberIsLive ? 1 : 0.01)
-                    .opacity(scrubberIsLive ? 1 : 0)
-                    .offset(x: playhead - 6)
-                    .allowsHitTesting(false)
-                // Chapter marks. 1pt, over the track rather than notched out
-                // of it: a gap in the filled bar would read as buffering
-                // rather than as a boundary. Drawn only where mpv reported
-                // chapters, so nothing changes for a release without them.
-                if controller.duration > 0 {
-                    ForEach(controller.chapters) { chapter in
-                        Rectangle()
-                            .fill(Color.white.opacity(0.55))
-                            .frame(width: 1, height: 8)
-                            .offset(x: geo.size.width * CGFloat(min(max(chapter.time / controller.duration, 0), 1)))
-                    }
-                    .allowsHitTesting(false)
-                }
-            }
-            .frame(maxHeight: .infinity)
-            .animation(.snappy(duration: 0.22), value: scrubberIsLive)
-            .contentShape(Rectangle())
-            // No drag on tvOS; `TVPlayerView` seeks from the remote's ring
-            // and never mounts this scrubber.
-            #if !os(tvOS)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        controller.isScrubbing = true
-                        let fraction = min(max(value.location.x / geo.size.width, 0), 1)
-                        let target = Double(fraction) * controller.duration
-                        if let previous = lastScrubTime, crossesBoundary(from: previous, to: target) {
-                            AppHaptics.seekSnap()
-                        }
-                        lastScrubTime = target
-                        controller.currentTime = target
-                    }
-                    .onEnded { value in
-                        let fraction = min(max(value.location.x / geo.size.width, 0), 1)
-                        let target = Double(fraction) * controller.duration
-                        controller.isScrubbing = false
-                        lastScrubTime = nil
-                        controller.seek(to: target)
-                    }
-            )
-            #endif
-            #if os(macOS)
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point):
-                    hoverFraction = min(max(point.x / geo.size.width, 0), 1)
-                case .ended:
-                    hoverFraction = nil
-                }
-            }
-            #endif
-            .overlay(alignment: .topLeading) {
-                seekTooltip(width: geo.size.width)
-            }
-        }
-    }
-
     var body: some View {
         // 40 pt hit targets on every icon, glyphs still 14 pt. At 28 pt the
         // owner still had to "be very precise"; the row spacing drops to 2 so
@@ -291,26 +114,12 @@ struct PlayerBottomBar: View {
             .chromeName("Next episode (N)", chromeHover)
             .accessibilityLabel("Next Episode (N)")
 
-            // Time Display
-            HStack(spacing: 4) {
-                Text(controller.formattedCurrentTime)
-                .foregroundColor(PlayerChrome.foreground)
-                Text("/")
-                .foregroundColor(PlayerChrome.muted)
-                Text(controller.formattedDuration)
-                .foregroundColor(PlayerChrome.muted)
-            }
-            .sumiTabularMono(size: 11.5)
-            .fixedSize()
-            // The row packs at 2pt for the icons' sake, which left the
-            // duration touching the start of the bar.
-            .padding(.leading, 4)
-            .padding(.trailing, 12)
+            PlayerTimeLabel(controller: controller)
 
             // Progress bar fills the middle, between the transport cluster
             // (left) and the options cluster (right) rather than a whole
             // separate row of its own.
-            scrubber
+            PlayerScrubber(controller: controller)
                 .frame(height: 12)
                 .frame(maxWidth: .infinity)
 
@@ -427,6 +236,215 @@ struct PlayerBottomBar: View {
                 Rectangle()
                     .fill(SumiTheme.border.opacity(0.6))
                     .frame(height: 1)
+            }
+        }
+    }
+}
+
+/// The elapsed / total readout, apart from the bar so the quarter-second
+/// `currentTime` step redraws these three texts and not every button in
+/// the row beside them.
+private struct PlayerTimeLabel: View {
+    let controller: PlayerController
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(controller.formattedCurrentTime)
+            .foregroundColor(PlayerChrome.foreground)
+            Text("/")
+            .foregroundColor(PlayerChrome.muted)
+            Text(controller.formattedDuration)
+            .foregroundColor(PlayerChrome.muted)
+        }
+        .sumiTabularMono(size: 11.5)
+        .fixedSize()
+        // The row packs at 2pt for the icons' sake, which left the
+        // duration touching the start of the bar.
+        .padding(.leading, 4)
+        .padding(.trailing, 12)
+    }
+}
+
+/// The scrubber, extracted so it can sit in the middle of the single
+/// transport row instead of its own stacked row above it -- the two-row
+/// layout this used to be needed more vertical height than the video's own
+/// letterbox gap reliably has, and got clipped at the bottom in windowed
+/// sizes with a smaller gap -- and so the playhead's quarter-second step
+/// rebuilds this view alone.
+private struct PlayerScrubber: View {
+    let controller: PlayerController
+
+    /// Where the pointer is along the bar, 0...1, or nil when it is not over
+    /// it. The tooltip is the whole of what this drives; scrubbing has its
+    /// own drag state and does not read this.
+    @State private var hoverFraction: Double?
+
+    /// Where the last scrub tick put the playhead, so the next one can tell
+    /// which boundaries it swept over. Nil outside a drag: a stale value
+    /// from the previous scrub would fire against every boundary between
+    /// the two, which is most of them.
+    @State private var lastScrubTime: Double?
+
+    @State private var tooltipWidth: CGFloat = 0
+
+    /// Time, and the chapter that time is inside. There is no frame preview
+    /// here and deliberately so: the only way to render one without seeking
+    /// the instance that is playing is a second libmpv on the same stream
+    /// URL, which is a second HTTP client pulling pieces from the range
+    /// server. Core pins exactly one playing file and keeps two selected
+    /// files at a time (`SELECTED_FILES_KEPT`), already spent on the playing
+    /// episode and the N+1 preload; a preview client requesting pieces
+    /// nobody is watching is the mid-playback eviction that pin exists to
+    /// prevent, and core cannot tell those reads are speculative.
+    @ViewBuilder
+    private func seekTooltip(width: CGFloat) -> some View {
+        if let hoverFraction, controller.duration > 0 {
+            let time = hoverFraction * controller.duration
+            let chapter = PlayerChapters.chapter(at: time, in: controller.chapters)
+            VStack(spacing: 2) {
+                Text(PlayerController.formatTimestamp(time))
+                    .sumiTabularMono(size: 11, weight: .semibold)
+                    .foregroundColor(PlayerChrome.foreground)
+                if let chapter, !chapter.title.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Text(chapter.title)
+                        .font(.system(size: 10))
+                        .foregroundColor(PlayerChrome.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .fixedSize()
+            // Sized to its text and drawn as glass: the fixed-width
+            // near-black slab read as a bar sitting on the picture.
+            .playerScrim(RoundedRectangle(cornerRadius: 8))
+            .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+            .allowsHitTesting(false)
+            // Clamped to the bar rather than centred on the pointer at the
+            // ends, where centring would hang it off the window.
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { tooltipWidth = $0 }
+            // Centred on the pointer by the tooltip's real width. It used a
+            // fixed 150 after the tooltip became sized to its text (~50 pt
+            // for "04:21"), so it sat well left of the mouse.
+            .offset(
+                x: min(max(hoverFraction * width - tooltipWidth / 2, 0), max(width - tooltipWidth, 0)),
+                y: -46
+            )
+        }
+    }
+
+    /// Whether a scrub from `from` to `to` swept over a chapter mark or the
+    /// edge of a skip window — the marks the bar already draws, so the tick
+    /// lands on something the viewer can see. Direction-agnostic: dragging
+    /// back over the opening is the same boundary as dragging forward over
+    /// it.
+    private func crossesBoundary(from: Double, to: Double) -> Bool {
+        guard controller.duration > 0, from != to else { return false }
+        let lower = min(from, to)
+        let upper = max(from, to)
+        let boundaries = controller.chapters.map(\.time)
+            + controller.skipWindows.flatMap { [$0.start, $0.end] }
+        return boundaries.contains { $0 > lower && $0 <= upper }
+    }
+
+    /// The bar is 4 pt at rest and 6 pt with a knob while the pointer is
+    /// over it or a scrub is in progress, so the thing about to be dragged
+    /// announces itself before the drag; a constant 4 pt line gave no cue
+    /// that it was live at all.
+    private var scrubberIsLive: Bool {
+        hoverFraction != nil || controller.isScrubbing
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            // Read once: a computed merge and filter over both cache maps,
+            // which the ForEach and its animation each asked for.
+            let buffered = controller.bufferedRanges
+            let thickness: CGFloat = scrubberIsLive ? 6 : 4
+            let playhead = geo.size.width * CGFloat(controller.progressFraction)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(height: thickness)
+                // What is already fetched, under the played part: the
+                // viewer can see how far a seek can land without a stall.
+                if controller.duration > 0 {
+                    ForEach(Array(buffered.enumerated()), id: \.offset) { _, span in
+                        let x0 = geo.size.width * CGFloat(min(max(span.start / controller.duration, 0), 1))
+                        let x1 = geo.size.width * CGFloat(min(max(span.end / controller.duration, 0), 1))
+                        Capsule()
+                            .fill(Color.white.opacity(0.28))
+                            .frame(width: max(x1 - x0, 0), height: thickness)
+                            .offset(x: x0)
+                    }
+                    .allowsHitTesting(false)
+                    .animation(.sumi(.tab), value: buffered)
+                }
+                Capsule()
+                    .fill(SumiTheme.indigo)
+                    .frame(width: playhead, height: thickness)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 12, height: 12)
+                    .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+                    .scaleEffect(scrubberIsLive ? 1 : 0.01)
+                    .opacity(scrubberIsLive ? 1 : 0)
+                    .offset(x: playhead - 6)
+                    .allowsHitTesting(false)
+                // Chapter marks. 1pt, over the track rather than notched out
+                // of it: a gap in the filled bar would read as buffering
+                // rather than as a boundary. Drawn only where mpv reported
+                // chapters, so nothing changes for a release without them.
+                if controller.duration > 0 {
+                    ForEach(controller.chapters) { chapter in
+                        Rectangle()
+                            .fill(Color.white.opacity(0.55))
+                            .frame(width: 1, height: 8)
+                            .offset(x: geo.size.width * CGFloat(min(max(chapter.time / controller.duration, 0), 1)))
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+            .frame(maxHeight: .infinity)
+            .animation(.snappy(duration: 0.22), value: scrubberIsLive)
+            .contentShape(Rectangle())
+            // No drag on tvOS; `TVPlayerView` seeks from the remote's ring
+            // and never mounts this scrubber.
+            #if !os(tvOS)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        controller.isScrubbing = true
+                        let fraction = min(max(value.location.x / geo.size.width, 0), 1)
+                        let target = Double(fraction) * controller.duration
+                        if let previous = lastScrubTime, crossesBoundary(from: previous, to: target) {
+                            AppHaptics.seekSnap()
+                        }
+                        lastScrubTime = target
+                        controller.currentTime = target
+                    }
+                    .onEnded { value in
+                        let fraction = min(max(value.location.x / geo.size.width, 0), 1)
+                        let target = Double(fraction) * controller.duration
+                        controller.isScrubbing = false
+                        lastScrubTime = nil
+                        controller.seek(to: target)
+                    }
+            )
+            #endif
+            #if os(macOS)
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point):
+                    hoverFraction = min(max(point.x / geo.size.width, 0), 1)
+                case .ended:
+                    hoverFraction = nil
+                }
+            }
+            #endif
+            .overlay(alignment: .topLeading) {
+                seekTooltip(width: geo.size.width)
             }
         }
     }

@@ -47,6 +47,8 @@ struct PhoneProfileView: View {
             }
             .scrollContentBackground(.hidden)
             .background(SumiTheme.background)
+            // Launch browses only for a paired phone; see AppModel.
+            .onAppear { BonjourDiscovery.shared.startBrowsing() }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

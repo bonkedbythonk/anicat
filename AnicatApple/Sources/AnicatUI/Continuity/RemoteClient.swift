@@ -175,9 +175,16 @@ public final class RemoteClient {
         guard Self.knownHosts().contains(node.id) else { return }
         // Same host only: with a Mac and an Apple TV both on the network, a
         // live connection to the other one is not this one.
-        if hostNodeId == node.id {
-            if status == .connected, connection?.state == .ready { return }
-            if case .connecting = status, connection?.state == .preparing { return }
+        if hostNodeId == node.id,
+           (status == .connected && connection?.state == .ready)
+            || (status == .connecting && connection?.state == .preparing) {
+            // The live connection may be a quiet sync's -- both fire on the
+            // same discovery change -- and that one hangs up when its reply
+            // lands, taking the foreground remote with it. Kept, it is ours.
+            quietSyncTimeout?.cancel()
+            quietSyncTimeout = nil
+            isQuietSync = false
+            return
         }
         connect(to: node)
     }

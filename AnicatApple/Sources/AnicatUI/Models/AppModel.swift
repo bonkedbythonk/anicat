@@ -1161,7 +1161,13 @@ public final class AppModel {
                 BonjourDiscovery.shared.startAdvertising(port: port)
             }
             #else
-            BonjourDiscovery.shared.startBrowsing()
+            // Paired phones only: a browse is what raises the Local Network
+            // prompt, and browsing at launch put it in front of every new
+            // viewer before they had heard of the remote. An unpaired phone
+            // starts browsing when Profile, where the remote row is, opens.
+            if !RemoteClient.knownHosts().isEmpty {
+                BonjourDiscovery.shared.startBrowsing()
+            }
             #endif
 
             // Preload everything the signed-in views draw from. `refreshAll`

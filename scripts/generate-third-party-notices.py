@@ -520,7 +520,7 @@ tracker applies if any of that becomes unavailable.""")
         add_library(add, lib)
 
     add("\n\n" + rule("2. Fonts"))
-    add("\nGeist and IBM Plex Mono, under the SIL Open Font License, version 1.1.\n")
+    add("\nGeist, under the SIL Open Font License, version 1.1.\n")
     add(read(os.path.join(UI_RESOURCES, "Fonts", "OFL.txt")))
     add("\nRajdhani and Shippori Mincho B1 (Latin subsets) are under the same license; their notices:\n")
     for notice in ("OFL-Rajdhani.txt", "OFL-ShipporiMinchoB1.txt"):

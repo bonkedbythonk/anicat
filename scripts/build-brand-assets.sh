@@ -137,15 +137,6 @@ full_bleed "$APPICON/anicat-1024-dark.png" "$SUMI" "$INDIGO_DARK" 0.95
 # Tinted icons are read for luminance only; the system supplies the colour.
 full_bleed "$APPICON/anicat-1024-tinted.png" "#000000" "#ffffff" 0.95
 
-# Menu bar template: black on clear, AppKit tints it. Sizes match the old
-# 16x15 art so BrandAssets' representation sizes stay right.
-cropped "$IMAGES/anicat_menu_icon.png" "#000000" 16 15
-cropped "$IMAGES/anicat_menu_icon@2x.png" "#000000" 32 30
-cropped "$IMAGES/anicat_menu_icon@3x.png" "#000000" 48 45
-tiffutil -cathidpicheck "$IMAGES/anicat_menu_icon.png" "$IMAGES/anicat_menu_icon@2x.png" \
-  -out "$IMAGES/anicat_menu_icon.tiff" >/dev/null
-cropped "$IMAGES/tray_icon.png" "#000000" 32 30
-
 # Sidebar and onboarding mark. SidebarView grayscales it and draws it at 10%,
 # so the fill only matters as a luminance. Callers size it by height (80pt in
 # the rail), and the paw is wider than the sitting cat it replaced: cropped

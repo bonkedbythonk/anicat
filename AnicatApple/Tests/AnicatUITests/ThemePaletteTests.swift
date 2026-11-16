@@ -222,17 +222,6 @@ struct ThemePaletteTests {
         #expect(SumiPalette.oled.isLight == false)
         #expect(SumiPalette.paper.isLight == true)
     }
-
-    @Test("the accent override replaces the accent without touching the rest")
-    func accentOverrideHook() {
-        var palette = SumiPalette.ink
-        #expect(palette.accentOverride == nil)
-        // The hook the poster accent will use. `indigoHex` stays the palette's
-        // own, which is what keeps `accentContrast` measuring something real.
-        palette.accentOverride = palette.successLight
-        #expect(palette.indigoHex == SumiPalette.ink.indigoHex)
-        #expect(palette.accentContrast == SumiPalette.ink.accentContrast)
-    }
 }
 
 @Suite("Night City")

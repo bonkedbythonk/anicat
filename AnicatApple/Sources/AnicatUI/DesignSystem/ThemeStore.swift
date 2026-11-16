@@ -78,14 +78,9 @@ public struct SumiPalette: Sendable {
     public let warning: Color
     public let warningLight: Color
 
-    private let baseIndigo: Color
-
-    /// The hook for "accent from the current poster". Nothing sets it yet;
-    /// when something does, it replaces the accent for the whole app without
-    /// any call site learning a second token name.
-    public var accentOverride: Color?
-
-    public var indigo: Color { accentOverride ?? baseIndigo }
+    /// The palette's own accent. The poster accent is not a field here: see
+    /// `ThemeStore.accentOverride`.
+    public let indigo: Color
 
     public init(
         id: String,
@@ -131,7 +126,7 @@ public struct SumiPalette: Sendable {
         self.foreground = Color(hex: foregroundHex)
         self.muted = Color(hex: foregroundHex, opacity: mutedAlpha)
         self.border = Color(hex: foregroundHex, opacity: borderAlpha)
-        self.baseIndigo = Color(hex: indigoHex)
+        self.indigo = Color(hex: indigoHex)
         self.indigoLight = Color(hex: indigoLightHex)
         self.danger = Color(hex: dangerHex)
         self.dangerLight = Color(hex: dangerLightHex)
@@ -625,6 +620,13 @@ public final class ThemeStore: @unchecked Sendable {
     public private(set) var appearance: AnicatAppearance
     public private(set) var palette: SumiPalette
 
+    /// The poster accent in force, nil for the palette's own. Its own stored
+    /// property, not a field of `palette`: every token reads `palette`, so an
+    /// accent written into it invalidated every colour-reading body in the
+    /// window (some 120 mounted home cards and the sidebar) on each detail
+    /// open and close, when only views that draw the accent needed it.
+    public private(set) var accentOverride: Color?
+
     public var colorScheme: ColorScheme { palette.isLight ? .light : .dark }
 
     #if os(macOS)
@@ -748,9 +750,9 @@ public final class ThemeStore: @unchecked Sendable {
 
     @MainActor
     private func apply(_ color: Color?) {
-        guard palette.accentOverride != nil || color != nil else { return }
+        guard accentOverride != nil || color != nil else { return }
         withAnimation(.sumi(.tab)) {
-            palette.accentOverride = color
+            accentOverride = color
         }
     }
 
@@ -769,9 +771,7 @@ public final class ThemeStore: @unchecked Sendable {
     }
 
     private func refresh() {
-        let override = palette.accentOverride
-        var next = skin.palette(isLight: appearance.isLight(systemIsDark: Self.systemPrefersDark))
-        next.accentOverride = override
+        let next = skin.palette(isLight: appearance.isLight(systemIsDark: Self.systemPrefersDark))
         // Assigned unconditionally, including when it resolves to the palette
         // already in force (picking "Follow system" on a Mac already set to
         // Light). That used to be worth guarding because a change rerooted the

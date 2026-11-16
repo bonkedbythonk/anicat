@@ -75,9 +75,9 @@ public enum SumiTheme {
     /// Hairline border: the foreground at the palette's border alpha.
     public static var border: Color { ThemeStore.shared.palette.border }
 
-    /// The single accent, Aizome Indigo. Honours `palette.accentOverride`, so
-    /// a future poster-derived accent needs no change at any call site.
-    public static var indigo: Color { ThemeStore.shared.palette.indigo }
+    /// The single accent, Aizome Indigo, or the poster accent while a detail
+    /// page has set one (`ThemeStore.accentOverride`).
+    public static var indigo: Color { ThemeStore.shared.accentOverride ?? ThemeStore.shared.palette.indigo }
 
     public static var indigoLight: Color { ThemeStore.shared.palette.indigoLight }
 

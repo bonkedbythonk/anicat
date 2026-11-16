@@ -2331,9 +2331,10 @@ private struct EpisodeListSection: View {
     // and the one the viewer actually wanted was a scroll away at the bottom.
     @State private var expandedGroups: Set<Int> = []
 
-    // Evaluated once per section body, not once per row, so a plain
-    // computed property is enough. It was a `@State` cache that nothing
-    // ever assigned, so no row was ever the resume target.
+    // A linear scan of the list: `body` reads it once and hands the result
+    // to the rows. Read inside the row builders it ran once per row, which
+    // is quadratic on a 366-episode entry. It was a `@State` cache that
+    // nothing ever assigned, so no row was ever the resume target.
     private var resumeTarget: MediaDetailView.EpisodeItem? {
         if let resumeEpisode, let match = episodes.first(where: { $0.number == resumeEpisode }) {
             return match
@@ -2369,11 +2370,11 @@ private struct EpisodeListSection: View {
     }
 
     @ViewBuilder
-    private func compactRows(for episodes: [MediaDetailView.EpisodeItem]) -> some View {
+    private func compactRows(for episodes: [MediaDetailView.EpisodeItem], target: MediaDetailView.EpisodeItem?) -> some View {
         ForEach(episodes) { episode in
             CompactEpisodeRow(
                 episode: episode,
-                isResumeTarget: episode.id == resumeTarget?.id,
+                isResumeTarget: episode.id == target?.id,
                 resumeSeconds: episode.number == resumeEpisode ? resumeSeconds : nil,
                 onPlay: { onPlayEpisode(episode) },
                 onToggleWatched: { watched in onSetEpisodeWatched(episode.number, watched) }
@@ -2383,11 +2384,11 @@ private struct EpisodeListSection: View {
     }
 
     @ViewBuilder
-    private func regularRows(for episodes: [MediaDetailView.EpisodeItem], downloadStates: [Int: MediaDetailView.EpisodeDownloadState]) -> some View {
+    private func regularRows(for episodes: [MediaDetailView.EpisodeItem], downloadStates: [Int: MediaDetailView.EpisodeDownloadState], target: MediaDetailView.EpisodeItem?) -> some View {
         ForEach(episodes) { episode in
             EpisodeRow(
                 episode: episode,
-                isResumeTarget: episode.id == resumeTarget?.id,
+                isResumeTarget: episode.id == target?.id,
                 resumeSeconds: episode.number == resumeEpisode ? resumeSeconds : nil,
                 downloadState: downloadStates[episode.number] ?? .notStarted,
                 onPlay: { onPlayEpisode(episode) },
@@ -2432,6 +2433,7 @@ private struct EpisodeListSection: View {
 
     var body: some View {
         let downloadStates = downloadStates()
+        let target = resumeTarget
         Group {
             if episodes.isEmpty {
                 if isLoading {
@@ -2447,9 +2449,9 @@ private struct EpisodeListSection: View {
                             isExpanded: Binding(member: group.firstNumber, of: $expandedGroups)
                         ) {
                             if selectedViewMode == .compact {
-                                compactRows(for: group.episodes)
+                                compactRows(for: group.episodes, target: target)
                             } else {
-                                regularRows(for: group.episodes, downloadStates: downloadStates)
+                                regularRows(for: group.episodes, downloadStates: downloadStates, target: target)
                             }
                         }
                     }
@@ -2466,9 +2468,8 @@ private struct EpisodeListSection: View {
                 // under the mini-player) sat inside a closed group. The owning
                 // group is added, not swapped in, so a group the viewer opened
                 // stays open.
-                .task(id: [episodes.first?.number ?? 0, resumeTarget?.number ?? 0]) {
-                    let target = resumeTarget?.number
-                    let owning = target.flatMap { number in
+                .task(id: [episodes.first?.number ?? 0, target?.number ?? 0]) {
+                    let owning = target.map(\.number).flatMap { number in
                         groups.first { $0.episodes.contains { $0.number == number } }
                     } ?? groups.first
                     if let owning {
@@ -2477,11 +2478,11 @@ private struct EpisodeListSection: View {
                 }
             } else if selectedViewMode == .compact {
                 LazyVStack(spacing: 0) {
-                    compactRows(for: episodes)
+                    compactRows(for: episodes, target: target)
                 }
             } else {
                 LazyVStack(spacing: 0) {
-                    regularRows(for: episodes, downloadStates: downloadStates)
+                    regularRows(for: episodes, downloadStates: downloadStates, target: target)
                 }
             }
         }

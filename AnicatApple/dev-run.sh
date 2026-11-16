@@ -64,6 +64,15 @@ fi
 for t in com.apple.corespotlightitem com.anicat.playback com.anicat.reading; do
     /usr/libexec/PlistBuddy -c "Add :NSUserActivityTypes: string $t" "$PLIST"
 done
+# A dist packaged before these keys existed never gained them, and Play on TV
+# then found no Chromecast with nothing logged; see package-anicat-macos-app.sh.
+/usr/libexec/PlistBuddy -c "Set :NSLocalNetworkUsageDescription Anicat finds TVs and other Anicat instances on your network, and streams to the TV you pick." "$PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string Anicat finds TVs and other Anicat instances on your network, and streams to the TV you pick." "$PLIST"
+/usr/libexec/PlistBuddy -c "Delete :NSBonjourServices" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$PLIST"
+for s in _googlecast._tcp _anicat-stream._tcp; do
+    /usr/libexec/PlistBuddy -c "Add :NSBonjourServices: string $s" "$PLIST"
+done
 # Signed with a real identity, not ad-hoc.
 #
 # TCC keys a folder grant to the app's designated requirement. Under an ad-hoc

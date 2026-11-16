@@ -563,13 +563,35 @@ public struct MpvSurface {
             guard let mpv else { return nil }
             return body(mpv)
         }
-        private var isRunning = false
+        /// Guards the fields the event-loop thread and the main thread both
+        /// write: `isRunning`, `lastDrawableSize`, `reconfigAttemptsForSize`
+        /// and `lastSizeCheckAt`. `fullScreenTransitionEnded` runs the forced
+        /// size check on main while the loop runs its idle one, and a plain
+        /// `CGSize` read during the other thread's write can come back half
+        /// old, half new. A leaf: never held across an mpv call or while
+        /// taking `handleLock`/`nudgeLock`, because `verifyVideoSizeIfDue`
+        /// calls into a nudge that reads `lastDrawableSize` itself.
+        private let crossThreadLock = NSLock()
+        private var _isRunning = false
+        private var isRunning: Bool {
+            get { crossThreadLock.withLock { _isRunning } }
+            set { crossThreadLock.withLock { _isRunning = newValue } }
+        }
         fileprivate var controller: PlayerController
         fileprivate weak var hostView: MpvHostView?
         private var lastLoadedURL: String?
         private var pendingStreamURL: String?
         private var lastAnime4KState: Bool?
         private var lastInterpolationState: Bool?
+        /// mpv's pause state as last written or last reported, so
+        /// `setPaused` can skip a write that changes nothing. `updateHostView`
+        /// calls it on every SwiftUI update of the player, and on the Mac the
+        /// write is a synchronous `mpv_set_property` on the main thread that
+        /// waits for the core. The `pause` observer keeps it in step with
+        /// changes that did not come through here (mpv pausing itself at the
+        /// end under `keep-open`): a cache of writes alone would read
+        /// "already playing" there and swallow the viewer's play press.
+        private var lastPausedWritten: Bool?
         /// HDR or above 1080p: the filter's 8-bit 4:2:0 input would flatten HDR, and
         /// nothing anime ships above 1080p. Read from the decoder's own params.
         private var smoothBlockedByContent = false
@@ -1074,10 +1096,16 @@ public struct MpvSurface {
                     self.refreshPausedFrame()
                 }
                 if again {
-                    // Off this block: `nudgeVideoReconfig` reads properties
-                    // through the handle lock this closure is still holding.
+                    // Off this block, which still holds `handleLock` (an
+                    // NSLock, not recursive). Inside `withHandle` on the
+                    // other side: this queue is not one `stop()` waits for,
+                    // and a nudge that passed its `mpv != nil` check before
+                    // `stop()` took the handle could go on reading
+                    // properties through the core `mpv_destroy` was freeing
+                    // (found by reading the code; not seen to crash).
                     DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.03) { [weak self] in
-                        self?.nudgeVideoReconfig(reason: "deferred")
+                        guard let self else { return }
+                        _ = self.withHandle { _ in self.nudgeVideoReconfig(reason: "deferred") }
                     }
                 }
             }
@@ -1085,9 +1113,17 @@ public struct MpvSurface {
 
         /// The layer size the view last applied, so the vo's own idea of
         /// its size (`osd-dimensions`) can be checked against it.
-        private var lastDrawableSize: CGSize = .zero
+        private var _lastDrawableSize: CGSize = .zero
+        private var lastDrawableSize: CGSize {
+            get { crossThreadLock.withLock { _lastDrawableSize } }
+            set { crossThreadLock.withLock { _lastDrawableSize = newValue } }
+        }
         private var fullScreenObserver: NSObjectProtocol?
-        private var reconfigAttemptsForSize = 0
+        private var _reconfigAttemptsForSize = 0
+        private var reconfigAttemptsForSize: Int {
+            get { crossThreadLock.withLock { _reconfigAttemptsForSize } }
+            set { crossThreadLock.withLock { _reconfigAttemptsForSize = newValue } }
+        }
 
         func drawableSizeChanged(to size: CGSize) {
             PlayerLog.write(String(format: "[nudge] drawable now %.0fx%.0f (was %.0fx%.0f)", size.width, size.height, lastDrawableSize.width, lastDrawableSize.height))
@@ -1147,8 +1183,12 @@ public struct MpvSurface {
         private var lastSizeCheckAt: CFAbsoluteTime = 0
         func verifyVideoSizeIfDue(force: Bool = false) {
             let now = CFAbsoluteTimeGetCurrent()
-            guard force || now - lastSizeCheckAt >= 0.5 else { return }
-            lastSizeCheckAt = now
+            let due = crossThreadLock.withLock { () -> Bool in
+                guard force || now - lastSizeCheckAt >= 0.5 else { return false }
+                lastSizeCheckAt = now
+                return true
+            }
+            guard due else { return }
             let wanted = lastDrawableSize
             if force {
                 // Before any guard: a forced check that logs nothing when a
@@ -1176,7 +1216,9 @@ public struct MpvSurface {
                 // how the paused fullscreen restore ran out of attempts with
                 // the vo still at 640x360 in a 3024x1898 layer.
                 guard nudgeVideoReconfig(reason: force ? "forced size check" : "idle size check") else { return }
-                reconfigAttemptsForSize += 1
+                // In place, not a read then a write: a main-thread reset to 0
+                // landing between the two would be overwritten.
+                crossThreadLock.withLock { _reconfigAttemptsForSize += 1 }
                 PlayerLog.write(String(format: "[libmpv] vo is %.0fx%.0f, layer is %.0fx%.0f; forcing a reconfig (%d)", w, h, wanted.width, wanted.height, reconfigAttemptsForSize))
             }
         }
@@ -1233,6 +1275,9 @@ public struct MpvSurface {
             // the next unrelated redraw.
             explicitSubtitleTrackId = nil
             didApplyTrackMemory = false
+            // The next `setPaused` goes out whatever it says: a new file is
+            // where the player's wish is re-asserted over what mpv kept.
+            lastPausedWritten = nil
             // paused-for-cache stays false until mpv has actually started
             // decoding, so the initial "resolving the first frame" stretch
             // has no property to key off — set it optimistically here and
@@ -1308,7 +1353,11 @@ public struct MpvSurface {
             }
         }
 
-        func setPaused(_ paused: Bool) { setTransport("pause", flag: paused) }
+        func setPaused(_ paused: Bool) {
+            guard mpv != nil, paused != lastPausedWritten else { return }
+            lastPausedWritten = paused
+            setTransport("pause", flag: paused)
+        }
 
         func seek(to seconds: Double) {
             runCommand(["seek", String(format: "%.2f", seconds), "absolute"], async: Self.asyncTransport)
@@ -2200,6 +2249,11 @@ public struct MpvSurface {
                                 self.lastCacheStateRead = now
                                 let ranges = self.cachedSeekableRanges()
                                 await MainActor.run {
+                                    // `@Observable` notifies on an equal
+                                    // assignment too, so every half-second
+                                    // read that matched the last one was a
+                                    // seek-bar rebuild for nothing.
+                                    guard self.controller.mpvBufferedRanges != ranges else { return }
                                     self.controller.mpvBufferedRanges = ranges
                                 }
                             }
@@ -2239,6 +2293,9 @@ public struct MpvSurface {
                         } else if name == "pause", let data = prop.data {
                             let paused = data.assumingMemoryBound(to: Int32.self).pointee != 0
                             await MainActor.run {
+                                // Before the gate: this mirrors mpv, not
+                                // the controller.
+                                self.lastPausedWritten = paused
                                 guard !self.controller.awaitingNewFile else { return }
                                 self.controller.isPlaying = !paused
                                 if paused {
@@ -2281,6 +2338,7 @@ public struct MpvSurface {
             pendingStreamURL = nil
             lastAnime4KState = nil
             lastInterpolationState = nil
+            lastPausedWritten = nil
             controller.isBuffering = false
             controller.bufferingPercent = nil
             controller.mpvBufferedRanges = []

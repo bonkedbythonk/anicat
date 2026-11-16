@@ -120,6 +120,14 @@ final class CastSession {
     /// seeked the Mac back 5-9 s within the 900 ms, the viewer seeked again,
     /// and one scrub became seven stream restarts in 25 s.
     @ObservationIgnored private var seekPending = false
+    /// What the running encode burned in: a change to any of them needs a
+    /// new one.
+    @ObservationIgnored private var streamTracks: (sid: String?, aid: String?, upscale: Bool, height: Int)?
+    /// An in-stream seek's target and the time to give up waiting for the
+    /// TV to report it.
+    @ObservationIgnored private var inStreamSeek: (target: Double, deadline: TimeInterval)?
+    /// Buffering before this does not count toward `stallLimit`.
+    @ObservationIgnored private var stallGraceUntil: TimeInterval = 0
     /// The Mac is paused until then to let a TV that fell behind catch up.
     @ObservationIgnored private var catchUpUntil: TimeInterval = 0
     /// Further off than any sync correction: the TV did not drift, it
@@ -132,6 +140,9 @@ final class CastSession {
     /// How far the encode may run past the TV. Enough to ride out a Wi-Fi
     /// hiccup or a slow stretch of torrent; more only heats the Mac.
     private static let encodeLead: Double = 60
+    /// Encoded seconds a seek target needs past it to stay in the stream:
+    /// the TV buffers about three two-second segments before it plays.
+    private static let inStreamMargin: Double = 8
 
     func start(_ device: CastDevice) {
         if isActive { stop() }
@@ -161,10 +172,15 @@ final class CastSession {
                 // once: on most launches of one evening the first attempt
                 // timed out, and every retry in the same process connected
                 // within a second. Why is not known.
-                // So a short first try, then a fresh connection.
+                // So a short first try, then a fresh connection. The stuck
+                // one never leaves "preparing" while the retry is ready in
+                // 50 ms (2026-11-16), so the first try is cut at a second of
+                // preparing: a whole 5 s launch timeout was lost on every
+                // cast. A ready one still gets the launch, which took the
+                // TV 7.5 s.
                 var channel = makeChannel(device.endpoint)
                 do {
-                    try await channel.open(timeout: .seconds(5))
+                    try await channel.open(timeout: .seconds(20), readyWithin: .seconds(1))
                 } catch {
                     guard generation == self.generation else { return }
                     AppLog.write("[cast] first connect stalled (\(error.localizedDescription)), retrying")
@@ -248,14 +264,35 @@ final class CastSession {
         // during the connect started a stream on the unopened channel.
         guard isActive, phase != .connecting else { return }
         seekTask?.cancel()
+        inStreamSeek = nil
         seekPending = true
         let file = sourcePath
         seekTask = Task { [weak self] in
+            // A spot the stream already holds needs no new encode: the TV
+            // seeks inside it. Restarting for every seek cost 7-9 s from
+            // press to picture at 4K (2026-11-16), where a seek in the
+            // encoded minute ahead or anywhere back to the stream's start
+            // is the TV's own buffer refill.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            if !self.awaitingStart, let encoder = self.encoder, self.phase == .playing,
+               position >= self.streamBase, position < encoder.position - Self.inStreamMargin {
+                encoder.setLimit(position + Self.encodeLead)
+                self.channel?.seek(to: position - self.streamBase)
+                // Still pending until the TV reports the new spot: the sync
+                // would otherwise read its old position as the TV seeking
+                // by itself and drag the Mac back there.
+                self.inStreamSeek = (position, Self.now + 6)
+                self.stallGraceUntil = Self.now + Self.stallLimit + Self.recoveredAfter
+                self.bufferingSince = nil
+                AppLog.write(String(format: "[cast] seek inside the stream to %.0fs", position))
+                return
+            }
             // Long enough to cover a run of +5 s presses (the owner's came
             // 0.6 and 1.4 s apart): each restart costs the TV two seconds
             // of black, so one restart at the end beats three on the way.
-            try? await Task.sleep(for: .milliseconds(900))
-            guard !Task.isCancelled, let self else { return }
+            try? await Task.sleep(for: .milliseconds(650))
+            guard !Task.isCancelled else { return }
             // A new file is loading: the next-file restart in the sync
             // places the stream, and it waits for this flag to clear.
             guard self.controller?.awaitingNewFile == false else {
@@ -302,6 +339,7 @@ final class CastSession {
 
             let height = props["height"].flatMap(Int.init) ?? 0
             let upscale = controller.isAnime4KEnabled && !controller.isLiveAction && height < 2160
+            streamTracks = (props["sid"], props["aid"], upscale, height)
             var subtitleOptions = SubtitleStyle.current.textOptions
             if let overrides = props["sub-ass-style-overrides"] { subtitleOptions.append(("sub-ass-style-overrides", overrides)) }
             if let scale = props["sub-scale"] { subtitleOptions.append(("sub-scale", scale)) }
@@ -361,6 +399,11 @@ final class CastSession {
     }
 
     private func handle(_ status: CastChannel.MediaStatus) {
+        if let seek = inStreamSeek,
+           abs(streamBase + status.currentTime - seek.target) < 3 || Self.now > seek.deadline {
+            inStreamSeek = nil
+            seekPending = false
+        }
         guard isActive else { return }
         // After a seek the TV goes on reporting the old stream until the new
         // LOAD lands. Its PLAYING was read as the new one starting (the Mac
@@ -408,7 +451,10 @@ final class CastSession {
             guard !awaitingStart else { return }
             if phase != .buffering { AppLog.write(String(format: "[cast] TV buffering at %.2fs", streamBase + status.currentTime)) }
             phase = .buffering
-            if bufferingSince == nil { bufferingSince = Self.now }
+            // Refilling after an in-stream seek is not the link failing: the
+            // TV took 4 s to play again with every segment already encoded,
+            // and the stall rule dropped the bitrate and restarted.
+            if bufferingSince == nil, Self.now > stallGraceUntil { bufferingSince = Self.now }
             hold(true)
         case "PAUSED":
             // Paused on the TV's own remote: follow it. Not when this session
@@ -463,8 +509,19 @@ final class CastSession {
                 return
             }
         }
-        let props = await readProperties(["path", "time-pos", "paused-for-cache"])
+        let props = await readProperties(["path", "time-pos", "paused-for-cache", "sid", "aid"])
         guard isActive, !awaitingStart, !seekPending else { return }
+        // Subtitles and upscaling are burned into the encode, and the audio
+        // too with the sound on the TV: changed mid-cast they never reached
+        // the TV until some later seek restarted the stream.
+        if let started = streamTracks, props["path"] == sourcePath {
+            let upscale = controller.isAnime4KEnabled && !controller.isLiveAction && started.height < 2160
+            if props["sid"] != started.sid || (soundOnTV && props["aid"] != started.aid) || upscale != started.upscale {
+                AppLog.write("[cast] subtitles, audio track or upscaling changed, restarting the stream")
+                beginStream(at: props["time-pos"].flatMap(Double.init) ?? controller.currentTime)
+                return
+            }
+        }
         if let path = props["path"], path != sourcePath {
             // A seek still pending for the old file belongs to it. Autoplay
             // jumps the finishing episode to its end; that jump, landing on

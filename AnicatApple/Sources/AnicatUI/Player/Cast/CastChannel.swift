@@ -47,6 +47,11 @@ final class CastChannel {
     private var loadRequestId: Int?
     private var transportId: String?
     private var mediaSessionId: Int?
+    /// Sessions the receiver had named when the last LOAD went out; that
+    /// LOAD's session numbers higher. A restart begun before the previous
+    /// one's first status put that stale session back otherwise.
+    private var highestSessionAtLoad = 0
+    private var highestSession = 0
     private var launchContinuation: CheckedContinuation<Void, Error>?
     private var heartbeat: Task<Void, Never>?
     private var closed = false
@@ -78,13 +83,22 @@ final class CastChannel {
     }
 
     /// Connects, launches the Default Media Receiver and joins its session.
-    func open(timeout: Duration) async throws {
+    /// `readyWithin`: give up early on a connection that has not even
+    /// reached the TV, rather than waiting the whole launch timeout.
+    func open(timeout: Duration, readyWithin: Duration? = nil) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             launchContinuation = continuation
             connection.stateUpdateHandler = { [weak self] state in
                 MainActor.assumeIsolated { self?.handle(state) }
             }
             connection.start(queue: .main)
+            if let readyWithin {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: readyWithin)
+                    guard let self, self.launchContinuation != nil, self.connection.state != .ready else { return }
+                    self.fail("no answer from the TV (connection \(self.connection.state))")
+                }
+            }
             Task { @MainActor [weak self] in
                 // Without a deadline a TV that accepts TCP and never answers
                 // the LAUNCH left the picker on "Connecting" for good.
@@ -101,6 +115,7 @@ final class CastChannel {
     /// total and the LIVE badge belonged to the single growing file.
     func load(url: String, duration: Double) {
         loadRequestId = requestId
+        highestSessionAtLoad = highestSession
         sendMedia(["type": "LOAD", "autoplay": true,
                    "media": ["contentId": url, "contentType": "application/x-mpegurl", "streamType": "BUFFERED",
                              "duration": duration, "hlsSegmentFormat": "fmp4", "hlsVideoSegmentFormat": "fmp4"]])
@@ -110,11 +125,22 @@ final class CastChannel {
     /// answered it; its failure, when the server cuts it, is not the cast's.
     /// Switching Motion while the TV was still opening a stream ended the
     /// cast with LOAD_FAILED 30 ms after the new encode began.
-    func supersedeLoad() { loadRequestId = nil }
+    func supersedeLoad() {
+        loadRequestId = nil
+        // Commands for the replaced stream: the TV refused 1-3 GET_STATUS
+        // and PLAY per restart with INVALID_MEDIA_SESSION_ID until the new
+        // stream's first status named its session.
+        mediaSessionId = nil
+    }
 
     func play() { sendMediaCommand("PLAY") }
     func pause() { sendMediaCommand("PAUSE") }
     func requestStatus() { sendMediaCommand("GET_STATUS") }
+    /// Moves the TV inside the stream it already has, in stream time.
+    func seek(to seconds: Double) {
+        guard let mediaSessionId else { return }
+        sendMedia(["type": "SEEK", "mediaSessionId": mediaSessionId, "currentTime": max(seconds, 0)])
+    }
 
     /// Ends the receiver app, which returns the TV to whatever it showed
     /// before, then drops the connection.
@@ -222,7 +248,10 @@ final class CastChannel {
         case (Namespace.media, "MEDIA_STATUS"):
             let now = ProcessInfo.processInfo.systemUptime
             for entry in payload["status"] as? [[String: Any]] ?? [] {
-                if let id = entry["mediaSessionId"] as? Int { mediaSessionId = id }
+                if let id = entry["mediaSessionId"] as? Int {
+                    highestSession = max(highestSession, id)
+                    if id > highestSessionAtLoad { mediaSessionId = id }
+                }
                 onMediaStatus?(MediaStatus(
                     playerState: entry["playerState"] as? String ?? "IDLE",
                     idleReason: entry["idleReason"] as? String,

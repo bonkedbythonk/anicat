@@ -37,7 +37,7 @@ pub struct VersionInfo {
     pub update_available: bool,
     pub checked_at: u64,
     /// Whether `/api/update` can run the installer here. The page shows its
-    /// Update now button only then; the same crate serves Android.
+    /// Update now button only then.
     pub can_install: bool,
 }
 

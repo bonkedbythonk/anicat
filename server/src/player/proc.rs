@@ -1,14 +1,8 @@
 //! The mpv behind a session, as far as the loop needs it: is it alive, wait
-//! for it to end, kill it. Where it runs is this file's business: a child
-//! process on Windows and macOS, the player screen of the app on Android.
+//! for it to end, kill it: a child process on Windows and macOS.
 
-#[cfg(not(target_os = "android"))]
 pub use desktop::MpvProc;
 
-#[cfg(target_os = "android")]
-pub use android::MpvProc;
-
-#[cfg(not(target_os = "android"))]
 mod desktop {
     use std::process::Stdio;
 
@@ -83,40 +77,6 @@ mod desktop {
             if ok == 0 || AssignProcessToJobObject(job, process as _) == 0 {
                 log::warn!("[player] could not bind mpv to the server's lifetime; mpv may outlive a crashed server");
             }
-        }
-    }
-}
-
-#[cfg(target_os = "android")]
-mod android {
-    // The library root is the Android entry point (`android.rs`).
-    use crate as android;
-
-    /// libmpv runs inside this process, in the app's player screen. The same
-    /// arguments a desktop mpv would get go to the screen, which applies them
-    /// as libmpv options; `input-ipc-server` among them, so the IPC the
-    /// session speaks is unchanged.
-    pub struct MpvProc;
-
-    impl MpvProc {
-        pub fn spawn(args: &[String]) -> Result<Self, String> {
-            log::info!("[player] starting the player screen with {args:?}");
-            android::start_mpv(args)?;
-            Ok(Self)
-        }
-
-        pub fn alive(&mut self) -> bool {
-            android::mpv_alive()
-        }
-
-        pub async fn wait(&mut self) -> String {
-            android::mpv_ended().await;
-            "the player screen closed".into()
-        }
-
-        /// Asks the player screen to close; it has no process to signal.
-        pub async fn kill(&mut self) {
-            android::kill_mpv();
         }
     }
 }

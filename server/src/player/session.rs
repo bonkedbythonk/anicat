@@ -211,8 +211,6 @@ pub async fn start(
     session.publish();
 
     let join = tokio::spawn(async move {
-        // Never cleared on Android, where the IPC closing ends the loop.
-        #[cfg_attr(target_os = "android", allow(unused_mut))]
         let mut events_open = true;
         let mut cmds_open = true;
         let mut kill_at: Option<tokio::time::Instant> = None;
@@ -230,12 +228,6 @@ pub async fn start(
                 }
                 ev = events.recv(), if events_open => match ev {
                     Some(ev) => session.on_event(ev).await,
-                    // No child to end the loop on Android: the IPC closing is
-                    // the player screen going away, and without this `finish`
-                    // never wrote the last position or paused the download.
-                    #[cfg(target_os = "android")]
-                    None => break,
-                    #[cfg(not(target_os = "android"))]
                     None => events_open = false,
                 },
                 cmd = cmd_rx.recv(), if cmds_open => match cmd {

@@ -1,6 +1,0 @@
-.gradle/
-build/
-local.properties
-# The engine, built by scripts/build-android.sh from server/.
-app/src/main/jniLibs/
-*.apk

@@ -2035,71 +2035,6 @@ impl AnicatEngine {
         }
     }
 
-    /// Brings the offline library back under its cap, least recently used
-    /// first. Returns how many chapters were removed.
-    ///
-    /// Run after a download rather than on a timer: the library only grows
-    /// one way, and doing it here means the chapter just fetched is the
-    /// newest and so the last thing considered.
-    pub fn enforce_offline_limit(&self) -> FfiResult<u32> {
-        let cap = self.offline_limit_bytes();
-        if cap == 0 {
-            return Ok(0);
-        }
-        let pinned = self.reading_chapter.lock().ok().and_then(|p| p.clone());
-        let mut rows = self
-            .registry
-            .offline_chapters_by_age()
-            .map_err(|msg| AnicatError::Storage { msg })?;
-        let sizes: Vec<(u64, bool)> = rows
-            .iter()
-            .map(|row| {
-                let is_pinned = pinned
-                    .as_ref()
-                    .map(|(c, id, chapter)| {
-                        row.catalog == *c && row.catalog_id == *id && row.chapter_id == *chapter
-                    })
-                    .unwrap_or(false);
-                (row.bytes.max(0) as u64, is_pinned)
-            })
-            .collect();
-        let doomed = chapters_to_evict(&sizes, cap);
-        let mut total: u64 = sizes.iter().map(|(bytes, _)| bytes).sum();
-        let mut evicted = 0;
-        // Removed back to front so the indices stay valid.
-        for index in doomed.into_iter().rev() {
-            let row = rows.remove(index);
-            // Whichever store the row lives in. Deleting from the manga
-            // library alone would forget a novel volume and leave its file on
-            // disk, so the cap would keep evicting to reclaim space that never
-            // came back.
-            match row.kind {
-                crate::db::service::OfflineKind::Manga => self
-                    .offline
-                    .delete(row.catalog.as_str(), row.catalog_id, &row.chapter_id)
-                    .map_err(|msg| AnicatError::Storage { msg })?,
-                crate::db::service::OfflineKind::Novel => self
-                    .novels
-                    .delete(row.catalog.as_str(), row.catalog_id, &row.chapter_id)
-                    .map_err(|msg| AnicatError::Storage { msg })?,
-            }
-            self.registry
-                .forget_offline_chapter(row.catalog, row.catalog_id, &row.chapter_id)
-                .map_err(|msg| AnicatError::Storage { msg })?;
-            total = total.saturating_sub(row.bytes.max(0) as u64);
-            evicted += 1;
-            log::info!(
-                "[offline] evicted {} ch {} ({} KB), {} KB left of {} KB",
-                row.catalog_id,
-                row.chapter_number,
-                row.bytes / 1024,
-                total / 1024,
-                cap / 1024
-            );
-        }
-        Ok(evicted)
-    }
-
     /// Every chapter kept on disk, newest first.
     pub fn offline_chapters(&self) -> FfiResult<Vec<FfiOfflineChapter>> {
         let rows = self
@@ -4349,6 +4284,71 @@ fn push_child_comments(
 }
 
 impl AnicatEngine {
+    /// Brings the offline library back under its cap, least recently used
+    /// first. Returns how many chapters were removed.
+    ///
+    /// Run after a download rather than on a timer: the library only grows
+    /// one way, and doing it here means the chapter just fetched is the
+    /// newest and so the last thing considered.
+    pub fn enforce_offline_limit(&self) -> FfiResult<u32> {
+        let cap = self.offline_limit_bytes();
+        if cap == 0 {
+            return Ok(0);
+        }
+        let pinned = self.reading_chapter.lock().ok().and_then(|p| p.clone());
+        let mut rows = self
+            .registry
+            .offline_chapters_by_age()
+            .map_err(|msg| AnicatError::Storage { msg })?;
+        let sizes: Vec<(u64, bool)> = rows
+            .iter()
+            .map(|row| {
+                let is_pinned = pinned
+                    .as_ref()
+                    .map(|(c, id, chapter)| {
+                        row.catalog == *c && row.catalog_id == *id && row.chapter_id == *chapter
+                    })
+                    .unwrap_or(false);
+                (row.bytes.max(0) as u64, is_pinned)
+            })
+            .collect();
+        let doomed = chapters_to_evict(&sizes, cap);
+        let mut total: u64 = sizes.iter().map(|(bytes, _)| bytes).sum();
+        let mut evicted = 0;
+        // Removed back to front so the indices stay valid.
+        for index in doomed.into_iter().rev() {
+            let row = rows.remove(index);
+            // Whichever store the row lives in. Deleting from the manga
+            // library alone would forget a novel volume and leave its file on
+            // disk, so the cap would keep evicting to reclaim space that never
+            // came back.
+            match row.kind {
+                crate::db::service::OfflineKind::Manga => self
+                    .offline
+                    .delete(row.catalog.as_str(), row.catalog_id, &row.chapter_id)
+                    .map_err(|msg| AnicatError::Storage { msg })?,
+                crate::db::service::OfflineKind::Novel => self
+                    .novels
+                    .delete(row.catalog.as_str(), row.catalog_id, &row.chapter_id)
+                    .map_err(|msg| AnicatError::Storage { msg })?,
+            }
+            self.registry
+                .forget_offline_chapter(row.catalog, row.catalog_id, &row.chapter_id)
+                .map_err(|msg| AnicatError::Storage { msg })?;
+            total = total.saturating_sub(row.bytes.max(0) as u64);
+            evicted += 1;
+            log::info!(
+                "[offline] evicted {} ch {} ({} KB), {} KB left of {} KB",
+                row.catalog_id,
+                row.chapter_number,
+                row.bytes / 1024,
+                total / 1024,
+                cap / 1024
+            );
+        }
+        Ok(evicted)
+    }
+
     /// Records a download once it lands, whatever the UI is doing.
     ///
     /// Polls the same status the episode row polls, at the same interval, and

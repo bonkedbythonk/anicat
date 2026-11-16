@@ -110,8 +110,7 @@ fn may_start(prefer_dub: bool, dubs_in_flight: usize, next_is_dub: bool) -> bool
 pub struct ResolveTarget<'a> {
     pub media: crate::media::MediaKey,
     pub episode: i64,
-    /// Search candidates, best first (AniList romaji, english, synonyms — or
-    /// the user's manual override).
+    /// Search candidates, best first (AniList romaji, english, synonyms).
     pub titles: &'a [String],
     /// Movies/OVAs legitimately have no episode number in their release
     /// names; allow an episodeless match for those.
@@ -355,7 +354,7 @@ impl CandidateStages {
 /// Everything the indexer search reads, so a hit can never be a pool scored
 /// for a different request. `media` covers anything derived from it, but
 /// `titles` and `sibling_titles` are here because they are handed to
-/// `search::find_candidates` directly: a manual search-title override changes
+/// `search::find_candidates` directly: the title the frontend sends changes
 /// the titles without changing `media`, and for an extras entry the
 /// sibling list is what *rejects* releases of the franchise's other entries,
 /// so a pool built while relations were still unknown holds candidates a
@@ -420,10 +419,6 @@ pub struct TorrentManager {
     /// key, so sharing this map with the picker would show the user a pool
     /// truncated to what the play path stops at.
     candidate_cache: tokio::sync::Mutex<HashMap<CandidateKey, (std::time::Instant, Vec<search::Candidate>)>>,
-    /// Ceiling on download speed in bytes per second, or zero for none. Set
-    /// from config before the session is created; see
-    /// `StreamConfig::torrent_download_limit_mbps`.
-    download_limit_bps: std::sync::atomic::AtomicU32,
     /// Which files are currently selected inside each live torrent, oldest
     /// first. librqbit's own `only_files()` is an unordered set, so the
     /// recency this needs to bound the selection is tracked here instead.
@@ -654,7 +649,6 @@ impl TorrentManager {
             evicted_files: Default::default(),
             playing_file: std::sync::Mutex::new(None),
             last_played_name: std::sync::Mutex::new(None),
-            download_limit_bps: std::sync::atomic::AtomicU32::new(0),
             downloads: tokio::sync::Mutex::new(HashMap::new()),
             downloading: std::sync::Mutex::new(HashMap::new()),
             progress: std::sync::Mutex::new(HashMap::new()),
@@ -712,17 +706,6 @@ impl TorrentManager {
         }
     }
 
-    /// Set the download ceiling, in megabytes per second (0 = unlimited).
-    /// Only read when the session is first created, so this has to happen
-    /// before the first torrent play — which is where `AppState` calls it,
-    /// at startup and whenever config is saved.
-    pub fn set_download_limit_mbps(&self, mbps: u32) {
-        self.download_limit_bps.store(
-            mbps.saturating_mul(1024 * 1024),
-            std::sync::atomic::Ordering::Relaxed,
-        );
-    }
-
     /// The session if one has been built and not dropped since.
     fn session_if_ready(&self) -> Option<Arc<Session>> {
         self.session.lock().unwrap_or_else(|e| e.into_inner()).clone()
@@ -746,19 +729,8 @@ impl TorrentManager {
                 std::fs::create_dir_all(&self.cache_dir).map_err(|e| e.to_string())?;
                 // Built twice: once normally, once without DHT persistence if
                 // the stored state turns out to be unusable. See below.
-                let limit_bps = self.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed);
-                if limit_bps > 0 {
-                    log::info!(
-                        "torrent: download limited to {} MB/s",
-                        limit_bps / (1024 * 1024)
-                    );
-                }
                 let opts = move |disable_dht_persistence: bool| SessionOptions {
                     disable_dht_persistence,
-                    ratelimits: librqbit::limits::LimitsConfig {
-                        upload_bps: None,
-                        download_bps: std::num::NonZeroU32::new(limit_bps),
-                    },
                     // Never seed — see the Cargo.toml note on the feature.
                     disable_upload: true,
                     // A dead/unreachable peer under the library's 10s default
@@ -1202,7 +1174,7 @@ impl TorrentManager {
 
     /// Resolve (search + start downloading) a stream URL for an episode.
     /// `titles` are search candidates, best first (AniList romaji, english,
-    /// synonyms — or the user's manual override).
+    /// synonyms).
     pub async fn resolve(
         &self,
         client: &reqwest::Client,
@@ -1828,38 +1800,6 @@ impl TorrentManager {
         }
         let pack = self.pack_eviction().await;
         cleanup_cache(&self.cache_dir, Some(&session), &self.cleanup_protected(None), Some(pack)).await;
-    }
-
-    /// True while any torrent in the session is still downloading (live and
-    /// not yet finished). Low Data Mode uses this to defer the near-end
-    /// next-episode preload until the current episode's download is done, so
-    /// the two never compete for bandwidth on a slow connection.
-    pub async fn any_download_active(&self) -> bool {
-        let Some(session) = self.session_if_ready() else { return false };
-        let active = std::sync::Mutex::new(false);
-        session.with_torrents(|it| {
-            let mut a = active.lock().unwrap();
-            for (_, h) in it {
-                let stats = h.stats();
-                if stats.live.is_some() && !stats.finished {
-                    *a = true;
-                }
-            }
-        });
-        active.into_inner().unwrap()
-    }
-
-    /// Whether a torrent id is still tracked by the session — i.e. whether
-    /// `/torrent-stream?t=<id>` would actually serve something rather than
-    /// 404. Cheap, local, no network round trip: the right liveness check
-    /// for a torrent-backed preload, where `probe_stream`'s HTTP range probe
-    /// (built for CDN URLs that can 403/expire) just adds latency without
-    /// checking anything more meaningful than this does.
-    pub async fn is_live(&self, torrent_id: usize) -> bool {
-        match self.session().await {
-            Ok(session) => session.get(torrent_id.into()).is_some(),
-            Err(_) => false,
-        }
     }
 
     /// Whether the stall logger last saw this torrent starved of bytes with
@@ -3016,9 +2956,8 @@ impl TorrentManager {
 
 /// What a media is, as far as searching torrents for it is concerned.
 pub struct MediaInfo {
-    /// Search titles, best first: the user's manual override (saved as the
-    /// "nyaa" provider slug via the re-match UI) first, then AniList
-    /// romaji/english/synonyms, then whatever the frontend sent.
+    /// Search titles, best first: AniList romaji/english/synonyms, then
+    /// whatever the frontend sent.
     pub titles: Vec<String>,
     /// AniList `episodes`, or aired-so-far for currently-airing shows.
     pub episode_count: Option<i64>,
@@ -3035,20 +2974,14 @@ pub struct MediaInfo {
 
 /// Gather everything about a media that a torrent search needs.
 ///
-/// Takes the two things it actually reads — the registry, for a manual
-/// search-title override, and the catalog client — rather than an app-wide
-/// state handle. That is what lets this file compile with no UI framework
-/// underneath it.
+/// Takes the catalog client rather than an app-wide state handle. That is
+/// what lets this file compile with no UI framework underneath it.
 pub async fn gather_media_info(
-    registry: &crate::db::Registry,
     catalog: &crate::catalog::Catalogs,
     media: crate::media::MediaKey,
     frontend_title: Option<String>,
 ) -> MediaInfo {
     let mut titles: Vec<String> = vec![];
-    if let Ok(Some(over)) = registry.get_provider_slug(media.catalog, media.id, "nyaa") {
-        titles.push(over);
-    }
 
     let mut episode_count = None;
     let mut aired_episodes = None;
@@ -3694,31 +3627,6 @@ mod tests {
         assert!(manager.resolve_progress(key.0, key.1).is_some());
         drop(play);
         assert!(manager.resolve_progress(key.0, key.1).is_none());
-    }
-
-    #[test]
-    fn a_zero_download_limit_means_unlimited() {
-        // librqbit takes the ceiling as NonZeroU32, where None is "no limit".
-        // Zero has to land there rather than as a literal zero bytes per
-        // second, which would stall every torrent outright.
-        let manager = TorrentManager::with_cache_dir(std::env::temp_dir().join("anicat-limit-test"));
-        manager.set_download_limit_mbps(0);
-        let bps = manager.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed);
-        assert_eq!(bps, 0);
-        assert!(std::num::NonZeroU32::new(bps).is_none(), "zero must mean unlimited");
-
-        manager.set_download_limit_mbps(5);
-        let bps = manager.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed);
-        assert_eq!(bps, 5 * 1024 * 1024);
-        assert!(std::num::NonZeroU32::new(bps).is_some());
-
-        // A ceiling large enough to overflow the byte conversion would wrap to
-        // something tiny and throttle playback to nothing.
-        manager.set_download_limit_mbps(u32::MAX);
-        assert_eq!(
-            manager.download_limit_bps.load(std::sync::atomic::Ordering::Relaxed),
-            u32::MAX
-        );
     }
 
     #[tokio::test]

@@ -28,6 +28,11 @@ use futures_util::StreamExt;
 /// indexer queries, for the same reason -- past it, servers start refusing.
 const PAGE_CONCURRENCY: usize = 4;
 
+/// Per request, as every reader source sets its own. The shared client has
+/// only a connect timeout, so a host that accepted the connection and then
+/// stopped sending hung the whole chapter download with no error.
+pub(super) const IMAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 pub struct OfflineLibrary {
     root: PathBuf,
     http: reqwest::Client,
@@ -82,6 +87,7 @@ impl OfflineLibrary {
                 async move {
                     let bytes = http
                         .get(&url)
+                        .timeout(IMAGE_TIMEOUT)
                         .send()
                         .await
                         .map_err(|e| format!("page {}: {e}", index + 1))?
@@ -158,7 +164,11 @@ impl OfflineLibrary {
 /// Kept because the decoder picks its path by extension and a `.img` for a
 /// JPEG makes it guess; anything unrecognisable becomes `jpg`, which is what
 /// both providers serve when they serve anything.
-fn extension_of(url: &str) -> String {
+///
+/// Light novel illustrations go through it too: an EPUB manifest states a
+/// media type per file from it, and a PNG written as `.jpg` shows as a broken
+/// image on some readers and not others.
+pub(super) fn extension_of(url: &str) -> String {
     let tail = url.split('?').next().unwrap_or(url);
     let ext = tail.rsplit('.').next().unwrap_or("");
     match ext.to_ascii_lowercase().as_str() {
@@ -172,7 +182,7 @@ fn extension_of(url: &str) -> String {
 
 /// FNV-1a. Not for security -- for turning an id that may contain slashes
 /// into sixteen hex characters that cannot.
-fn stable_hash(value: &str) -> u64 {
+pub(super) fn stable_hash(value: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in value.as_bytes() {
         hash ^= *byte as u64;

@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use regex_lite::Regex;
 
+use super::decode_entities;
 use super::mangadex::{ChapterRow, MangaDetail, MangaSummary};
 
 const BASE_URL: &str = "https://mangakatana.com";
@@ -124,7 +125,7 @@ fn first_capture(re: &Regex, haystack: &str) -> Option<String> {
 fn parse_single_result(html: &str, url: &str) -> Vec<MangaSummary> {
     let title_re = Regex::new(r"<h1[^>]*>([^<]+)</h1>").unwrap();
     let cover_re = Regex::new(r#"class="cover"[^>]*>(?s:.*?)<img[^>]+src="([^"]+)""#).unwrap();
-    let title = first_capture(&title_re, html).map(|t| html_unescape(t.trim())).unwrap_or_else(|| "Unknown".to_string());
+    let title = first_capture(&title_re, html).map(|t| decode_entities(t.trim())).unwrap_or_else(|| "Unknown".to_string());
     let cover_image = first_capture(&cover_re, html).unwrap_or_default();
     vec![MangaSummary { id: url.to_string(), title, cover_image, matches_anilist: false }]
 }
@@ -153,7 +154,7 @@ fn parse_search_results(html: &str) -> Vec<MangaSummary> {
     for cap in title_re.captures_iter(html) {
         let start = cap.get(0).unwrap().start();
         let href = cap[1].to_string();
-        let title = html_unescape(cap[2].trim());
+        let title = decode_entities(cap[2].trim());
         // `start` always lands on a boundary (it is a regex match start),
         // but subtracting a fixed byte count can land mid-codepoint when a
         // multibyte title sits in the preceding 600 bytes, so the cut point
@@ -247,10 +248,9 @@ fn parse_chapter_list(html: &str) -> Vec<ChapterRow> {
     let mut rows: Vec<(f64, f64, ChapterRow)> = Vec::new();
     for cap in anchor_re.captures_iter(chapter_table(html)) {
         let href = cap[1].to_string();
-        // MangaKatana's own titles carry raw `&quot;`/`&amp;` entities;
-        // decoding just the handful that actually show up in chapter names
-        // avoids pulling in a whole HTML-entity crate for four escapes.
-        let raw_title = html_unescape(cap[2].trim());
+        // MangaKatana's own titles carry raw `&quot;`/`&amp;` entities, and
+        // an undecoded title matches nothing.
+        let raw_title = decode_entities(cap[2].trim());
         let Some((number, value)) = parse_chapter_number(&raw_title) else { continue };
         let volume = parse_volume_number(&raw_title).unwrap_or(0.0);
         let url = if href.starts_with("http") { href } else { format!("{BASE_URL}{href}") };
@@ -270,17 +270,6 @@ fn parse_chapter_list(html: &str) -> Vec<ChapterRow> {
             .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
     });
     rows.into_iter().map(|(_, _, r)| r).collect()
-}
-
-fn html_unescape(s: &str) -> String {
-    s.replace("&quot;", "\"")
-        .replace("&amp;", "&")
-        .replace("&#39;", "'")
-        // "A Returner&#039;s Magic Should Be Special" came through as-is,
-        // and no title comparison could match it.
-        .replace("&#039;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
 }
 
 fn parse_chapter_pages(html: &str) -> Vec<String> {

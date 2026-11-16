@@ -483,7 +483,7 @@ fn season_episode(t: &str) -> Option<(u32, u32)> {
 /// an alias in parentheses after the title: "MAO S01E06 ... (Maoyuu Maou
 /// Yuusha, Multi-Subs)" is the 2026 MAO (AniDB 19469) tagged with the 2013
 /// show's name, and it passed as that show for three episodes in a row.
-/// No AniDB answer existed for the newest releases, so the name decided.
+/// Nothing but the name tells the two apart.
 ///
 /// Deliberately narrow: only the no-bracket naming with an `SxxEyy` token,
 /// where the words before it are the release's own title. A `[Group] A ~ B
@@ -1760,8 +1760,7 @@ pub async fn find_candidates(
     // Expand season-naming variants and short forms, keep order, dedupe, cap
     // the fan-out. Each title is followed immediately by its own short form so
     // the cap can never keep a title while dropping the variant of it that
-    // works — and a manual override, which `gather_media_info` puts first
-    // precisely because the automatic titles failed, always survives.
+    // works.
     let mut expanded: Vec<String> = vec![];
     for t in titles {
         for v in title_variants(t).into_iter().flat_map(|v| {
@@ -1850,10 +1849,10 @@ async fn search_pool(
     let single = ReleaseCriteria { allow_episodeless: false, ..criteria };
     // Nyaa queries grouped by title variant rather than flat, because a
     // *round* is the unit of work that can be skipped: the variants are
-    // ordered worst-last (a manual override first, then AniList
-    // romaji/english, then short forms), so once a round has produced enough
-    // playable releases the remaining rounds are querying progressively less
-    // likely spellings of a title that already worked.
+    // ordered worst-last (AniList romaji/english, then short forms), so once
+    // a round has produced enough playable releases the remaining rounds are
+    // querying progressively less likely spellings of a title that already
+    // worked.
     let mut rounds: Vec<Vec<(String, String, ReleaseCriteria)>> = vec![];
     for title in expanded {
         let norm = normalize(title);
@@ -3640,8 +3639,8 @@ mod extras_tests {
             assert!(title_matches_with_alts(&normalize(&maoyu[0]), name, &[]), "{name} is in the pool");
             assert!(leads_with_foreign_title(name, &maoyu), "{name}");
         }
-        // The releases AniDB confirmed for this entry, and the shapes that
-        // reach it through an alias legitimately.
+        // Releases of this entry, and the shapes that reach it through an
+        // alias legitimately.
         for name in [
             "[Anime Time] Maoyu Archenemy & Hero (Season 1) [BD][1080p][HEVC 10bit x265][AAC][Eng Sub] [Batch] Maoyuu Maou Yuusha",
             "[HorribleSubs] Maoyuu Maou Yuusha - 05 [1080p].mkv",

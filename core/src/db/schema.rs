@@ -396,10 +396,9 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
                 PRIMARY KEY (catalog, catalog_id, name)
             );
 
-            -- AniList id to AniDB id, from arm.haglund.dev. The mapping of an
-            -- entry does not change, and kept here a resolve checks releases
-            -- against AniDB without that host having to be up. A NULL anidb_id
-            -- is an answer too (no mapping), refetched once it is a week old.
+            -- AniList id to AniDB id, for the AniDB release check that went
+            -- with AnimeTosho. Nothing reads or writes it since; migration 13
+            -- drops it.
             CREATE TABLE IF NOT EXISTS anidb_ids (
                 anilist_id INTEGER PRIMARY KEY,
                 anidb_id INTEGER,
@@ -441,6 +440,13 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 13 {
+        conn.execute_batch("DROP TABLE IF EXISTS anidb_ids;")
+            .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 13)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Opportunistic, not required for correctness: WAL lets a read (the
     // library view repainting) proceed while a write (a progress tick) is in
     // flight, instead of the two serializing on the rollback journal.
@@ -469,7 +475,7 @@ fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> Result<
 mod tests {
     use super::*;
 
-    const LATEST: i64 = 12;
+    const LATEST: i64 = 13;
 
     fn user_version(conn: &Connection) -> i64 {
         conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap()

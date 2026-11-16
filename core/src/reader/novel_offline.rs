@@ -18,6 +18,8 @@ use std::path::PathBuf;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
+use super::offline::{extension_of, stable_hash, IMAGE_TIMEOUT};
+
 /// The format the manifest is written in. A volume stored by an older build
 /// carries no illustrations at all, and there is no way to add them to it
 /// without refetching -- so it reads as not downloaded and is fetched again,
@@ -127,14 +129,11 @@ impl NovelLibrary {
                 let dir = dir.clone();
                 let http = http.clone();
                 async move {
-                    let bytes = http.get(&url).send().await.ok()?.bytes().await.ok()?;
-                    if bytes.is_empty() {
-                        return None;
-                    }
+                    let bytes = fetch_image(&http, &url).await?;
                     // Named by position, not by the source's file name: two
                     // chapters can name the same file, and the position is the
                     // only thing about an illustration that is stable.
-                    let file = format!("{chapter:04}-{index:03}.{}", extension(&url));
+                    let file = format!("{chapter:04}-{index:03}.{}", extension_of(&url));
                     std::fs::write(dir.join(&file), &bytes).ok()?;
                     Some((
                         chapter,
@@ -170,11 +169,8 @@ impl NovelLibrary {
     ) -> Option<String> {
         let dir = self.image_dir(catalog, catalog_id, volume_id);
         std::fs::create_dir_all(&dir).ok()?;
-        let bytes = http.get(url).send().await.ok()?.bytes().await.ok()?;
-        if bytes.is_empty() {
-            return None;
-        }
-        let file = format!("cover.{}", extension(url));
+        let bytes = fetch_image(http, url).await?;
+        let file = format!("cover.{}", extension_of(url));
         std::fs::write(dir.join(&file), &bytes).ok()?;
         Some(file)
     }
@@ -257,27 +253,31 @@ impl NovelLibrary {
     }
 }
 
-/// The source's own extension, lowercased, or `jpg`. An EPUB manifest has to
-/// state a media type per file and readers go by it, so a PNG written as
-/// `.jpg` shows as a broken image on some devices and not others.
-fn extension(url: &str) -> String {
-    let tail = url.rsplit('/').next().unwrap_or("");
-    let ext = tail.rsplit('.').next().unwrap_or("").to_lowercase();
-    match ext.as_str() {
-        "png" | "gif" | "webp" | "jpeg" | "jpg" => ext,
-        _ => "jpg".to_string(),
+/// The image's bytes, or `None` with the reason logged. The status is
+/// checked because a Cloudflare error page (img.lnori.com answers 1016 with
+/// HTML) otherwise lands on disk as `cover.jpg` and is packed into the EPUB.
+async fn fetch_image(http: &reqwest::Client, url: &str) -> Option<bytes::Bytes> {
+    let result = async {
+        http.get(url)
+            .timeout(IMAGE_TIMEOUT)
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await
     }
-}
-
-/// FNV-1a. Not for security: it only has to be stable across runs and not
-/// collide in practice over the handful of volumes one library holds.
-fn stable_hash(value: &str) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    for byte in value.as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    .await;
+    match result {
+        Ok(bytes) if !bytes.is_empty() => Some(bytes),
+        Ok(_) => {
+            log::warn!("novel image {url}: empty body");
+            None
+        }
+        Err(e) => {
+            log::warn!("novel image {url}: {e}");
+            None
+        }
     }
-    hash
 }
 
 #[cfg(test)]
@@ -353,9 +353,9 @@ mod tests {
     #[test]
     fn an_unknown_extension_becomes_jpg_rather_than_itself() {
         // The manifest states a media type per file and readers go by it.
-        assert_eq!(extension("https://img.lnori.com/12020-01.jpg"), "jpg");
-        assert_eq!(extension("https://img.lnori.com/12020-01.PNG"), "png");
-        assert_eq!(extension("https://img.lnori.com/12020-01"), "jpg");
-        assert_eq!(extension("https://img.lnori.com/a.jpg?v=2"), "jpg");
+        assert_eq!(extension_of("https://img.lnori.com/12020-01.jpg"), "jpg");
+        assert_eq!(extension_of("https://img.lnori.com/12020-01.PNG"), "png");
+        assert_eq!(extension_of("https://img.lnori.com/12020-01"), "jpg");
+        assert_eq!(extension_of("https://img.lnori.com/a.jpg?v=2"), "jpg");
     }
 }

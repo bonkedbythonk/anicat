@@ -21,6 +21,8 @@ use std::time::Duration;
 
 use regex_lite::Regex;
 
+use super::strip_tags;
+
 const USER_AGENT: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
@@ -151,26 +153,12 @@ fn capture(re: &Regex, haystack: &str) -> Option<String> {
     re.captures(haystack).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
 }
 
-fn strip_tags(html: &str) -> String {
-    let tag_re = Regex::new(r"<[^>]+>").unwrap();
-    decode_entities(&tag_re.replace_all(html, ""))
-}
-
 /// `<br>`/`<br />` become newlines before the tags are stripped, so a
 /// multi-line block (the author line, the summary) keeps its line breaks
 /// instead of running everything together.
 fn html_to_text(html: &str) -> String {
     let br_re = Regex::new(r"(?i)<br\s*/?>").unwrap();
     strip_tags(&br_re.replace_all(html, "\n")).trim().to_string()
-}
-
-fn decode_entities(s: &str) -> String {
-    s.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
 }
 
 /// One TOC page's chapters, in document order. `p-eplist__chapter-title`

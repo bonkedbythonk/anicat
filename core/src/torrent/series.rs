@@ -56,53 +56,6 @@ struct KnabenResponse {
     hits: Vec<KnabenHit>,
 }
 
-/// One season's episode count, in season order, skipping specials (season 0).
-/// Enough to convert between the absolute numbering the app stores and the
-/// SxxEyy that release names use.
-pub type SeasonMap = Vec<(u32, u32)>;
-
-/// Convert an absolute episode number into the season and episode a release
-/// name would spell.
-///
-/// The app stores one integer per episode because everything downstream
-/// assumes it: auto-next adds one, the preloader adds one, and the watched
-/// check compares against a total. Encoding the season into that number
-/// (`season * 1000 + episode`) would break each of those at every season
-/// boundary, so the number stays absolute and the season is recovered here.
-///
-/// The tradeoff is that a stored number means "the Nth episode as TMDB
-/// ordered them when it was stored". If TMDB later inserts an episode into an
-/// earlier season, later numbers shift by one. Rare, and the same class of
-/// drift the anime side already lives with.
-pub fn absolute_to_season_episode(absolute: i64, seasons: &SeasonMap) -> Option<(u32, u32)> {
-    if absolute < 1 {
-        return None;
-    }
-    let mut remaining = absolute as u32;
-    for (season, count) in seasons {
-        if remaining <= *count {
-            return Some((*season, remaining));
-        }
-        remaining -= count;
-    }
-    None
-}
-
-/// The inverse: where a given episode of a season falls in absolute order.
-pub fn season_episode_to_absolute(season: u32, episode: u32, seasons: &SeasonMap) -> Option<i64> {
-    let mut absolute = 0i64;
-    for (s, count) in seasons {
-        if *s == season {
-            if episode == 0 || episode > *count {
-                return None;
-            }
-            return Some(absolute + episode as i64);
-        }
-        absolute += *count as i64;
-    }
-    None
-}
-
 /// True when the release name opens with the wanted series title.
 ///
 /// The same anchoring the film matcher uses, and for the same reason: a name
@@ -353,32 +306,6 @@ mod tests {
 
     fn crit(season: u32, episode: u32) -> EpisodeCriteria {
         EpisodeCriteria { season, episode, browser_client: false }
-    }
-
-    #[test]
-    fn absolute_numbering_crosses_season_boundaries() {
-        // Two seasons of 10, then one of 8.
-        let seasons: SeasonMap = vec![(1, 10), (2, 10), (3, 8)];
-        assert_eq!(absolute_to_season_episode(1, &seasons), Some((1, 1)));
-        assert_eq!(absolute_to_season_episode(10, &seasons), Some((1, 10)));
-        // The boundary auto-next walks over: +1 from the last of a season has
-        // to land on the first of the next, which is why the stored number is
-        // absolute rather than season-encoded.
-        assert_eq!(absolute_to_season_episode(11, &seasons), Some((2, 1)));
-        assert_eq!(absolute_to_season_episode(28, &seasons), Some((3, 8)));
-        assert_eq!(absolute_to_season_episode(29, &seasons), None);
-        assert_eq!(absolute_to_season_episode(0, &seasons), None);
-    }
-
-    #[test]
-    fn season_and_episode_round_trip_through_absolute() {
-        let seasons: SeasonMap = vec![(1, 10), (2, 10), (3, 8)];
-        for (s, e) in [(1u32, 1u32), (1, 10), (2, 1), (3, 8)] {
-            let abs = season_episode_to_absolute(s, e, &seasons).unwrap();
-            assert_eq!(absolute_to_season_episode(abs, &seasons), Some((s, e)));
-        }
-        assert_eq!(season_episode_to_absolute(2, 11, &seasons), None);
-        assert_eq!(season_episode_to_absolute(9, 1, &seasons), None);
     }
 
     #[test]

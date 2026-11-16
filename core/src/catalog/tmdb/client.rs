@@ -77,12 +77,6 @@ impl TmdbClient {
         }
     }
 
-    pub fn set_proxy(&self, proxy: Option<String>) {
-        if let Ok(mut p) = self.proxy.lock() {
-            *p = clean_proxy(proxy);
-        }
-    }
-
     pub fn set_token(&self, token: Option<String>) {
         if let Ok(mut t) = self.token.lock() {
             *t = token.filter(|t| !t.trim().is_empty());

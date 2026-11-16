@@ -461,24 +461,6 @@ impl Registry {
         Ok(())
     }
 
-    pub fn set_provider_slug(
-        &self,
-        catalog: Catalog,
-        catalog_id: i64,
-        provider: &str,
-        slug: &str,
-    ) -> Result<(), String> {
-        let conn = self.lock()?;
-        conn.execute(
-            "INSERT INTO provider_slugs (catalog, catalog_id, provider, slug)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(catalog, catalog_id, provider) DO UPDATE SET slug = excluded.slug",
-            params![catalog.as_str(), catalog_id, provider, slug],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
     /// Notes a chapter as downloaded.
     pub fn record_offline_chapter(&self, row: NewOfflineChapter<'_>) -> Result<(), String> {
         let NewOfflineChapter {
@@ -866,23 +848,6 @@ impl Registry {
         Ok(out)
     }
 
-    pub fn get_provider_slug(
-        &self,
-        catalog: Catalog,
-        catalog_id: i64,
-        provider: &str,
-    ) -> Result<Option<String>, String> {
-        let conn = self.lock()?;
-        conn.query_row(
-            "SELECT slug FROM provider_slugs
-             WHERE catalog = ?1 AND catalog_id = ?2 AND provider = ?3",
-            params![catalog.as_str(), catalog_id, provider],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())
-    }
-
     /// The release that last played for this episode, if one was recorded.
     /// A stored opening (`"op"`) or ending (`"ed"`) fingerprint, as bytes.
     pub fn skip_reference(&self, catalog: Catalog, catalog_id: i64, kind: &str) -> Result<Option<Vec<u8>>, String> {
@@ -1187,6 +1152,10 @@ impl Registry {
         .map_err(|e| e.to_string())
     }
 
+    /// Everything the registry learned from watching and reading. Not
+    /// `downloaded_episodes` or `offline_chapters`: those rows are the only
+    /// index of files on disk, and clearing them would leave the files
+    /// orphaned with nothing to show or delete them.
     pub fn clear_all(&self) -> Result<(), String> {
         let conn = self.lock()?;
         conn.execute_batch(
@@ -1197,6 +1166,10 @@ impl Registry {
             DELETE FROM local_library;
             DELETE FROM media_prefs;
             DELETE FROM title_track_prefs;
+            DELETE FROM reading_history;
+            DELETE FROM rejected_releases;
+            DELETE FROM audio_misses;
+            DELETE FROM skip_references;
             COMMIT;",
         )
         .map_err(|e| e.to_string())
@@ -1426,16 +1399,37 @@ mod tests {
     }
 
     #[test]
-    fn clear_all_empties_every_table_and_stays_usable() {
+    fn clear_all_empties_what_was_learned_and_keeps_what_indexes_files() {
         let db = Registry::open_in_memory().unwrap();
         db.record_progress(Catalog::Anilist, 21, 1, 100, 1400).unwrap();
-        db.set_provider_slug(Catalog::Anilist, 21, "nyaa", "One Piece").unwrap();
+        db.record_reading_progress(Catalog::Anilist, 30, "ch-1", "1", 4, 20).unwrap();
+        db.reject_release(Catalog::Anilist, 21, "wrong show").unwrap();
+        db.record_audio_miss(Catalog::Anilist, 21, "no dub", true).unwrap();
+        db.set_skip_reference(Catalog::Anilist, 21, "op", &[1, 2, 3]).unwrap();
+        db.record_downloaded_episode(Catalog::Anilist, 21, 1, None, "/tmp/ep1.mkv", 10).unwrap();
+        db.record_offline_chapter(NewOfflineChapter {
+            catalog: Catalog::Anilist,
+            catalog_id: 30,
+            chapter_id: "ch-1",
+            chapter_number: "1",
+            title: None,
+            page_count: 20,
+            bytes: 10,
+            kind: OfflineKind::Manga,
+        })
+        .unwrap();
 
         db.clear_all().unwrap();
 
         assert_eq!(db.get_progress(Catalog::Anilist, 21, 1).unwrap(), None);
-        assert_eq!(db.get_provider_slug(Catalog::Anilist, 21, "nyaa").unwrap(), None);
         assert_eq!(db.recent_activity(10).unwrap().len(), 0);
+        assert_eq!(db.reading_progress(Catalog::Anilist, 30, "ch-1").unwrap(), None);
+        assert!(db.rejected_releases(Catalog::Anilist, 21).unwrap().is_empty());
+        assert!(db.audio_misses(Catalog::Anilist, 21, true).unwrap().is_empty());
+        assert_eq!(db.skip_reference(Catalog::Anilist, 21, "op").unwrap(), None);
+        // Files on disk are indexed only by these rows.
+        assert_eq!(db.downloaded_episodes().unwrap().len(), 1);
+        assert_eq!(db.offline_chapters().unwrap().len(), 1);
 
         // A write after clearing must not hit a dropped table — clear_all
         // deletes rows, it must never touch schema.
@@ -1448,7 +1442,7 @@ mod tests {
         let db = Registry::open_in_memory().unwrap();
         db.record_progress(Catalog::Anilist, 21, 1, 100, 1400).unwrap();
         db.record_progress(Catalog::TmdbTv, 21, 1, 100, 1400).unwrap();
-        db.set_provider_slug(Catalog::Anilist, 21, "nyaa", "One Piece").unwrap();
+        db.reject_release(Catalog::Anilist, 21, "wrong show").unwrap();
 
         db.remove_watch(Catalog::TmdbTv, 21, 1).unwrap();
         assert!(db.get_progress(Catalog::TmdbTv, 21, 1).unwrap().is_none());
@@ -1460,8 +1454,8 @@ mod tests {
         db.clear_watch_history().unwrap();
         assert!(db.get_progress(Catalog::Anilist, 21, 1).unwrap().is_none());
         assert_eq!(
-            db.get_provider_slug(Catalog::Anilist, 21, "nyaa").unwrap().as_deref(),
-            Some("One Piece"),
+            db.rejected_releases(Catalog::Anilist, 21).unwrap(),
+            vec!["wrong show".to_string()],
             "clearing the watch log is not clearing the registry"
         );
     }
@@ -1482,7 +1476,7 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 12);
+        assert_eq!(v, 13);
     }
 
     /// A database stamped 5, 6 or 7 by a build that numbered the `completed`

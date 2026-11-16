@@ -348,8 +348,7 @@ impl Catalogs {
         vars.insert("isAdult".to_string(), serde_json::json!(false));
         // Explicit null, not an empty string: AniList's `search` argument
         // treats null as "no filter" (unlike `type`, where null matches
-        // nothing — see `insert_search_media_type` on the Tauri side for that
-        // footgun). An empty string is a real search term and returns zero
+        // nothing). An empty string is a real search term and returns zero
         // results.
         vars.insert("search".to_string(), serde_json::json!(null));
         vars.insert("sort".to_string(), serde_json::json!(["POPULARITY_DESC"]));

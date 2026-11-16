@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 use regex_lite::Regex;
 
 use super::syosetu::{NovelChapterContent, NovelChapterRef};
+use super::{decode_entities, strip_tags};
 
 const BASE_URL: &str = "https://lnori.com";
 const SERIES_SITEMAP: &str = "https://lnori.com/sitemap/sitemap-series.xml";
@@ -680,31 +681,8 @@ fn cover_image(html: &str) -> Option<String> {
     if url.starts_with("http") { Some(url) } else { None }
 }
 
-fn strip_tags(html: &str) -> String {
-    let tag_re = Regex::new(r"(?s)<[^>]*>").unwrap();
-    decode_entities(&tag_re.replace_all(html, ""))
-}
-
 fn collapse_spaces(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn decode_entities(s: &str) -> String {
-    s.replace("&nbsp;", " ")
-        .replace("&#160;", " ")
-        .replace("&mdash;", "\u{2014}")
-        .replace("&ndash;", "\u{2013}")
-        .replace("&hellip;", "\u{2026}")
-        .replace("&rsquo;", "\u{2019}")
-        .replace("&lsquo;", "\u{2018}")
-        .replace("&rdquo;", "\u{201d}")
-        .replace("&ldquo;", "\u{201c}")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        // Last, or a literal `&amp;lt;` in the source decodes twice.
-        .replace("&amp;", "&")
 }
 
 /// Readable prose out of a slice of the book.

@@ -154,40 +154,6 @@ query ($page: Int, $perPage: Int, $type: MediaType, $isAdult: Boolean) {
 }
 "#;
 
-pub const MEDIA_SEASONAL_QUERY: &str = r#"
-query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int, $type: MediaType, $isAdult: Boolean) {
-  Page(page: $page, perPage: $perPage) {
-    media(season: $season, seasonYear: $seasonYear, type: $type, sort: [POPULARITY_DESC], isAdult: $isAdult) {
-      id type
-      title { romaji english native }
-      coverImage { large medium }
-      bannerImage format status season seasonYear episodes duration genres averageScore meanScore popularity favourites trending
-      nextAiringEpisode { airingAt episode timeUntilAiring }
-      mediaListEntry { id status score progress }
-      siteUrl
-    }
-    pageInfo { total currentPage lastPage hasNextPage }
-  }
-}
-"#;
-
-pub const MEDIA_UPCOMING_QUERY: &str = r#"
-query ($page: Int, $perPage: Int, $type: MediaType, $isAdult: Boolean) {
-  Page(page: $page, perPage: $perPage) {
-    media(status: NOT_YET_RELEASED, type: $type, sort: [POPULARITY_DESC], isAdult: $isAdult) {
-      id type
-      title { romaji english native }
-      coverImage { large medium }
-      bannerImage format status season seasonYear episodes duration genres averageScore meanScore popularity favourites trending
-      nextAiringEpisode { airingAt episode timeUntilAiring }
-      mediaListEntry { id status score progress }
-      siteUrl
-    }
-    pageInfo { total currentPage lastPage hasNextPage }
-  }
-}
-"#;
-
 pub const USER_LIST_QUERY: &str = r#"
 query ($userName: String, $type: MediaType, $status: MediaListStatus, $sort: [MediaListSort]) {
   MediaListCollection(userName: $userName, type: $type, status: $status, sort: $sort) {
@@ -229,40 +195,6 @@ query {
         nodes { id type title { romaji english } coverImage { large medium } averageScore genres format }
       }
     }
-  }
-}
-"#;
-
-pub const HEALTH_CHECK_QUERY: &str = r#"
-query {
-  Viewer {
-    name
-  }
-}
-"#;
-
-pub const USER_NOTIFICATIONS_QUERY: &str = r#"
-query ($page: Int, $perPage: Int, $reset: Boolean) {
-  Page(page: $page, perPage: $perPage) {
-    notifications(resetNotificationCount: $reset, type_in: [AIRING, RELATED_MEDIA_ADDITION, MEDIA_DATA_CHANGE, MEDIA_MERGE]) {
-      ... on AiringNotification {
-        id type episode contexts createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on RelatedMediaAdditionNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on MediaDataChangeNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-      ... on MediaMergeNotification {
-        id type context createdAt
-        media { id type title { romaji english native } coverImage { large medium } }
-      }
-    }
-    pageInfo { total currentPage lastPage hasNextPage }
   }
 }
 "#;
@@ -452,21 +384,6 @@ query ($id: Int, $page: Int, $perPage: Int) {
 }
 "#;
 
-pub const SMART_PLAYLIST_QUERY: &str = r#"
-query ($genre: [String], $format: MediaFormat, $status: MediaStatus, $seasonYear: Int, $season: MediaSeason, $sort: [MediaSort], $isAdult: Boolean) {
-  Page(page: 1, perPage: 8) {
-    media(genre_in: $genre, format: $format, status: $status, seasonYear: $seasonYear, season: $season, sort: $sort, type: ANIME, isAdult: $isAdult) {
-      id type
-      title { romaji english native }
-      coverImage { large medium }
-      bannerImage format status season seasonYear episodes duration genres averageScore meanScore
-      mediaListEntry { id status }
-      siteUrl
-    }
-  }
-}
-"#;
-
 // Batched per-seed recommendations: fetches AniList's own "people who watched
 // this also liked" edges for many seed titles in one round trip (Page.media
 // accepts id_in), instead of one MEDIA_DETAIL_QUERY per seed. Feeds the local
@@ -541,40 +458,6 @@ query ($id: Int, $perPage: Int) {
         format status season seasonYear episodes duration genres averageScore isAdult
         mediaListEntry { id status score progress }
         siteUrl
-      }
-    }
-  }
-}
-"#;
-
-pub const MEDIA_REVIEWS_QUERY: &str = r#"
-query ($mediaId: Int, $page: Int, $perPage: Int) {
-  Media(id: $mediaId) {
-    reviews(page: $page, perPage: $perPage, sort: [RATING_DESC, ID_DESC]) {
-      pageInfo {
-        total
-        perPage
-        currentPage
-        lastPage
-        hasNextPage
-      }
-      nodes {
-        id
-        summary
-        body(asHtml: false)
-        rating
-        ratingAmount
-        score
-        user {
-          id
-          name
-          avatar {
-            large
-            medium
-          }
-        }
-        createdAt
-        updatedAt
       }
     }
   }

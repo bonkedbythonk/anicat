@@ -1257,8 +1257,6 @@ impl AnicatEngine {
             .set_token(token.filter(|t| !t.trim().is_empty()));
     }
 
-    /// Whether the engine currently holds an AniList token. Says nothing
-    /// about whether it is still valid — `viewer_profile` answers that.
     /// Kept for `BridgeTests`, which exercises the search path through the
     /// narrowest surface it can. The MANGA and NOVEL siblings had no caller
     /// at all and are gone.
@@ -1438,7 +1436,6 @@ impl AnicatEngine {
         let port = self.ensure_stream_server().await?;
         let media = MediaKey::new(req.catalog.into(), req.catalog_id);
         let info = crate::torrent::gather_media_info(
-            &self.registry,
             &self.catalogs,
             media,
             req.title.clone(),
@@ -1836,11 +1833,13 @@ impl AnicatEngine {
         let mut out = vec![];
         for row in rows {
             if !std::path::Path::new(&row.path).exists() {
-                let _ = self.registry.forget_downloaded_episode(
+                if let Err(e) = self.registry.forget_downloaded_episode(
                     row.catalog,
                     row.catalog_id,
                     row.episode_number,
-                );
+                ) {
+                    log::warn!("downloads: forgetting a missing file's row failed: {e}");
+                }
                 continue;
             }
             out.push(FfiDownloadedEpisode {
@@ -2030,9 +2029,9 @@ impl AnicatEngine {
         // Opening is using: the cap evicts by when a chapter was last read,
         // not by when it was fetched.
         if let Some(chapter_id) = chapter_id {
-            let _ = self
-                .registry
-                .touch_offline_chapter(catalog, catalog_id, &chapter_id);
+            if let Err(e) = self.registry.touch_offline_chapter(catalog, catalog_id, &chapter_id) {
+                log::warn!("offline: marking a chapter used failed: {e}");
+            }
         }
     }
 
@@ -2514,7 +2513,7 @@ impl AnicatEngine {
         } else {
             Some(self.cinema_search_inputs(catalog, catalog_id, episode, title.clone()).await?)
         };
-        let info = crate::torrent::gather_media_info(&self.registry, &self.catalogs, media, title).await;
+        let info = crate::torrent::gather_media_info(&self.catalogs, media, title).await;
         if cinema.is_none() && info.titles.is_empty() {
             return Err(AnicatError::NotFound {
                 msg: format!("no search titles for {media}"),
@@ -2613,7 +2612,7 @@ impl AnicatEngine {
         } else {
             Some(self.cinema_search_inputs(catalog, catalog_id, episode, title.clone()).await?)
         };
-        let info = crate::torrent::gather_media_info(&self.registry, &self.catalogs, media, title.clone()).await;
+        let info = crate::torrent::gather_media_info(&self.catalogs, media, title.clone()).await;
         if cinema.is_none() && info.titles.is_empty() {
             return Err(AnicatError::NotFound {
                 msg: format!("no search titles for {media}"),
@@ -3455,7 +3454,9 @@ impl AnicatEngine {
         let Some(volume) = self.novels.load(catalog.as_str(), catalog_id, &book_url) else {
             return vec![];
         };
-        let _ = self.registry.touch_offline_chapter(catalog, catalog_id, &book_url);
+        if let Err(e) = self.registry.touch_offline_chapter(catalog, catalog_id, &book_url) {
+            log::warn!("offline: marking a volume used failed: {e}");
+        }
         volume
             .chapters
             .iter()
@@ -4864,12 +4865,14 @@ fn episode_is_watched(
     locally_completed: bool,
     anilist_progress: Option<i32>,
 ) -> bool {
-    locally_completed || local_percent >= 85.0 || anilist_progress.is_some_and(|p| number <= p)
+    locally_completed
+        || local_percent >= crate::db::stats::WATCHED_FRACTION * 100.0
+        || anilist_progress.is_some_and(|p| number <= p)
 }
 
 /// The local-history episode the primary button should offer to resume
-/// into. A completed episode is not something to resume into (the `< 0.85`
-/// filter), and once AniList has a confirmed progress, the *only* valid
+/// into. A completed episode is not something to resume into (the
+/// `WATCHED_FRACTION` filter), and once AniList has a confirmed progress, the *only* valid
 /// candidate is the one episode immediately after it — not just anything
 /// with an incomplete local position, however far away.
 ///
@@ -4901,7 +4904,7 @@ fn resume_episode(
     history
         .iter()
         .filter(|e| e.duration > 0 && e.stop_time > 0)
-        .filter(|e| (e.stop_time as f64 / e.duration as f64) < 0.85)
+        .filter(|e| (e.stop_time as f64 / e.duration as f64) < crate::db::stats::WATCHED_FRACTION)
         .filter(|e| match list_progress {
             Some(p) => e.episode_number == p as i64 + 1,
             None => true,
@@ -5169,10 +5172,7 @@ fn strip_html(input: &str) -> String {
             _ => {}
         }
     }
-    out.replace("&mdash;", "\u{2014}")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#039;", "'")
+    crate::reader::decode_entities(&out)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

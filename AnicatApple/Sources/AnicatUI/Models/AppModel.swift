@@ -439,6 +439,16 @@ public final class AppModel {
     /// The status-line poller `resolveAndPlay` runs beside its resolve; see
     /// `cancelResolve` for why Cancel stops it directly.
     var activeResolvePoller: Task<Void, Never>?
+    /// Bumped by every `resolveAndPlay`. The resolve FFI call cannot be
+    /// cancelled, so a resolve the viewer moved on from still returned and
+    /// restored its "previous" episode over the play that replaced it;
+    /// `cancelResolve` leaves this alone, so a resolve that is only cancelled
+    /// still puts back the episode playing under it.
+    @ObservationIgnored var playGeneration = 0
+    /// `stopPlayback`'s `playbackStopped()`, awaited by the next
+    /// `resolveAndPlay`: run unordered, the engine's pause-all could land
+    /// after the next resolve had unpaused its torrent and stall it.
+    @ObservationIgnored var pendingPlaybackStop: Task<Void, Never>?
     /// Watches a stream that has just been handed to mpv; see
     /// `AppModel+OpeningWatchdog.swift`.
     var openingWatchdogTask: Task<Void, Never>?
@@ -498,6 +508,10 @@ public final class AppModel {
     /// its last 30 seconds. "Autoplay is on and nothing happened" came with
     /// no line in the log to say which of six conditions said no.
     var hasLoggedAutoNextGates = false
+    /// Once per episode past the 85% line: the download lookup behind
+    /// `queueWatchedDownloadRemoval` (a defaults read, a scan, a stat) ran
+    /// on every position tick for the rest of the episode.
+    var hasQueuedWatchedDownloadRemoval = false
     /// Wakes when the earliest scheduled episode airs; see
     /// `armScheduleRollover`.
     var scheduleRolloverTask: Task<Void, Never>?

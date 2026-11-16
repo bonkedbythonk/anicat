@@ -78,7 +78,10 @@ extension AppModel {
                     lastProgressAt = now
                     continue
                 }
-                if let stats = engine.playingTorrentStats() {
+                let stats = await self.engineIO { engine.playingTorrentStats() }
+                guard !Task.isCancelled, self.currentPlaybackCatalogId == catalogId,
+                      self.currentPlaybackEpisode == episode else { return }
+                if let stats {
                     let bytes = stats.fileDownloadedBytes
                     // Complete on disk: the swarm has nothing left to send,
                     // so "no bytes" is the normal state, not a stall. The
@@ -116,8 +119,13 @@ extension AppModel {
     /// to try.
     private func switchAwayFromStalledRelease(catalog: FfiCatalog, catalogId: Int64, episode: Int64, engine: AnicatEngine) async {
         let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
-        let current = playerController.currentReleaseName
-            ?? engine.rememberedReleaseName(catalog: catalog, catalogId: catalogId, episode: episode, preferDub: preferDub)
+        var current = playerController.currentReleaseName
+        if current == nil {
+            current = await engineIO {
+                engine.rememberedReleaseName(catalog: catalog, catalogId: catalogId, episode: episode, preferDub: preferDub)
+            }
+            guard currentPlaybackCatalogId == catalogId, currentPlaybackEpisode == episode else { return }
+        }
         if let current { stalledReleaseNames.insert(current) }
 
         var next: String? = nil
@@ -157,7 +165,7 @@ extension AppModel {
                 guard let self else { return }
                 self.errorMessage = nil
                 self.errorRetryAction = nil
-                self.activeResolveTask = Task { [weak self] in
+                self.startPlay { [weak self] in
                     _ = try? await self?.resolveAndPlay(catalog: catalog, catalogId: catalogId, episode: episode, forceNewFile: true)
                 }
             }

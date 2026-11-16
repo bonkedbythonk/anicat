@@ -805,37 +805,10 @@ public struct RootView: View {
                 }
             }
         }
-        // Not folded into `syncPlaybackSession`, which is otherwise the one
-        // place that follows "is an episode playing right now":
-        // `KeyboardBacklightDimmer` is `@MainActor` and owns `NSEvent`
-        // monitors, while `AppModel` is `@unchecked Sendable` and
-        // `syncPlaybackSession` runs on whatever thread mpv's pause observer
-        // was on. Reading both values here is also what registers the
-        // observation, so the pause edge arrives at all.
-        //
-        // No `initial: true`: the singleton is built lazily, so firing on
-        // appear would run the `dlopen` and the notification registrations
-        // at launch for a feature that defaults to off, and the call it
-        // would make (`stop()` on a false value) does nothing anyway.
-        .onChange(of: model.activeStreamURL != nil && model.playerController.isPlaying) { _, isWatching in
-            if isWatching {
-                KeyboardBacklightDimmer.shared.start()
-            } else {
-                KeyboardBacklightDimmer.shared.stop()
-            }
-        }
-        // The keyboard goes out with the chrome rather than on the dimmer's
-        // own three-second clock. The controls fading is the stronger
-        // signal: it says the picture is what is being looked at, and a lit
-        // keyboard under a dark room is the same distraction the chrome was.
-        .onChange(of: model.playerController.areControlsVisible) { _, visible in
-            guard model.activeStreamURL != nil else { return }
-            if visible {
-                KeyboardBacklightDimmer.shared.noteChromeShown()
-            } else {
-                KeyboardBacklightDimmer.shared.dimNow()
-            }
-        }
+        // In a child view: read here, the play state and the chrome's
+        // visibility made this whole body (sidebar, player, detail page)
+        // re-run on every play/pause and every chrome show/hide.
+        .background(KeyboardBacklightFollower(model: model))
         #endif
     }
 
@@ -1438,6 +1411,48 @@ public struct RootView: View {
 
 }
 
+/// Drives `KeyboardBacklightDimmer` from playback; see where `RootView`
+/// attaches it.
+private struct KeyboardBacklightFollower: View {
+    let model: AppModel
+
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            // Not folded into `syncPlaybackSession`, which is otherwise the one
+            // place that follows "is an episode playing right now":
+            // `KeyboardBacklightDimmer` is `@MainActor` and owns `NSEvent`
+            // monitors, while `AppModel` is `@unchecked Sendable` and
+            // `syncPlaybackSession` runs on whatever thread mpv's pause observer
+            // was on. Reading both values here is also what registers the
+            // observation, so the pause edge arrives at all.
+            //
+            // No `initial: true`: the singleton is built lazily, so firing on
+            // appear would run the `dlopen` and the notification registrations
+            // at launch for a feature that defaults to off, and the call it
+            // would make (`stop()` on a false value) does nothing anyway.
+            .onChange(of: model.activeStreamURL != nil && model.playerController.isPlaying) { _, isWatching in
+                if isWatching {
+                    KeyboardBacklightDimmer.shared.start()
+                } else {
+                    KeyboardBacklightDimmer.shared.stop()
+                }
+            }
+            // The keyboard goes out with the chrome rather than on the dimmer's
+            // own three-second clock. The controls fading is the stronger
+            // signal: it says the picture is what is being looked at, and a lit
+            // keyboard under a dark room is the same distraction the chrome was.
+            .onChange(of: model.playerController.areControlsVisible) { _, visible in
+                guard model.activeStreamURL != nil else { return }
+                if visible {
+                    KeyboardBacklightDimmer.shared.noteChromeShown()
+                } else {
+                    KeyboardBacklightDimmer.shared.dimNow()
+                }
+            }
+    }
+}
+
 #endif
 
 /// A shelf's Play/Resume button: open the show's page first, then start the
@@ -1480,6 +1495,7 @@ public func playFromShelf(
     // load), and a Retry left over from an earlier failure would then re-run
     // that older attempt against a page the viewer has since left.
     model.errorRetryAction = nil
+    model.activeResolveTask?.cancel()
     model.activeResolveTask = Task {
         await model.openDetail(id: catalogId, title: title, coverURL: coverURL, isManga: false)
         // Cancel pressed while the page was still loading. Without this the
@@ -1549,9 +1565,11 @@ private func playEpisode(
         catalogId: catalogId,
         episode: episode
     ) {
+        model.activeResolveTask?.cancel()
         model.activeResolveTask = Task { await model.playDownloadedFile(download) }
         return
     }
+    model.activeResolveTask?.cancel()
     model.activeResolveTask = Task { [model] in
         do {
             _ = try await model.resolveAndPlay(

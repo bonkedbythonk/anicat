@@ -26,6 +26,15 @@ extension AppModel {
         playerController.resolveElapsedSeconds = nil
     }
 
+    /// Starts a play as `activeResolveTask`, cancelling the one before it.
+    /// The resolve overlay's Cancel cancels whatever task sits there; Next,
+    /// Previous, an episode pick and auto-next ran untracked, so Cancel
+    /// stopped an older task and two resolves raced to name the episode.
+    func startPlay(_ work: @escaping @MainActor () async -> Void) {
+        activeResolveTask?.cancel()
+        activeResolveTask = Task { await work() }
+    }
+
     // These four dedup flags only mean anything scoped to "the episode
     // currently loaded" — `resolveAndPlay` resets them for the episode
     // starting, `stopPlayback` for the one ending. They used to be reset by
@@ -45,6 +54,7 @@ extension AppModel {
         hasPreloadedNextEpisode = false
         hasSearchedStoredEnding = false
         hasBootstrappedOpening = false
+        hasQueuedWatchedDownloadRemoval = false
         // Fifth flag, same rule: the countdown card's "cancelled" is scoped
         // to one episode, and a cancel that survived into the next one would
         // silently disable auto-next for the rest of the binge.
@@ -119,7 +129,7 @@ extension AppModel {
             self?.handlePlaybackFailure(message)
         }
         playerController.onNextEpisode = { [weak self] in
-            Task { await self?.playAdjacentEpisode(offset: 1) }
+            Task { @MainActor in self?.startPlay { await self?.playAdjacentEpisode(offset: 1) } }
         }
         playerController.onFetchTorrentDetails = { [weak self] completion in
             Task { @MainActor [weak self] in
@@ -142,10 +152,10 @@ extension AppModel {
             }
         }
         playerController.onPreviousEpisode = { [weak self] in
-            Task { await self?.playAdjacentEpisode(offset: -1) }
+            Task { @MainActor in self?.startPlay { await self?.playAdjacentEpisode(offset: -1) } }
         }
         playerController.onSelectEpisode = { [weak self] number in
-            Task { await self?.playSelectedEpisode(number) }
+            Task { @MainActor in self?.startPlay { await self?.playSelectedEpisode(number) } }
         }
         playerController.onListReleases = { [weak self] completion in
             Task { @MainActor in
@@ -175,7 +185,7 @@ extension AppModel {
             // button, and that button cancels whatever task is parked
             // there. Left unset it would have cancelled the previous play's
             // task, hidden the overlay, and let this resolve land anyway.
-            self?.activeResolveTask = Task { [weak self] in
+            self?.startPlay { [weak self] in
                 await self?.switchRelease(to: name)
             }
         }
@@ -201,12 +211,14 @@ extension AppModel {
         // is still the one the list was asked for: the search above is a
         // live wave across three indexers, and Next can land mid-flight.
         if currentPlaybackCatalogId == catalogId, currentPlaybackEpisode == episode {
-            playerController.rememberedReleaseName = engine.rememberedReleaseName(
-                catalog: currentPlaybackCatalog,
-                catalogId: catalogId,
-                episode: episode,
-                preferDub: UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
-            )
+            let catalog = currentPlaybackCatalog
+            let preferDub = UserDefaults.standard.string(forKey: "anicat_sub_dub") == "Dubbed"
+            let remembered = await engineIO {
+                engine.rememberedReleaseName(catalog: catalog, catalogId: catalogId, episode: episode, preferDub: preferDub)
+            }
+            if currentPlaybackCatalogId == catalogId, currentPlaybackEpisode == episode {
+                playerController.rememberedReleaseName = remembered
+            }
         }
         return choices.map {
             MediaDetailView.ReleaseCandidateItem(
@@ -225,7 +237,7 @@ extension AppModel {
         guard let engine, let catalogId = currentPlaybackCatalogId,
               let episode = currentPlaybackEpisode else { return }
         let catalog = currentPlaybackCatalog
-        activeResolveTask = Task { [weak self] in
+        startPlay { [weak self] in
             let rejected: String?
             do {
                 rejected = try await engine.rejectPlayingRelease(catalog: catalog, catalogId: catalogId, episode: episode)
@@ -580,6 +592,7 @@ extension AppModel {
                 catalogId: catalogId,
                 episode: Int64(number)
             )
+        } catch is CancellationError {
         } catch {
             errorMessage = error.localizedDescription
             playFeedback(.error)
@@ -651,6 +664,7 @@ extension AppModel {
                 catalogId: catalogId,
                 episode: Int64(target.number)
             )
+        } catch is CancellationError {
         } catch {
             errorMessage = error.localizedDescription
             playFeedback(.error)
@@ -1135,8 +1149,9 @@ extension AppModel {
         }
 
         // Any catalog, not just AniList's: a downloaded film is as much space.
-        if completionRulesApply, dur > 0,
+        if !hasQueuedWatchedDownloadRemoval, completionRulesApply, dur > 0,
            Double(stopTime) / Double(dur) * 100 >= Self.watchedThresholdPct {
+            hasQueuedWatchedDownloadRemoval = true
             queueWatchedDownloadRemoval(catalogId: catalogId, episode: episode)
         }
 
@@ -1243,7 +1258,7 @@ extension AppModel {
            playerController.autoPlayNextEnabled, playerController.hasNextEpisode {
             hasAutoAdvancedEpisode = true
             print("[autonext] end of ep \(episode) at \(Int(currentTime))s of \(Int(duration))s, playing next")
-            Task { await self.playAdjacentEpisode(offset: 1) }
+            startPlay { await self.playAdjacentEpisode(offset: 1) }
         }
 
         // Only record if whole second changed and valid
@@ -1268,6 +1283,7 @@ extension AppModel {
         // mutex and its worker decides whether Discord needs a write.
         publishPlaybackPresence()
 
+        let playingURL = activeStreamURL
         engineIOQueue.async {
             if secondChanged {
                 try? engine.recordProgress(
@@ -1284,7 +1300,15 @@ extension AppModel {
                 let onDisk = engine.playingFileBuffered().map {
                     BufferedSpan(start: $0.start, end: $0.end)
                 }
+                // Checked against what is playing when it lands: queued
+                // behind a slow write, the outgoing file's map arrived after
+                // the next episode (or the next release of this one) had
+                // cleared it, and the bar showed the old file's pieces.
                 DispatchQueue.main.async {
+                    guard self.currentPlaybackCatalogId == catalogId,
+                          self.currentPlaybackEpisode == episode,
+                          self.activeStreamURL == playingURL,
+                          self.playerController.torrentBufferedFractions != onDisk else { return }
                     self.playerController.torrentBufferedFractions = onDisk
                 }
             }
@@ -1341,6 +1365,16 @@ extension AppModel {
                 subtitleLang: memory?.subtitleLang,
                 subtitleTitle: memory?.subtitleTitle
             )
+        }
+    }
+
+    /// A synchronous registry or torrent read, run on `engineIOQueue` and
+    /// awaited. Called on the main actor, such a read waited on the registry
+    /// mutex behind whatever write the queue was running, and could read a
+    /// position older than a write still queued there.
+    func engineIO<T>(_ read: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            engineIOQueue.async { continuation.resume(returning: read()) }
         }
     }
 
@@ -1404,7 +1438,7 @@ extension AppModel {
             guard let self else { return }
             self.errorMessage = nil
             self.errorRetryAction = nil
-            self.activeResolveTask = Task { [weak self] in
+            self.startPlay { [weak self] in
                 _ = try? await self?.resolveAndPlay(catalog: catalog, catalogId: catalogId, episode: episode, forceNewFile: true)
             }
         }
@@ -1443,7 +1477,7 @@ extension AppModel {
         // Without it a closed player kept downloading the rest of the
         // episode, and the preloaded next one, at full speed.
         if let engine {
-            Task.detached(priority: .utility) { await engine.playbackStopped() }
+            pendingPlaybackStop = Task.detached(priority: .utility) { await engine.playbackStopped() }
         }
         // mpv only stops in `dismantleNSView`, which SwiftUI runs after the
         // close fade has finished, so the episode kept talking for about a
@@ -1524,29 +1558,36 @@ extension AppModel {
     /// ceiling at all. Returns just the stream URL string — `StreamHandle`
     /// itself isn't `Sendable` (a plain uniffi-generated struct), and the
     /// URL is the only field any caller reads.
+    ///
+    /// A gated continuation, not a task group: the resolve FFI call cannot
+    /// be cancelled, and a group waits for every child, so neither the
+    /// timeout nor Cancel returned before the engine did. Here the first of
+    /// result, timeout and cancellation answers and the others are dropped.
     static func resolveWithTimeout(
         engine: AnicatEngine,
         req: StreamRequest,
         timeoutSeconds: Double
     ) async throws -> String {
-        // `StreamRequest` is a plain uniffi-generated value struct — no
-        // shared mutable state — but isn't marked `Sendable`, so the strict
-        // concurrency checker won't let it cross into `addTask`'s closure
-        // without this box making the "trust me" explicit.
-        final class UncheckedBox<T>: @unchecked Sendable { let value: T; init(_ value: T) { self.value = value } }
-        let boxedReq = UncheckedBox(req)
-        return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask { try await engine.resolveStream(req: boxedReq.value).url }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
-                throw NSError(
-                    domain: "Anicat",
-                    code: 3,
-                    userInfo: [NSLocalizedDescriptionKey: "No stream found after \(Int(timeoutSeconds))s. The search or download may be stalled — try again, or try a different episode."]
-                )
+        let race = ResolveRace()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.start(continuation, timer: Task {
+                    guard (try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))) != nil else { return }
+                    race.finish(.failure(NSError(
+                        domain: "Anicat",
+                        code: 3,
+                        userInfo: [NSLocalizedDescriptionKey: "No stream found after \(Int(timeoutSeconds))s. The search or download may be stalled — try again, or try a different episode."]
+                    )))
+                })
+                // Cancelled before `start`: the handler found no
+                // continuation to resume and this would wait out the resolve.
+                if Task.isCancelled { return race.finish(.failure(CancellationError())) }
+                Task {
+                    do { race.finish(.success(try await engine.resolveStream(req: req).url)) } catch { race.finish(.failure(error)) }
+                }
             }
-            defer { group.cancelAll() }
-            return try await group.next()!
+        } onCancel: {
+            race.finish(.failure(CancellationError()))
         }
     }
 
@@ -1565,6 +1606,12 @@ extension AppModel {
         fromStart: Bool = false,
         forceNewFile: Bool = false
     ) async throws -> URL {
+        playGeneration &+= 1
+        let generation = playGeneration
+        if let stop = pendingPlaybackStop {
+            await stop.value
+            guard playGeneration == generation else { throw CancellationError() }
+        }
         // A reader open over the player is a reader over the picture. Both
         // sit above it by design -- opening a chapter while an episode plays
         // is a deliberate thing to do -- but a *stream* arriving under an
@@ -1597,7 +1644,7 @@ extension AppModel {
         }
 
         isLoading = true
-        defer { isLoading = false }
+        defer { if playGeneration == generation { isLoading = false } }
 
         // From here on, anything mpv reports belongs to the outgoing file,
         // unless this is the same episode being asked for again: then no
@@ -1666,6 +1713,13 @@ extension AppModel {
         self.playerController.videoDisplayHeight = nil
         self.playerController.decodedDisplayWidth = nil
         self.playerController.decodedDisplayHeight = nil
+        // Whether this call still owns the player after an await: no newer
+        // play started, and nothing (a downloaded file, a close) has put
+        // another episode where this one wrote its own.
+        func ownsPlay() -> Bool {
+            playGeneration == generation && currentPlaybackCatalog == catalog
+                && currentPlaybackCatalogId == catalogId && currentPlaybackEpisode == episode
+        }
 
         // Restore any existing progress from SQLite or media metadata
         var initialDuration: Double = 0.0
@@ -1682,8 +1736,13 @@ extension AppModel {
         // `currentTime > 0`). The recorded duration below is still worth
         // reading for the progress bar, so the fallback that fills it from
         // the AniList runtime keeps working either way.
-        if !fromStart,
-           let progress = try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode) {
+        // Through `engineIOQueue`, so it reads after the close's final
+        // `recordProgress` rather than racing it.
+        let progress = fromStart ? nil : await engineIO {
+            try? engine.getProgress(catalog: catalog, catalogId: catalogId, episodeNumber: episode)
+        }
+        guard ownsPlay() else { throw CancellationError() }
+        if let progress {
             initialTime = Double(progress.stopTime)
             initialDuration = Double(progress.duration)
             // An episode already watched through (past the 85% mark that
@@ -1799,17 +1858,20 @@ extension AppModel {
             if chosenName == nil, catalog == .anilist, let inFlight = preresolveInFlight,
                inFlight.catalogId == catalogId, inFlight.episode == episode {
                 await inFlight.task.value
-                guard !Task.isCancelled else { throw CancellationError() }
+                guard !Task.isCancelled, ownsPlay() else { throw CancellationError() }
             }
             handleURL = try await Self.resolveWithTimeout(engine: engine, req: req, timeoutSeconds: 120)
             // The Cancel button (`cancelResolve`) only cancels *waiting* on
             // this Task, not the FFI call itself mid-flight — check here so
             // a resolve that finishes after the viewer already gave up
             // doesn't start playback anyway.
-            guard !Task.isCancelled else {
+            guard !Task.isCancelled, ownsPlay() else {
                 throw CancellationError()
             }
         } catch {
+            // Superseded: putting this call's "previous" back would
+            // overwrite the play, file or close that replaced it.
+            guard ownsPlay() else { throw CancellationError() }
             // No new file is coming; whatever is still playing owns the
             // position again.
             self.playerController.awaitingNewFile = false
@@ -1834,16 +1896,15 @@ extension AppModel {
         // menu to refill: that menu caches its list per title and episode,
         // and a release switch changes neither, so after a switch no row
         // carried the tag for the rest of the episode.
-        self.playerController.rememberedReleaseName = engine.rememberedReleaseName(
-            catalog: catalog,
-            catalogId: catalogId,
-            episode: episode,
-            preferDub: preferDub
-        )
-
+        let remembered = await engineIO {
+            engine.rememberedReleaseName(catalog: catalog, catalogId: catalogId, episode: episode, preferDub: preferDub)
+        }
         // Read here, above the assignment that hands mpv the URL — see
         // `loadTrackMemory` for why the ordering is the whole point.
-        self.playerController.titleTrackMemory = await loadTrackMemory(catalog: catalog, catalogId: catalogId, engine: engine)
+        let trackMemory = await loadTrackMemory(catalog: catalog, catalogId: catalogId, engine: engine)
+        guard ownsPlay() else { throw CancellationError() }
+        self.playerController.rememberedReleaseName = remembered
+        self.playerController.titleTrackMemory = trackMemory
 
         // Before returning streamURL, configure playerController with actual title, episode number, and duration
         self.playerController.title = effectiveTitle
@@ -2104,5 +2165,29 @@ extension AppModel {
             ? String(format: "%.1f MB/s", stats.downloadMibPerSec)
             : "\(Int(stats.downloadMibPerSec * 1024)) KB/s"
         return "\(peers) \u{00B7} \(rate)"
+    }
+}
+
+/// The one answer `AppModel.resolveWithTimeout` gives. Finished from the main
+/// actor and from a cancellation handler on any thread, hence the lock.
+private final class ResolveRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String, Error>?
+    private var timer: Task<Void, Never>?
+
+    func start(_ continuation: CheckedContinuation<String, Error>, timer: Task<Void, Never>) {
+        lock.withLock {
+            self.continuation = continuation
+            self.timer = timer
+        }
+    }
+
+    func finish(_ result: Result<String, Error>) {
+        let (continuation, timer) = lock.withLock {
+            defer { self.continuation = nil; self.timer = nil }
+            return (self.continuation, self.timer)
+        }
+        timer?.cancel()
+        continuation?.resume(with: result)
     }
 }

@@ -74,6 +74,11 @@ async fn fetch_releases(client: &reqwest::Client, media_id: i64) -> Option<Vec<S
         }
     };
 
+    Some(parse_releases(&json))
+}
+
+/// The Nyaa-tracked torrents in one `releases.moe` records response.
+fn parse_releases(json: &Value) -> Vec<SeadexRelease> {
     let mut releases = vec![];
     for item in json["items"].as_array().into_iter().flatten() {
         for tr in item["expand"]["trs"].as_array().into_iter().flatten() {
@@ -109,7 +114,7 @@ async fn fetch_releases(client: &reqwest::Client, media_id: i64) -> Option<Vec<S
             });
         }
     }
-    Some(releases)
+    releases
 }
 
 /// `anilist_id` is `None` for a TMDB title. SeaDex is a curated list of anime
@@ -223,4 +228,55 @@ pub(crate) async fn find_candidates(
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shape `releases.moe/api/collections/entries/records?expand=trs`
+    /// answers with, cut to the fields `parse_releases` reads.
+    const FIXTURE: &str = r#"{
+        "items": [{
+            "alID": 20582,
+            "expand": {"trs": [
+                {"tracker": "Nyaa", "infoHash": "aaaa", "url": "https://nyaa.si/view/123",
+                 "releaseGroup": "YURI", "isBest": true,
+                 "files": [{"name": "[YURI] Show Lite - 02.mkv", "length": 1}]},
+                {"tracker": "AB", "infoHash": "bbbb", "url": "/torrents.php?id=1",
+                 "releaseGroup": "Private", "isBest": true,
+                 "files": [{"name": "Show Lite - 02.mkv", "length": 1}]},
+                {"tracker": "Nyaa", "infoHash": "", "url": "https://nyaa.si/view/9",
+                 "releaseGroup": "NoHash", "files": [{"name": "x.mkv"}]},
+                {"tracker": "Nyaa", "infoHash": "cccc", "url": "https://example.org/x",
+                 "releaseGroup": "NoFiles", "files": []}
+            ]}
+        }]
+    }"#;
+
+    #[test]
+    fn only_nyaa_releases_with_a_hash_and_files_are_kept() {
+        let json: Value = serde_json::from_str(FIXTURE).unwrap();
+        let releases = parse_releases(&json);
+        assert_eq!(releases.len(), 1);
+        let r = &releases[0];
+        assert_eq!(r.info_hash, "aaaa");
+        assert_eq!(r.group, "YURI");
+        assert!(r.is_best);
+        assert_eq!(r.files, vec!["[YURI] Show Lite - 02.mkv".to_string()]);
+        assert_eq!(r.torrent_url.as_deref(), Some("https://nyaa.si/download/123.torrent"));
+    }
+
+    #[tokio::test]
+    async fn a_cached_pick_becomes_a_candidate_without_a_fetch() {
+        let json: Value = serde_json::from_str(FIXTURE).unwrap();
+        let cache = tokio::sync::Mutex::new(HashMap::from([(20582, parse_releases(&json))]));
+        let titles = vec!["Show Lite".to_string()];
+        let found =
+            find_candidates(&reqwest::Client::new(), &cache, Some(20582), &titles, 2, false, Some(6)).await;
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "[SeaDex Best] YURI");
+        assert_eq!(found[0].score, SEADEX_SCORE + SEADEX_BEST_BONUS);
+        assert!(!found[0].assume_batch);
+    }
 }

@@ -422,6 +422,9 @@ public struct SumiPosterGrid: View {
                     item: item,
                     namespace: openingSourceKey == "\(shelfKey):\(item.id)" ? namespace : nil
                 ) { onSelect(item) }
+                // As on the shelves and in Search: without it every card in
+                // the grid re-ran its body on each body of the grid's parent.
+                .equatable()
             }
         }
     }

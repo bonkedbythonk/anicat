@@ -1057,12 +1057,14 @@ impl Registry {
             if Catalog::parse(&row.catalog).is_none() || !is_trusted_import(row) {
                 continue;
             }
+            // The newest row wins, so a peer's timestamp is clamped to now: one
+            // from the future would win every later sync, on both devices.
             changed += tx
                 .execute(
                     "INSERT INTO resolved_releases
                         (catalog, catalog_id, episode_number, name, magnet,
                          torrent_url, assume_batch, prefer_dub, resolved_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, MIN(?9, datetime('now')))
                      ON CONFLICT(catalog, catalog_id, episode_number) DO UPDATE SET
                         name = excluded.name,
                         magnet = excluded.magnet,
@@ -1226,6 +1228,15 @@ mod tests {
             db.remembered_release(Catalog::Anilist, 21, 3).unwrap().unwrap().name,
             "fresh"
         );
+    }
+
+    #[test]
+    fn an_imported_release_from_the_future_cannot_win_later_syncs() {
+        let db = Registry::open_in_memory().unwrap();
+        db.import_resolved_releases(&[exported("planted", "2999-01-01 00:00:00")])
+            .unwrap();
+        let stored = db.export_resolved_releases().unwrap();
+        assert!(stored[0].resolved_at.as_str() < "2999", "stored {}", stored[0].resolved_at);
     }
 
     #[test]

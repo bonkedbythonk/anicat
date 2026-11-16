@@ -213,7 +213,10 @@ impl TmdbClient {
             .timeout(std::time::Duration::from_secs(20))
             .send()
             .await
-            .map_err(|e| TmdbFailure::Other(format!("tmdb request failed: {}", e)))?;
+            // `without_url`: reqwest's error text carries the whole URL, and on
+            // the direct route that includes the viewer's own `api_key`, which
+            // then reached the page's error message and the log.
+            .map_err(|e| TmdbFailure::Other(format!("tmdb request failed: {}", e.without_url())))?;
 
         let status = response.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -242,7 +245,7 @@ impl TmdbClient {
         response
             .json::<T>()
             .await
-            .map_err(|e| TmdbFailure::Other(format!("tmdb response did not parse: {}", e)))
+            .map_err(|e| TmdbFailure::Other(format!("tmdb response did not parse: {}", e.without_url())))
     }
 }
 

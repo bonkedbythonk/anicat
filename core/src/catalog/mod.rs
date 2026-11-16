@@ -445,7 +445,23 @@ impl Catalogs {
     }
 
     /// One AniList entry, served from the response cache when it is warm.
+    /// An 18+ entry comes back as no media: every list and search already
+    /// drops them, but a deep link, the phone remote or the Windows API asks
+    /// for an id directly, and that path reached adult titles and could start
+    /// their torrents.
     pub async fn media_detail(
+        &self,
+        anilist_id: i64,
+        is_manga: bool,
+    ) -> Result<anilist::responses::MediaResponse, String> {
+        let mut res = self.media_detail_any(anilist_id, is_manga).await?;
+        if res.media.as_ref().is_some_and(|m| m.is_adult.unwrap_or(false)) {
+            res.media = None;
+        }
+        Ok(res)
+    }
+
+    async fn media_detail_any(
         &self,
         anilist_id: i64,
         is_manga: bool,

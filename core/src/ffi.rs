@@ -1435,6 +1435,7 @@ impl AnicatEngine {
         }
         let port = self.ensure_stream_server().await?;
         let media = MediaKey::new(req.catalog.into(), req.catalog_id);
+        self.refuse_adult(media).await?;
         let info = crate::torrent::gather_media_info(
             &self.catalogs,
             media,
@@ -2356,7 +2357,7 @@ impl AnicatEngine {
                     .filter_map(|c| c.name.clone())
                     .collect(),
                 gallery: crate::catalog::tmdb::types::gallery_urls(m.images.as_ref()),
-                homepage: m.homepage.clone().filter(|h| !h.is_empty()),
+                homepage: m.homepage.clone().filter(|h| is_web_url(h)),
                 imdb_url: m
                     .external_ids
                     .as_ref()
@@ -2398,7 +2399,7 @@ impl AnicatEngine {
             next_air_date: s.next_episode_to_air.as_ref().and_then(|ep| ep.air_date.clone()),
             companies: s.networks.iter().flatten().filter_map(|c| c.name.clone()).collect(),
             gallery: crate::catalog::tmdb::types::gallery_urls(s.images.as_ref()),
-            homepage: s.homepage.clone().filter(|h| !h.is_empty()),
+            homepage: s.homepage.clone().filter(|h| is_web_url(h)),
             imdb_url: s
                 .external_ids
                 .as_ref()
@@ -2448,6 +2449,7 @@ impl AnicatEngine {
         } else {
             Some(self.cinema_search_inputs(catalog, catalog_id, episode, title.clone()).await?)
         };
+        self.refuse_adult(media).await?;
         let info = crate::torrent::gather_media_info(&self.catalogs, media, title).await;
         if cinema.is_none() && info.titles.is_empty() {
             return Err(AnicatError::NotFound {
@@ -2547,6 +2549,7 @@ impl AnicatEngine {
         } else {
             Some(self.cinema_search_inputs(catalog, catalog_id, episode, title.clone()).await?)
         };
+        self.refuse_adult(media).await?;
         let info = crate::torrent::gather_media_info(&self.catalogs, media, title.clone()).await;
         if cinema.is_none() && info.titles.is_empty() {
             return Err(AnicatError::NotFound {
@@ -4284,6 +4287,21 @@ fn push_child_comments(
 }
 
 impl AnicatEngine {
+    /// Lists and searches never show an 18+ title, but a deep link, the
+    /// phone remote or the Windows API can hand a resolve its id directly,
+    /// which joined that title's swarm. `media_detail` reports such an entry
+    /// as no media; an outage (an error) is let through, since nothing is
+    /// known either way and refusing would break every play during one.
+    async fn refuse_adult(&self, media: MediaKey) -> FfiResult<()> {
+        let Some(id) = media.anilist_id() else { return Ok(()) };
+        match self.catalogs.media_detail(id, false).await {
+            Ok(res) if res.media.is_none() => Err(AnicatError::NotFound {
+                msg: format!("AniList has no media {id}"),
+            }),
+            _ => Ok(()),
+        }
+    }
+
     /// Brings the offline library back under its cap, least recently used
     /// first. Returns how many chapters were removed.
     ///
@@ -6529,4 +6547,23 @@ fn safe_filename(title: &str) -> String {
     let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     let trimmed = collapsed.trim_matches('.').trim();
     if trimmed.is_empty() { "Volume".to_string() } else { trimmed.chars().take(120).collect() }
+}
+
+/// TMDB's `homepage` is contributor-edited and becomes a clickable link on
+/// the Mac and in the Windows page; a `javascript:` or `file:` value there
+/// would run on click. Only web links pass.
+fn is_web_url(s: &str) -> bool {
+    reqwest::Url::parse(s).is_ok_and(|u| matches!(u.scheme(), "http" | "https"))
+}
+
+#[cfg(test)]
+mod web_url_tests {
+    #[test]
+    fn only_web_links_pass() {
+        assert!(super::is_web_url("https://www.example.com/film"));
+        assert!(super::is_web_url("http://example.com"));
+        assert!(!super::is_web_url("javascript:alert(1)"));
+        assert!(!super::is_web_url("file:///etc/passwd"));
+        assert!(!super::is_web_url(""));
+    }
 }

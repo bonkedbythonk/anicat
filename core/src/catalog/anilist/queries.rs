@@ -5,6 +5,7 @@ pub const MEDIA_DETAIL_QUERY: &str = r#"
 query ($id: Int, $type: MediaType) {
   Media(id: $id, type: $type) {
     id
+    isAdult
     idMal
     type
     title { romaji english native }

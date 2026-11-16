@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 public struct SettingsView: View {
@@ -324,3 +325,4 @@ public struct SettingsView: View {
 }
 
 // MARK: - Settings Tabs
+#endif

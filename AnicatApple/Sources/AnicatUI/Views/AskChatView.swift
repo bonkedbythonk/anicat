@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import AnicatCoreKit
 
@@ -191,3 +192,4 @@ struct AskChatView: View {
         }
     }
 }
+#endif

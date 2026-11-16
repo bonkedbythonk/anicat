@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 public struct KeyboardShortcutsOverlay: View {
@@ -182,3 +183,4 @@ public struct KeyboardShortcutsOverlay: View {
         }
     }
 }
+#endif

@@ -4,6 +4,7 @@ import AnicatCoreKit
 import AppKit
 #endif
 
+#if os(macOS)
 public struct RootView: View {
     @Bindable public var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotionForPushBack
@@ -1437,6 +1438,8 @@ public struct RootView: View {
 
 }
 
+#endif
+
 /// A shelf's Play/Resume button: open the show's page first, then start the
 /// stream on top of it. Closing the player then lands on the episode list of
 /// what was just watched instead of back on the home feed, and a resolve
@@ -1582,12 +1585,10 @@ private func playEpisode(
     }
 }
 
+#if os(macOS)
 extension View {
     fileprivate func globalKeyboardShortcuts(model: AppModel) -> some View {
-        #if os(macOS)
         self.modifier(GlobalKeyboardShortcutsModifier(model: model))
-        #else
-        self
-        #endif
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct AccountTabSection: View {
@@ -186,3 +187,4 @@ struct AccountTabSection: View {
 }
 
 }
+#endif

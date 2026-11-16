@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 /// The ⌘K palette: type to filter, Return to go.
@@ -212,3 +213,4 @@ public struct CommandPalette: View {
         command.action()
     }
 }
+#endif

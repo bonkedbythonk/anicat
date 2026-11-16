@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct MaintenanceTabSection: View {
@@ -306,3 +307,4 @@ struct MaintenanceTabSection: View {
 }
 
 // MARK: - Reusable Settings Components
+#endif

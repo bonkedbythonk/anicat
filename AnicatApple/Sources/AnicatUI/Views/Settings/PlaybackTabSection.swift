@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 /// Playback, split by what each control actually affects.
@@ -266,3 +267,4 @@ struct PlaybackTabSection: View {
     }
     }
 }
+#endif

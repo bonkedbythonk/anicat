@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 /// The Library: the AniList list, one status bucket at a time.
@@ -268,4 +269,5 @@ private struct LibraryTable: View {
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
     }
 }
+#endif
 #endif

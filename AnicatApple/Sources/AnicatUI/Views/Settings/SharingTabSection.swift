@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 /// Everything Anicat tells something outside itself.
@@ -67,3 +68,4 @@ struct SharingTabSection: View {
     .onAppear { pairedCount = RemoteHost.pairedDevices().count }
     }
 }
+#endif

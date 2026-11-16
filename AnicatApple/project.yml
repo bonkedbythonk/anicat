@@ -111,7 +111,10 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: Anicat
             CFBundleURLSchemes: [anicat]
+        # corespotlightitem: RootTabView answers a Spotlight tap, but an
+        # undeclared type never reaches it. The Mac's plist carries it too.
         NSUserActivityTypes:
+          - com.apple.corespotlightitem
           - com.anicat.playback
           - com.anicat.reading
         # Without this the Live Activity request fails silently -- there is
@@ -133,7 +136,7 @@ targets:
             UIApplicationShortcutItemUserInfo:
               url: anicat://search
           - UIApplicationShortcutItemType: com.anicat.ios.remote
-            UIApplicationShortcutItemTitle: Remote for Mac
+            UIApplicationShortcutItemTitle: Remote
             UIApplicationShortcutItemIconSymbolName: macbook.and.iphone
             UIApplicationShortcutItemUserInfo:
               url: anicat://remote
@@ -190,13 +193,6 @@ targets:
         CFBundleDisplayName: Anicat
         CFBundleShortVersionString: 1.1.0
         CFBundleVersion: "1"
-        # Playback keeps going while another app has the screen? No: a TV
-        # has no pocket. What the audio background mode buys here is that
-        # the AVAudioSession survives the app being sent to the background
-        # by a Siri interruption, which is the same session teardown the
-        # phone hits on lock.
-        UIBackgroundModes:
-          - audio
         # See the iOS target: librqbit talks to peers on the local subnet
         # and BonjourDiscovery advertises `_anicat-stream._tcp`; tvOS
         # refuses both silently without the declaration.

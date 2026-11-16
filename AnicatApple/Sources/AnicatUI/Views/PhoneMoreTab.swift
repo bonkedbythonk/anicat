@@ -35,13 +35,13 @@ struct PhoneProfileView: View {
                     // looking for a remote that had "disappeared".
                     let node = BonjourDiscovery.shared.discoveredMacNode
                     Button { if let node { onRemote(node) } } label: {
-                        row("Mac remote", "macbook.and.iphone", value: node?.name ?? "No Mac found")
+                        row("Remote", "macbook.and.iphone", value: node?.name ?? "No Mac or Apple TV found")
                     }
                     .foregroundStyle(SumiTheme.foreground)
                     .disabled(node == nil)
                 } footer: {
                     if BonjourDiscovery.shared.discoveredMacNode == nil {
-                        Text("Open Anicat on your Mac, on the same Wi-Fi as this phone.")
+                        Text("Open Anicat on your Mac or Apple TV, on the same Wi-Fi as this phone.")
                     }
                 }
             }

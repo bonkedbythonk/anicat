@@ -66,9 +66,11 @@ let package = Package(
                 .product(name: "MPVKit-GPL", package: "MPVKit")
             ],
             path: "Sources/AnicatUI",
-            // The iPhone app icon: project.yml compiles it, and SwiftPM warned
-            // on every build that it did not know what to do with it.
-            exclude: ["Resources/AppIcon.xcassets"],
+            // The iPhone and Apple TV app icons: project.yml compiles them.
+            // SwiftPM warned on every build that it did not know what to do
+            // with the first; an asset catalog under a target is processed into
+            // its resource bundle unless excluded.
+            exclude: ["Resources/AppIcon.xcassets", "Resources/AppIconTV.xcassets"],
             resources: [
                 .copy("Resources/Shaders"),
                 .process("Resources/Images"),

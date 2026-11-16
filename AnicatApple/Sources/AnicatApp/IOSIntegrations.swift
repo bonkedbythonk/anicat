@@ -30,7 +30,7 @@ struct IOSIntegrations: View {
                 LiveActivityBridge.shared.syncRemote(
                     state: remote.state,
                     connected: remote.status == .connected,
-                    macName: remote.hostName ?? BonjourDiscovery.shared.discoveredMacNode?.name ?? "Mac")
+                    macName: remote.hostName ?? BonjourDiscovery.shared.discoveredMacNode?.name ?? "Anicat")
             }
     }
 

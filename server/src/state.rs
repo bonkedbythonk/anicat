@@ -33,3 +33,29 @@ impl AppState {
         self.token.lock().map(|t| t.is_some()).unwrap_or(false)
     }
 }
+
+#[cfg(test)]
+impl AppState {
+    /// A real engine on a fresh registry in the temp dir; nothing here
+    /// touches the network until a route asks AniList or TMDB something.
+    pub fn for_test(name: &str, token: Option<&str>) -> Self {
+        let data_dir = std::env::temp_dir().join(format!("anicat-server-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::fs::create_dir_all(&data_dir).expect("temp dir");
+        let engine = AnicatEngine::new(data_dir.to_string_lossy().into_owned(), None, None, None).expect("engine");
+        let writer = Writer::spawn(engine.clone());
+        let http = reqwest::Client::new();
+        let prefs = Arc::new(crate::player::prefs::PrefsStore::load(&data_dir));
+        let player = Arc::new(Player::new(engine.clone(), writer.clone(), prefs, http.clone()));
+        Self {
+            engine,
+            writer,
+            player,
+            data_dir,
+            port: 0,
+            log_redirected: false,
+            token: Arc::new(Mutex::new(token.map(str::to_string))),
+            http,
+        }
+    }
+}

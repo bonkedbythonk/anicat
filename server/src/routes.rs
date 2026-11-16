@@ -717,3 +717,166 @@ async fn cinema_cast(
 ) -> ApiResult<Json<Value>> {
     Ok(Json(json!(s.engine.cinema_cast(cinema_catalog(q.catalog)?, id).await?)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    async fn send(s: &AppState, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Vec<u8>, String) {
+        let mut req = Request::builder().method(method).uri(uri);
+        if body.is_some() {
+            req = req.header(header::CONTENT_TYPE, "application/json");
+        }
+        let body = body.map(|b| Body::from(b.to_string())).unwrap_or_else(Body::empty);
+        let resp = router(s.clone()).oneshot(req.body(body).unwrap()).await.unwrap();
+        let status = resp.status();
+        let mime = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, bytes.to_vec(), mime)
+    }
+
+    async fn send_json(s: &AppState, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+        let (status, bytes, _) = send(s, method, uri, body).await;
+        (status, serde_json::from_slice(&bytes).expect("a JSON body"))
+    }
+
+    fn done(s: AppState) {
+        let _ = std::fs::remove_dir_all(&s.data_dir);
+    }
+
+    /// The page calls `response.json()` on every answer; a plain-text
+    /// rejection showed as a JSON syntax error instead of what was wrong.
+    #[tokio::test]
+    async fn malformed_requests_answer_in_the_json_error_shape() {
+        let s = AppState::for_test("routes-rejections", None);
+        let cases = [
+            ("POST", "/api/watched", Some(json!({ "catalog_id": 1 })), StatusCode::UNPROCESSABLE_ENTITY),
+            ("GET", "/api/progress/1", None, StatusCode::BAD_REQUEST),
+            ("GET", "/api/media/abc", None, StatusCode::BAD_REQUEST),
+            ("GET", "/api/resolve-progress/bogus/1/1", None, StatusCode::BAD_REQUEST),
+        ];
+        for (method, uri, body, want) in cases {
+            let (status, v) = send_json(&s, method, uri, body).await;
+            assert_eq!(status, want, "{uri}");
+            assert!(v["error"].is_string(), "{uri}: {v}");
+            assert_eq!(v["anilist_down"], false, "{uri}");
+        }
+        done(s);
+    }
+
+    /// A TMDB id under the AniList catalog is a different title; these
+    /// must refuse before asking TMDB anything.
+    #[tokio::test]
+    async fn cinema_routes_refuse_a_non_tmdb_catalog() {
+        let s = AppState::for_test("routes-cinema-catalog", None);
+        for uri in ["/api/cinema/1?catalog=anilist", "/api/cinema/1/extras?catalog=anilist", "/api/cinema/1/cast?catalog=manga_dex"] {
+            let (status, v) = send_json(&s, "GET", uri, None).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+            assert_eq!(v["error"], "catalog must be tmdb_movie or tmdb_tv", "{uri}");
+        }
+        done(s);
+    }
+
+    #[tokio::test]
+    async fn signed_out_list_routes_answer_401_without_asking_anilist() {
+        let s = AppState::for_test("routes-signed-out", None);
+        let cases = [
+            ("GET", "/api/user-list", None),
+            ("GET", "/api/recommendations", None),
+            ("POST", "/api/list-entry", Some(json!({ "catalog_id": 1, "progress": 3 }))),
+        ];
+        for (method, uri, body) in cases {
+            let (status, v) = send_json(&s, method, uri, body).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri}");
+            assert!(v["error"].is_string(), "{uri}");
+        }
+        let (status, v) = send_json(&s, "GET", "/api/viewer", None).await;
+        assert_eq!((status, v), (StatusCode::OK, json!({ "signed_in": false })));
+        done(s);
+    }
+
+    /// Marked locally always; AniList only for an AniList title. Signed in
+    /// with a TMDB title, a lost catalog check would ask AniList for a TMDB
+    /// id and fail the whole request after the local write.
+    #[tokio::test]
+    async fn watched_marks_locally_and_syncs_only_anilist_titles() {
+        let s = AppState::for_test("routes-watched", Some("token"));
+        let body = json!({ "catalog": "tmdb_tv", "catalog_id": 1399, "episode": 2 });
+        let (status, v) = send_json(&s, "POST", "/api/watched", Some(body)).await;
+        assert_eq!((status, v), (StatusCode::OK, json!({ "anilist_synced": false })));
+        *s.token.lock().unwrap() = None;
+        let body = json!({ "catalog_id": 21, "episode": 5 });
+        let (status, v) = send_json(&s, "POST", "/api/watched", Some(body)).await;
+        assert_eq!((status, v), (StatusCode::OK, json!({ "anilist_synced": false })));
+        let (_, rows) = send_json(&s, "GET", "/api/activity", None).await;
+        let mut seen: Vec<(String, i64, i64)> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                let catalog = r["catalog"].as_str().unwrap().to_string();
+                (catalog, r["catalog_id"].as_i64().unwrap(), r["episode_number"].as_i64().unwrap())
+            })
+            .collect();
+        seen.sort();
+        assert_eq!(seen, [("anilist".to_string(), 21, 5), ("tmdb_tv".to_string(), 1399, 2)]);
+        done(s);
+    }
+
+    #[tokio::test]
+    async fn progress_round_trips_and_forget_drops_from_the_episode_on() {
+        let s = AppState::for_test("routes-forget", None);
+        for ep in 1..=3 {
+            s.writer.record_progress(FfiCatalog::Anilist, 7, ep, 300, 1440).await.unwrap();
+        }
+        let (_, v) = send_json(&s, "GET", "/api/progress/7?episode=1", None).await;
+        assert_eq!(v["stop_time"], 300);
+        let (status, _, _) = send(&s, "POST", "/api/forget", Some(json!({ "catalog_id": 7, "from_episode": 2 }))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let left: Vec<bool> = [1, 2, 3]
+            .iter()
+            .map(|&ep| s.engine.get_progress(FfiCatalog::Anilist, 7, ep).unwrap().is_some())
+            .collect();
+        assert_eq!(left, [true, false, false]);
+        done(s);
+    }
+
+    /// A blank paste is a sign-out, not a token of spaces saved to
+    /// config.json that every later launch would sign in with.
+    #[tokio::test]
+    async fn blank_token_signs_out_and_clears_config() {
+        let s = AppState::for_test("routes-token", Some("old"));
+        crate::config::save_token(&s.data_dir, Some("old")).unwrap();
+        let (status, v) = send_json(&s, "POST", "/api/token", Some(json!({ "token": "   " }))).await;
+        assert_eq!((status, v), (StatusCode::OK, json!({ "signed_in": false })));
+        assert!(!s.signed_in());
+        assert_eq!(crate::config::load_token(&s.data_dir), None);
+        done(s);
+    }
+
+    #[tokio::test]
+    async fn skin_art_serves_only_known_names_with_the_data_dir_first() {
+        let s = AppState::for_test("routes-skin-art", None);
+        for uri in ["/api/skin-art/nope/background", "/api/skin-art/ink/other", "/api/skin-art/ink/background", "/api/skin-art/..%2F..%2Fconfig/background"] {
+            let (status, _, _) = send(&s, "GET", uri, None).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+        }
+        let (status, bytes, mime) = send(&s, "GET", "/api/skin-art/dusk/background", None).await;
+        assert_eq!((status, mime.as_str()), (StatusCode::OK, "image/jpeg"));
+        assert!(!bytes.is_empty());
+        let dir = s.data_dir.join("skin-art").join("ink");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("background.png"), b"png").unwrap();
+        let (status, bytes, mime) = send(&s, "GET", "/api/skin-art/ink/background", None).await;
+        assert_eq!((status, mime.as_str(), bytes.as_slice()), (StatusCode::OK, "image/png", b"png".as_slice()));
+        done(s);
+    }
+}

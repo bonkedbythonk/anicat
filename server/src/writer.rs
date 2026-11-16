@@ -132,3 +132,40 @@ impl Writer {
         .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::state::AppState;
+    use anicat_core::ffi::{AnicatError, FfiCatalog};
+    use axum::http::StatusCode;
+
+    /// The resume point going backwards: a stalled earlier tick must not
+    /// land after a later one.
+    #[tokio::test]
+    async fn a_stalled_earlier_write_lands_before_a_later_one() {
+        let s = AppState::for_test("writer-order", None);
+        let stalled = s.writer.submit_blocking(|e| {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            e.record_progress(FfiCatalog::Anilist, 1, 1, 100, 1440)
+        });
+        let later = s.writer.record_progress(FfiCatalog::Anilist, 1, 1, 200, 1440);
+        let (a, b) = tokio::join!(stalled, later);
+        a.unwrap();
+        b.unwrap();
+        let hit = s.engine.get_progress(FfiCatalog::Anilist, 1, 1).unwrap().unwrap();
+        assert_eq!(hit.stop_time, 200);
+        let _ = std::fs::remove_dir_all(&s.data_dir);
+    }
+
+    #[tokio::test]
+    async fn a_job_error_comes_back_in_the_api_shape() {
+        let s = AppState::for_test("writer-error", None);
+        let err = s
+            .writer
+            .submit_blocking(|_| Err::<(), _>(AnicatError::NotFound { msg: "gone".into() }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        let _ = std::fs::remove_dir_all(&s.data_dir);
+    }
+}

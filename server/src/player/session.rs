@@ -866,3 +866,16 @@ fn remove_socket(endpoint: &std::path::Path) {
 /// A named pipe goes away with its last handle; there is no file to remove.
 #[cfg(windows)]
 fn remove_socket(_endpoint: &std::path::Path) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mpv_title_names_the_episode_except_for_a_film() {
+        assert_eq!(title_text(Some("Frieren"), FfiCatalog::Anilist, 3), "Frieren - Episode 3");
+        assert_eq!(title_text(Some("Heat"), FfiCatalog::TmdbMovie, 1), "Heat");
+        assert_eq!(title_text(Some("  "), FfiCatalog::TmdbTv, 2), "Anicat - Episode 2");
+        assert_eq!(title_text(None, FfiCatalog::TmdbMovie, 1), "Anicat");
+    }
+}

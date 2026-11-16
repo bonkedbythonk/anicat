@@ -103,3 +103,38 @@ impl IntoResponse for ApiError {
         (self.status, Json(body)).into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status_of(e: AnicatError) -> StatusCode {
+        ApiError::from(e).status
+    }
+
+    #[test]
+    fn engine_errors_map_to_statuses() {
+        let msg = |m: &str| m.to_string();
+        assert_eq!(status_of(AnicatError::NotFound { msg: msg("x") }), StatusCode::NOT_FOUND);
+        assert_eq!(
+            status_of(AnicatError::Network { msg: msg("graphql: Not Found.") }),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(status_of(AnicatError::Network { msg: msg("timed out") }), StatusCode::BAD_GATEWAY);
+        assert_eq!(status_of(AnicatError::Storage { msg: msg("locked") }), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(status_of(AnicatError::Internal { msg: msg("join") }), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn anilist_outage_marker_anywhere_becomes_503_with_the_sentence() {
+        let e = ApiError::from(AnicatError::Network {
+            msg: "anilist_down: The AniList API has been temporarily disabled.".into(),
+        });
+        assert_eq!(e.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(e.anilist_down);
+        assert_eq!(e.message, "The AniList API has been temporarily disabled.");
+        let plain = ApiError::bad_request("catalog must be tmdb_movie or tmdb_tv");
+        assert_eq!(plain.status, StatusCode::BAD_REQUEST);
+        assert!(!plain.anilist_down);
+    }
+}

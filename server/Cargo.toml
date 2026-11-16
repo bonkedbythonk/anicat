@@ -39,6 +39,10 @@ tray-icon = { version = "0.23", default-features = false }
 tao = "0.35"
 png = "0.18"
 
+[dev-dependencies]
+# `ServiceExt::oneshot` for the route tests; axum already pulls it in.
+tower = { version = "0.5", features = ["util"] }
+
 [build-dependencies]
 # The exe's own icon in Explorer and the taskbar. Does nothing off Windows.
 embed-resource = "3"

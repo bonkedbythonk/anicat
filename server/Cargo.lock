@@ -86,6 +86,7 @@ dependencies = [
  "serde_json",
  "tao",
  "tokio",
+ "tower",
  "tray-icon",
  "windows-sys 0.61.2",
 ]

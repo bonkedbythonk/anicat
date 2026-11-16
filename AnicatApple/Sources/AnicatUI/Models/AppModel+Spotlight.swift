@@ -8,9 +8,8 @@ import UIKit
 #endif
 
 /// The library and the watch history in the system search, so a title
-/// typed into Spotlight opens its page. The earlier `SpotlightIndexer` was
-/// deleted with the Tauri build and its rows are still being purged
-/// (`purgeStaleSpotlightIndexOnce`); this one writes under its own domain.
+/// typed into Spotlight opens its page. It writes under its own domain, not
+/// the `"library"` one the Tauri build's deleted `SpotlightIndexer` used.
 extension AppModel {
     static let spotlightDomain = "titles"
     public static let spotlightActivityType = CSSearchableItemActionType

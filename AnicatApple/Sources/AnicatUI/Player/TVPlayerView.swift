@@ -349,8 +349,8 @@ struct TVPlayerView: View {
                     controller.setPlaybackRate(rate)
                 }
             )) {
-                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                    Text(rate == 1 ? "Normal" : "\(rate.formatted())x").tag(rate)
+                ForEach(PlayerController.playbackSpeeds, id: \.self) { rate in
+                    Text(rate == 1 ? "Normal" : PlayerController.speedLabel(rate)).tag(rate)
                 }
             }
             // A submenu with its name and current value: inline, tvOS

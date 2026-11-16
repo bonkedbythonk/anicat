@@ -42,8 +42,6 @@ struct TVSettingsView: View {
     @State private var cacheBytes: UInt64?
     @State private var isPurging = false
 
-    private static let authorizeURL = "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token"
-
     // Two columns, the way tvOS's own Settings is laid out: who and what
     // this is on the left, held still, and the list scrolling on the right.
     // One full-width form under a faded centred title read as a stock
@@ -126,7 +124,7 @@ struct TVSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("On your phone or computer, open:")
                         .font(.system(size: 22))
-                    Text(Self.authorizeURL)
+                    Text(AppModel.aniListAuthorizeURL.absoluteString)
                         .font(.system(size: 20, design: .monospaced))
                         .foregroundStyle(SumiTheme.indigo)
                         .textCase(nil)

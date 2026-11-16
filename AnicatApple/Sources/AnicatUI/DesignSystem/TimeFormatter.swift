@@ -7,20 +7,6 @@ public enum SumiTimeFormatter {
         UserDefaults.standard.string(forKey: storageKey) ?? "24-hour"
     }
 
-    public static var is12Hour: Bool {
-        currentTimeFormat == "12-hour (AM/PM)"
-    }
-
-    public static func timeFormatPattern(for format: String? = nil) -> String {
-        let fmt = format ?? currentTimeFormat
-        return fmt == "12-hour (AM/PM)" ? "h:mm a" : "HH:mm"
-    }
-
-    public static func historyFormatPattern(for format: String? = nil) -> String {
-        let fmt = format ?? currentTimeFormat
-        return fmt == "12-hour (AM/PM)" ? "EEE hh:mm a" : "EEE HH:mm"
-    }
-
     private static let time12Formatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "h:mm a"
@@ -48,11 +34,6 @@ public enum SumiTimeFormatter {
     public static func formatTime(_ date: Date, timeFormat: String? = nil) -> String {
         let is12 = (timeFormat ?? currentTimeFormat) == "12-hour (AM/PM)"
         return (is12 ? time12Formatter : time24Formatter).string(from: date)
-    }
-
-    public static func formatHistoryDate(_ date: Date, timeFormat: String? = nil) -> String {
-        let is12 = (timeFormat ?? currentTimeFormat) == "12-hour (AM/PM)"
-        return (is12 ? history12Formatter : history24Formatter).string(from: date)
     }
 
     /// "3h ago" / "2d ago" for a forum post or comment. Not

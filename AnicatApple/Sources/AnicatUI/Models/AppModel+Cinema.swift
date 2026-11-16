@@ -291,6 +291,17 @@ extension AppModel {
         return results.map(Self.cinemaCard)
     }
 
+    /// A card from a phone or TV shelf. `cinemaCatalog(forId:)` is what
+    /// knows whether an id is a film or a series when the card does not say.
+    public func openCinemaDetail(_ item: MediaCard.Item) async {
+        await openCinemaDetail(
+            catalog: item.catalog ?? cinemaCatalog(forId: item.id),
+            id: item.id,
+            title: item.title,
+            coverURL: item.coverImageURL
+        )
+    }
+
     /// Opens a cinema card's detail page.
     ///
     /// A separate entry point from `openDetail`, which is AniList's: that

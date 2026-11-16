@@ -469,7 +469,7 @@ extension AppModel {
         if ScreenshotFixtures.isEnabled {
             await fetchWatchActivity()
             if viewer == nil {
-                viewer = ScreenshotFixtures.profile(favourites: trendingItemsAsSummaries, favouriteManga: [])
+                viewer = ScreenshotFixtures.profile(favourites: [], favouriteManga: [])
             }
             isSignedIn = true
             return
@@ -745,22 +745,6 @@ extension AppModel {
     /// `loadCinemaLibrary` has always filtered the other way.
     static func anilistActivity(_ rows: [ActivityRow]) -> [ActivityRow] {
         rows.filter { $0.catalog == .anilist }
-    }
-
-    /// `loadHistory` under screenshot mode may run before the home load has
-    /// a trending list to build a profile from; an empty favourites row is
-    /// fine there.
-    private var trendingItemsAsSummaries: [MediaSummary] { [] }
-
-    /// Loads the trending anime shelf that backs Search's Discover section.
-    /// The same list `loadInitialCatalog` fetches; kept as its own method so
-    /// the search page can top it up without re-running the whole home load.
-    public func loadTrending() async {
-        guard let engine else { return }
-        isLoading = true
-        defer { isLoading = false }
-        let trending = (try? await engine.trending(mediaType: "ANIME", format: nil, limit: 24)) ?? []
-        trendingItems = trending.map(Self.card)
     }
 
     /// Cmd+K's own live title search — deliberately not routed through

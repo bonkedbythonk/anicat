@@ -110,11 +110,8 @@ public enum SumiTheme {
     public static let radiusMd: CGFloat = 10
     public static let radiusLg: CGFloat = 12
     public static let radiusXl: CGFloat = 14
-    public static let radius2Xl: CGFloat = 16
-    public static let radius3Xl: CGFloat = 20
     
     // MARK: - Spacing
-    public static let spaceSm: CGFloat = 8
     public static let spaceMd: CGFloat = 16
     public static let spaceLg: CGFloat = 24
     
@@ -302,8 +299,7 @@ public struct SumiTabularMono: ViewModifier {
 /// links, icon buttons. Anything that looks like a push button uses the
 /// native styles below instead. A dim, not a shrink: every control used to
 /// scale to 97% on press, the web's `active:scale` habit, and no Mac control
-/// moves under the pointer. Shared with `SumiMenuPressable`, which has to
-/// fake the same dip for `Menu`.
+/// moves under the pointer.
 private enum SumiPressFeedback {
     static let opacity: Double = 0.85
 }
@@ -327,39 +323,6 @@ public struct SumiPressableButtonStyle: ButtonStyle {
 
 public extension ButtonStyle where Self == SumiPressableButtonStyle {
     static var sumiPressable: SumiPressableButtonStyle { SumiPressableButtonStyle() }
-}
-
-/// `Menu`'s label ignores `.buttonStyle` entirely — a `ButtonStyle` only ever
-/// applies to `Button`, so every `Menu`-based control in the app (dropdowns,
-/// the detail page's status/overflow menus) silently lost the press feedback
-/// every `Button` gets from `.sumiPressable`. This fakes the same dim from a
-/// raw press gesture, applied to the Menu's label view instead.
-private struct SumiMenuPressable: ViewModifier {
-    @State private var isPressed = false
-
-    func body(content: Content) -> some View {
-        #if os(tvOS)
-        // No drag on a Siri Remote, and the focus engine already lifts and
-        // dims a focused control; a second press effect on top of that
-        // reads as a glitch.
-        content
-        #else
-        content
-            .opacity(isPressed ? SumiPressFeedback.opacity : 1.0)
-            .animation(.snappy, value: isPressed)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in isPressed = true }
-                    .onEnded { _ in isPressed = false }
-            )
-        #endif
-    }
-}
-
-public extension View {
-    func sumiMenuPressable() -> some View {
-        modifier(SumiMenuPressable())
-    }
 }
 
 /// The app's push buttons, drawn in Sumi: an indigo fill for the one action a
@@ -473,18 +436,6 @@ public extension View {
 public extension View {
     func sumiTabularMono(size: CGFloat = 11.5, weight: Font.Weight = .regular) -> some View {
         modifier(SumiTabularMono(size: size, weight: weight))
-    }
-    
-    func sumiCardStyle() -> some View {
-        self
-            .background(SumiTheme.card)
-            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusXl))
-            .overlay(
-                SumiRect(cornerRadius: SumiTheme.radiusXl)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
-            .sumiBrackets()
-            .sumiFrame(radius: SumiTheme.radiusXl)
     }
 }
 

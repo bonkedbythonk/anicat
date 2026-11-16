@@ -33,20 +33,5 @@ public struct TMDBAttribution: View {
         }
     }
 
-    /// Loaded by URL rather than by name, for the same reason `SumiLogoMark`
-    /// is: `Image(_:bundle:)` looks the name up in an asset catalog, and this
-    /// ships as a loose PNG, so the by-name form renders nothing and says
-    /// nothing about why.
-    private static let mark: Image? = {
-        let candidates = [
-            Bundle.anicatResources.url(forResource: "tmdb_logo", withExtension: "png"),
-            Bundle.anicatResources.url(forResource: "tmdb_logo", withExtension: "png", subdirectory: "Images"),
-        ]
-        for case let url? in candidates {
-            if let data = try? Data(contentsOf: url), let image = PlatformImage(data: data) {
-                return Image(platformImage: image)
-            }
-        }
-        return nil
-    }()
+    private static let mark = Image.bundledPNG("tmdb_logo")
 }

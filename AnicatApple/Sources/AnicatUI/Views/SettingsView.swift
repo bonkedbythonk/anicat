@@ -260,6 +260,7 @@ public struct SettingsView: View {
                             .foregroundColor(SumiTheme.muted)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 10)

@@ -10,9 +10,26 @@ import AnicatCoreKit
 struct AnicatUITests {
     @Test("Anime4K Preset Shader Count")
     func testPresetShaders() {
-        let preset = Anime4KPreset.modeAFast
+        let preset = Anime4KPreset.on
         #expect(preset.shaderFileNames.count == 6)
         #expect(preset.shaderFileNames.first == "Anime4K_Clamp_Highlights.glsl")
+    }
+
+    @Test("Player clock carries hours past one hour")
+    func testFormatTimestamp() {
+        #expect(PlayerController.formatTimestamp(0) == "00:00")
+        #expect(PlayerController.formatTimestamp(312) == "05:12")
+        #expect(PlayerController.formatTimestamp(3599) == "59:59")
+        #expect(PlayerController.formatTimestamp(3600) == "1:00:00")
+        #expect(PlayerController.formatTimestamp(7300) == "2:01:40")
+        #expect(PlayerController.formatTimestamp(-5) == "00:00")
+        #expect(PlayerController.formatTimestamp(113, padded: false) == "1:53")
+    }
+
+    @Test("Speed labels")
+    func testSpeedLabel() {
+        #expect(PlayerController.playbackSpeeds.map(PlayerController.speedLabel)
+            == ["0.5x", "0.75x", "1x", "1.25x", "1.5x", "2x"])
     }
 
     @Test("Anime4K Single Toggle and 6-Shader Chain Exact Matching")

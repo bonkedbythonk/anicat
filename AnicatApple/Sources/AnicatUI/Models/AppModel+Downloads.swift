@@ -137,7 +137,7 @@ extension AppModel {
     /// without this the app forgot every relaunch that it had an episode,
     /// and pressing Play fetched a file already on the disk.
     @MainActor
-    public func loadDownloadedEpisodes() {
+    public func loadDownloadedEpisodes() async {
         guard let engine else { return }
         #if os(iOS)
         Self.excludeDownloadsFromBackup()
@@ -150,10 +150,14 @@ extension AppModel {
             from: watchingItems + libraryItems + mangaReading,
             knownTitles: knownTitles
         )
-        if !hints.isEmpty {
-            _ = try? engine.scanDownloadsFolder(hints: hints)
-        }
-        let rows = (try? engine.downloadedEpisodes()) ?? []
+        // Off the main actor: the walk scales with the user's files and ran
+        // as a synchronous FFI call during launch.
+        let rows = await Task.detached(priority: .utility) {
+            if !hints.isEmpty {
+                _ = try? engine.scanDownloadsFolder(hints: hints)
+            }
+            return (try? engine.downloadedEpisodes()) ?? []
+        }.value
         // Rows for episodes the app is downloading right now win: they carry
         // live progress, and the stored row only knows about finished ones.
         var restored: [LibraryDownload] = []

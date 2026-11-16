@@ -60,10 +60,6 @@ struct PhoneSettingsView: View {
     @State private var cacheBytes: UInt64?
     @State private var isPurging = false
 
-    private static let authorizeURL = URL(
-        string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token"
-    )!
-
     var body: some View {
         Form {
             account
@@ -124,7 +120,7 @@ struct PhoneSettingsView: View {
                     .foregroundStyle(SumiTheme.muted)
 
                 Button("Authorize in your browser") {
-                    Platform.openExternal(Self.authorizeURL)
+                    Platform.openExternal(AppModel.aniListAuthorizeURL)
                 }
 
                 // AniList's implicit grant hands the token back in the

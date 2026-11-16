@@ -10,13 +10,14 @@ import Foundation
 ///
 /// So a build carries one of two things, and the first is much the better:
 ///
-/// 1. **A proxy URL** (`ANICAT_TMDB_PROXY`, or `ANICATTMDBProxy` in the
-///    bundle). The key lives on the proxy and no credential ships at all.
+/// 1. **A proxy URL** (`ANICATTMDBProxy` in the bundle, or
+///    `ANICAT_TMDB_PROXY` in a debug build's environment). The key lives on the proxy and no credential ships at all.
 ///    This is the only arrangement in which the key genuinely cannot be
 ///    extracted: an Info.plist entry is plain text, a constant in the binary
 ///    is one `strings` away, and obfuscation only decides how many minutes it
 ///    takes. See `services/tmdb-proxy/`.
-/// 2. **A key** (`ANICAT_TMDB_KEY`, or `ANICATTMDBKey` in the bundle), for a
+/// 2. **A key** (`ANICATTMDBKey` in the bundle, or `ANICAT_TMDB_KEY` in a
+///    debug build's environment), for a
 ///    dev build or a build with no proxy behind it. It ships inside the app
 ///    and should be treated as public and rotatable, not as a secret.
 ///
@@ -39,7 +40,10 @@ public enum TmdbCredential {
     /// Not a viewer-facing setting: which server the app talks to is decided
     /// by whoever packaged it, not by whoever is using it.
     public static var proxyURL: String? {
-        if let env = clean(ProcessInfo.processInfo.environment[proxyEnvironmentVariable]) {
+        // Through DebugHooks: in a release build any process that launched
+        // the app could point its TMDB traffic at another server. Packaged
+        // builds carry the proxy in Info.plist.
+        if let env = clean(DebugHooks.env(proxyEnvironmentVariable)) {
             return env
         }
         return clean(Bundle.main.object(forInfoDictionaryKey: proxyInfoPlistKey) as? String)
@@ -51,16 +55,10 @@ public enum TmdbCredential {
         if let user = clean(UserDefaults.standard.string(forKey: userKeyDefaultsKey)) {
             return user
         }
-        if let env = clean(ProcessInfo.processInfo.environment[environmentVariable]) {
+        if let env = clean(DebugHooks.env(environmentVariable)) {
             return env
         }
         return clean(Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String)
-    }
-
-    /// Whether the viewer supplied their own key, which is what Settings shows
-    /// in place of "using the built-in key".
-    public static var isUserSupplied: Bool {
-        clean(UserDefaults.standard.string(forKey: userKeyDefaultsKey)) != nil
     }
 
     /// A blank string is not a key, and neither is a shell variable that was

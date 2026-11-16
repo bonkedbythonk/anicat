@@ -820,8 +820,17 @@ extension AppModel {
     public func loadOfflineChapters() {
         guard let engine else { return }
         offlineChapters = (try? engine.offlineChapters()) ?? []
-        offlineBytes = engine.offlineSizeBytes()
         offlineCapBytes = engine.offlineLimitBytes()
+        // A directory walk, synchronous over FFI, from eleven call sites on
+        // the main actor; off it, the total lands a moment after the list.
+        // Generation-checked: a walk started before a delete could finish
+        // after the one started after it and put the old total back.
+        offlineBytesGeneration += 1
+        let generation = offlineBytesGeneration
+        Task {
+            let bytes = await Task.detached(priority: .utility) { engine.offlineSizeBytes() }.value
+            if generation == offlineBytesGeneration { offlineBytes = bytes }
+        }
         guard let details = selectedMediaDetails else { return }
         var states = chapterOfflineStates
         for row in offlineChapters where row.catalogId == details.id {

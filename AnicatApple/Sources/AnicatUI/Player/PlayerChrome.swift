@@ -68,13 +68,17 @@ private struct ChromeNameModifier: ViewModifier {
     @State private var inside = false
 
     func body(content: Content) -> some View {
+        // Without the label VoiceOver read the symbol's asset name
+        // ("chevron.left") for every icon-only player button.
         #if os(macOS)
         content
+            .accessibilityLabel(name)
             .onHover { inside = $0; publish() }
             .onChange(of: isOn) { publish() }
             .onChange(of: name) { publish() }
         #else
         content
+            .accessibilityLabel(name)
         #endif
     }
 

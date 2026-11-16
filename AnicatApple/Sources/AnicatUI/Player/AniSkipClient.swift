@@ -45,14 +45,6 @@ public enum AniSkipClient {
         case failed(String)
     }
 
-    /// `nil` on any failure; see `lookup` for which one.
-    public static func skipTimes(malId: Int64, episode: Int, episodeLengthSeconds: Double) async -> SkipTimes? {
-        if case .found(let times) = await lookup(malId: malId, episode: episode, episodeLengthSeconds: episodeLengthSeconds) {
-            return times
-        }
-        return nil
-    }
-
     /// Not an error to surface as a toast either way: skip times are a
     /// nicety. The outcome is for the stream details panel and the log.
     public static func lookup(malId: Int64, episode: Int, episodeLengthSeconds: Double) async -> Lookup {

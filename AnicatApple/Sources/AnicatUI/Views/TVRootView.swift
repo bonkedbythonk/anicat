@@ -496,14 +496,7 @@ private struct UpNextTab: View {
 
     private func openCinema(_ item: MediaCard.Item) {
         showDetail = true
-        Task {
-            await model.openCinemaDetail(
-                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
-                id: item.id,
-                title: item.title,
-                coverURL: item.coverImageURL
-            )
-        }
+        Task { await model.openCinemaDetail(item) }
     }
 
     private func open(_ id: Int64, _ title: String, _ cover: URL?, _ isManga: Bool) {
@@ -888,14 +881,7 @@ private struct LibraryTab: View {
 
     private func openCinema(_ item: MediaCard.Item) {
         showDetail = true
-        Task {
-            await model.openCinemaDetail(
-                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
-                id: item.id,
-                title: item.title,
-                coverURL: item.coverImageURL
-            )
-        }
+        Task { await model.openCinemaDetail(item) }
     }
 
     private func open(_ item: MediaCard.Item) {
@@ -970,14 +956,7 @@ private struct SearchTab: View {
 
     private func openCinema(_ item: MediaCard.Item) {
         showDetail = true
-        Task {
-            await model.openCinemaDetail(
-                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
-                id: item.id,
-                title: item.title,
-                coverURL: item.coverImageURL
-            )
-        }
+        Task { await model.openCinemaDetail(item) }
     }
 
     private func open(_ item: MediaCard.Item) {

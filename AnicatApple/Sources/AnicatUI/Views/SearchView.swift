@@ -376,6 +376,7 @@ public struct SearchView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.sumiPressable)
+                            .accessibilityLabel("Clear search")
                         }
 
                         if isLoading {

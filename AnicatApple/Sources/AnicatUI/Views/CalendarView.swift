@@ -189,6 +189,7 @@ public struct CalendarView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)
+        .accessibilityLabel(months < 0 ? "Previous month" : "Next month")
     }
 
     private var weekdayHeader: some View {
@@ -325,6 +326,7 @@ public struct CalendarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
+                .accessibilityLabel("Close day")
             }
             .padding(.bottom, 6)
 

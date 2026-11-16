@@ -101,14 +101,7 @@ struct AccountTabSection: View {
                     description: "Authorize Anicat to access your AniList account."
                 ) {
                     Button {
-                        // Must match the client id the web build registers
-                        // in web/src-tauri/src/commands/auth.rs — this one
-                        // was wrong (20822 belongs to a third-party app,
-                        // "Airin," not this one) and sent users through
-                        // someone else's OAuth client instead of Anicat's own.
-                        if let url = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token") {
-                            Platform.openExternal(url)
-                        }
+                        Platform.openExternal(AppModel.aniListAuthorizeURL)
                     } label: {
                         // Secondary: Save and connect below is this card's
                         // prominent button.
@@ -157,8 +150,7 @@ struct AccountTabSection: View {
         // Cinema mode reads TMDB with a key the app carries, so this is
         // an override and not a requirement -- the field says so, because
         // an empty credential box otherwise reads as a thing to go and
-        // fill in before films will work. Takes effect on the next
-        // launch: the engine is handed its key when it is constructed.
+        // fill in before films will work.
         SettingsCard(title: "Cinema (TMDB)") {
             SettingField(
                 label: "Your own TMDB key",

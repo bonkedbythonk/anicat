@@ -3,25 +3,19 @@ import AnicatUI
 import AnicatCoreKit
 
 #if os(macOS)
-/// Pins the process to dark aqua at launch.
-///
-/// `SumiTheme`'s colours are dynamic `NSColor`s that resolve by asking the
-/// appearance they are drawn under, and `.preferredColorScheme(.dark)` only
-/// covers SwiftUI's own environment — a colour resolved against the window or
-/// the app appearance still answers with the washi-paper light palette on a
-/// Mac set to Light. The web build ships the Ink & Index dark skin with no
-/// light toggle wired up, so there is nothing for a light resolution to be
-/// right about.
+/// The app delegate: hands the process appearance to `ThemeStore` at launch,
+/// keeps the app alive with no window, and brings the window back on reopen.
+/// The name is from when it pinned dark aqua.
 final class AppearanceLock: NSObject, NSApplicationDelegate {
-    /// A Dock click with no visible window (the main window hidden behind a
-    /// fullscreen space that was left, or closed) brings the window back
-    /// rather than doing nothing.
     /// Without this the app exits 0 three seconds after a launch that opened
     /// no window (the reopen-to-self case below), and Cmd-W would quit it too.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
 
+    /// A Dock click with no visible window (the main window hidden behind a
+    /// fullscreen space that was left, or closed) brings the window back
+    /// rather than doing nothing.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { AppWindow.main?.makeKeyAndOrderFront(nil) }
         return true
@@ -157,8 +151,7 @@ struct WindowConfigurator: NSViewRepresentable {
         // restores the window straight into fullscreen at the next launch,
         // black until Escape forces a layout: playback drove that fullscreen,
         // not the viewer, and it is gone. Fullscreen is decided per session
-        // by playback, so the window opts out of state restoration; the
-        // frame itself still comes back through SwiftUI's own autosave.
+        // by playback, so the window opts out of state restoration.
         window.isRestorable = false
         // Restoration off means the frame no longer comes back either;
         // `WindowFrameMemory` keeps the last size and position without
@@ -188,7 +181,7 @@ struct WindowConfigurator: NSViewRepresentable {
         // vibrant. A real opaque color here keeps the rest of the window on
         // the fast path; VibrancyBackdrop's own .behindWindow view still
         // handles the sidebar's translucency independently.
-        window.backgroundColor = NSColor(srgbRed: 22.0 / 255, green: 19.0 / 255, blue: 16.0 / 255, alpha: 1)
+        window.backgroundColor = NSColor(ThemeStore.shared.palette.background)
         ScrollPocketWorkaround.disableScrollPockets(in: window.contentView)
     }
 }

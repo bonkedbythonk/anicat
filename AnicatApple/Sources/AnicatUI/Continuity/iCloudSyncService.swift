@@ -63,9 +63,11 @@ public final class iCloudSyncService: @unchecked Sendable {
             print("[iCloudSyncService] Local keychain write returned status: \(status)")
         }
 
-        // 2. Persist to ~/Library/Application Support/Anicat/config.json (matching Tauri config.rs)
+        // 2. Persist to ~/Library/Application Support/Anicat/config.json.
+        // Not config.toml: that file is only read, for a 5.x upgrader's
+        // token, and rewriting it put a second plain-text copy of every new
+        // token on disk.
         saveTokenToConfigFile(trimmed)
-        saveTokenToTOMLFile(trimmed)
 
         return keychainSuccess || (loadTokenFromConfigFile() != nil)
     }
@@ -244,21 +246,6 @@ public final class iCloudSyncService: @unchecked Sendable {
             return token.isEmpty ? nil : token
         }
         return nil
-    }
-
-    private func saveTokenToTOMLFile(_ token: String) {
-        let fileURL = configTOMLURL
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
-            return
-        }
-        guard let regex = try? NSRegularExpression(pattern: #"anilist_token\s*=\s*"[^"]*""#) else {
-            return
-        }
-        let range = NSRange(location: 0, length: (contents as NSString).length)
-        if regex.firstMatch(in: contents, options: [], range: range) != nil {
-            let updated = regex.stringByReplacingMatches(in: contents, options: [], range: range, withTemplate: "anilist_token = \"\(token)\"")
-            writePrivate(Data(updated.utf8), to: fileURL)
-        }
     }
 
     private func removeTokenFromTOMLFile() {

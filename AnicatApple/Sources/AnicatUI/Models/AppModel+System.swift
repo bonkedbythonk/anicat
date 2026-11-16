@@ -1,8 +1,5 @@
 import Foundation
 import SwiftUI
-#if canImport(CoreSpotlight)
-import CoreSpotlight
-#endif
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -55,29 +52,6 @@ extension AppModel {
                 AppLog.write("[backup] could not exclude \(url.lastPathComponent): \(error.localizedDescription)")
             }
         }
-    }
-
-    /// One-shot cleanup for rows the now-deleted `SpotlightIndexer` wrote
-    /// under its `"library"` domain before it was removed — deleting that
-    /// file took its own `clear()` call with it, so without this those show
-    /// titles stay searchable forever with no code path left that knows
-    /// about them. `UserDefaults` guards it to one run per install; safe to
-    /// delete this method entirely once every machine that ever ran the
-    /// indexer has launched a build past this one.
-    @MainActor
-    public func purgeStaleSpotlightIndexOnce() {
-        let key = "anicat_spotlight_purged_2026_09_08"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
-        // No Spotlight on tvOS, so nothing the indexer could have written.
-        // `os`, not `canImport`: the framework is importable there and its
-        // index class is not.
-        #if !os(tvOS)
-        Task.detached(priority: .background) {
-            guard CSSearchableIndex.isIndexingAvailable() else { return }
-            try? await CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: ["library"])
-        }
-        #endif
     }
 
     // MARK: - Deep links
@@ -194,13 +168,6 @@ extension AppModel {
     }
 
     // MARK: - Dock badge
-
-    /// Titles on the watching list with an aired episode the viewer has not
-    /// reached. The same count Up Next's own "2 new episodes" subtitle shows,
-    /// so the two can never disagree.
-    public var newEpisodeBadgeCount: Int {
-        upNextItems.filter { $0.hasNewEpisode && $0.unit != "CH" }.count
-    }
 
     /// Stamps the dock tile. Looking at Up Next *is* reading the badge, so it
     /// clears while that section is open rather than needing its own

@@ -1492,19 +1492,6 @@ public struct MediaDetailView: View {
         }
     }
 
-    private func hairlineControl<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .foregroundColor(SumiTheme.foreground.opacity(0.8))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(SumiTheme.card.opacity(0.8))
-            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
-            .overlay(
-                SumiRect(cornerRadius: SumiTheme.radiusMd)
-                    .stroke(SumiTheme.border, lineWidth: 1)
-            )
-    }
-
     /// The episode the primary button plays: the resume point if there is one,
     /// else the first unwatched aired episode, else the first.
     private var resumeTarget: EpisodeItem? {
@@ -1648,14 +1635,14 @@ public struct MediaDetailView: View {
         details.format?.uppercased() == "MOVIE" && episodes.count <= 1
     }
 
-    /// "Resume Ep 4  1:53", the time a step quieter: as one string,
+    /// "Resume Ep 4  01:53", the time a step quieter: as one string,
     /// "Resume Episode 4 · 1:53" was the longest label in the row.
     private var primaryActionTitle: Text {
         guard let target = resumeTarget else { return Text("Nothing to play") }
         let episode = isSingleSitting ? "" : " Ep \(target.number)"
         if let seconds = resumeSecondsForTarget {
             return Text("Resume\(episode)")
-                + Text("  \(Self.clock(seconds))")
+                + Text("  \(PlayerController.formatTimestamp(Double(seconds), padded: false))")
                     .fontWeight(.medium)
                     .foregroundColor(SumiTheme.background.opacity(0.72))
         }
@@ -1663,12 +1650,6 @@ public struct MediaDetailView: View {
             return Text(target.isWatched ? "Watch again" : "Play")
         }
         return target.isWatched ? Text("Rewatch") : Text("Play\(episode)")
-    }
-
-    static func clock(_ seconds: Int) -> String {
-        let m = seconds / 60
-        let s = seconds % 60
-        return String(format: "%d:%02d", m, s)
     }
 
     private func synopsisBlock(_ text: String) -> some View {
@@ -2555,7 +2536,7 @@ private struct CompactEpisodeRow: View, Equatable {
                     Spacer(minLength: 8)
 
                     if isResumeTarget, let seconds = resumeSeconds, seconds > 0 {
-                        Text("Resume \(MediaDetailView.clock(seconds))")
+                        Text("Resume \(PlayerController.formatTimestamp(Double(seconds), padded: false))")
                             .sumiTabularMono(size: 10.5, weight: .semibold)
                             .foregroundColor(SumiTheme.indigo)
                     }
@@ -2865,7 +2846,7 @@ private struct EpisodeRow: View, Equatable {
                 Text("·").foregroundColor(SumiTheme.muted.opacity(0.5))
                 // A size up and semibold: with no tinted box around the row,
                 // this is what marks the episode to resume.
-                Text("Resume \(MediaDetailView.clock(seconds))")
+                Text("Resume \(PlayerController.formatTimestamp(Double(seconds), padded: false))")
                     .font(.system(size: 11.5, weight: .semibold))
                     .monospacedDigit()
                     .foregroundColor(SumiTheme.indigo)

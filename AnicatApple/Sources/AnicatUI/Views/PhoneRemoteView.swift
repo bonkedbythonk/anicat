@@ -275,14 +275,14 @@ struct PhoneRemoteView: View {
                             client.send(.setPlaybackRate(rate))
                         } label: {
                             if abs(state.playbackRate - rate) < 0.01 {
-                                Label(Self.speedLabel(rate), anicat: "checkmark")
+                                Label(PlayerController.speedLabel(rate), anicat: "checkmark")
                             } else {
-                                Text(Self.speedLabel(rate))
+                                Text(PlayerController.speedLabel(rate))
                             }
                         }
                     }
                 } label: {
-                    Label(Self.speedLabel(state.playbackRate), anicat: "speedometer")
+                    Label(PlayerController.speedLabel(state.playbackRate), anicat: "speedometer")
                         .font(.system(size: 14))
                         .foregroundStyle(SumiTheme.muted)
                 }
@@ -408,10 +408,6 @@ struct PhoneRemoteView: View {
     }
 
     static let speeds: [Double] = [0.75, 1, 1.25, 1.5, 2]
-
-    static func speedLabel(_ rate: Double) -> String {
-        rate == rate.rounded() ? "\(Int(rate))x" : String(format: "%gx", rate)
-    }
 
     private var volume: some View {
         HStack(spacing: 14) {

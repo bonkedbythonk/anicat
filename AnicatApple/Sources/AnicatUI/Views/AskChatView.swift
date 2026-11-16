@@ -93,6 +93,7 @@ struct AskChatView: View {
                             .foregroundColor(canSend ? SumiTheme.indigo : SumiTheme.muted)
                     }
                     .buttonStyle(.sumiPressable)
+                    .accessibilityLabel("Send")
                     .disabled(!canSend)
                     .animation(.sumi(.tab), value: canSend)
                 }

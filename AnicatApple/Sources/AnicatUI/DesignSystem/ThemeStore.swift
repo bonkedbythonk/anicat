@@ -762,6 +762,9 @@ public final class ThemeStore: @unchecked Sendable {
     public func applyToNativeChrome() {
         #if os(macOS)
         NSApp?.appearance = nsAppearance
+        // The window's own fill shows wherever SwiftUI has not painted yet
+        // (resize edges, launch); pinned to Ink it stayed brown under Paper.
+        AppWindow.main?.backgroundColor = NSColor(palette.background)
         #endif
     }
 

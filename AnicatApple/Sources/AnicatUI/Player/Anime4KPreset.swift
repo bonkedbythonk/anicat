@@ -1,18 +1,15 @@
 import Foundation
 
-/// Represents the Anime4K real-time neural upscaling state.
-/// Tauri Anicat uses a single toggle (On / Off) backed by the official 6-shader chain.
+/// Represents the Anime4K real-time neural upscaling state: a single toggle
+/// (On / Off) backed by the official 6-shader chain, as the Tauri build had.
 public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
     case off = "Off"
     case on = "On"
 
-    /// Backward compatibility alias for the default Anime4K Mode A (Fast) preset
-    public static let modeAFast: Anime4KPreset = .on
-
     public var id: String { rawValue }
     public var displayName: String { rawValue }
 
-    /// Official 6-shader chain from Tauri Anicat (Mode A - Fast)
+    /// Official 6-shader chain (Mode A - Fast), carried over from the Tauri build
     /// Source: github.com/bloc97/Anime4K
     public static let shaderFileNames: [String] = [
         "Anime4K_Clamp_Highlights.glsl",
@@ -69,11 +66,7 @@ public enum Anime4KPreset: String, CaseIterable, Identifiable, Sendable {
                 ?? Bundle.main.path(forResource: baseName, ofType: ext, inDirectory: "Shaders")
         }
 
-        #if os(Windows)
-        return paths.joined(separator: ";")
-        #else
         return paths.joined(separator: ":")
-        #endif
     }
 }
 

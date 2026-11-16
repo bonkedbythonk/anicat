@@ -80,6 +80,8 @@ public final class ScrollEventTap {
 
     private func deliver(_ cgEvent: CGEvent) {
         guard NSApp.isActive, !handlers.isEmpty, let event = NSEvent(cgEvent: cgEvent) else { return }
+        // Debug only: in release this wrote a log line on every gesture.
+        #if DEBUG
         if event.phase == .began { ScrollLagProbe.gestureBegan() }
         let start = CFAbsoluteTimeGetCurrent()
         for handler in handlers.values { handler(event) }
@@ -87,9 +89,13 @@ public final class ScrollEventTap {
         if event.phase == .began || cost > 2 {
             PlayerLog.write(String(format: "[scroll] tap handlers %.2fms at phase %@ dy %.1f", cost, event.phase == .began ? "began" : "changed", event.scrollingDeltaY))
         }
+        #else
+        for handler in handlers.values { handler(event) }
+        #endif
     }
 }
 
+#if DEBUG
 /// Diagnostic for "a hard scroll lags before it moves" (owner, 2026-09-14):
 /// the trackpad's `began` tick, stamped by the event tap, against the first
 /// content offset change the page reports. The gap is the lag.
@@ -118,7 +124,12 @@ public extension View {
         }
     }
 }
-#else
+#endif
+#endif
+
+// Release builds skip the probe: it ran a geometry callback on every scroll
+// frame of home and detail for a log line only a debugging session reads.
+#if !(os(macOS) && DEBUG)
 public extension View {
     func scrollLagProbe(_ page: String) -> some View { self }
 }

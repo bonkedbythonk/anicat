@@ -796,6 +796,7 @@ public struct PlayerView: View {
                                 .playerScrim(Circle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     }
@@ -806,6 +807,7 @@ public struct PlayerView: View {
                             .background(Circle().fill(Color.black.opacity(0.55)))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close player")
                     .padding(6)
                     .opacity(isMiniHovered ? 1 : 0.7)
                     VStack {
@@ -1739,11 +1741,11 @@ public struct PlayerView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(SumiTheme.muted)
                 HStack(spacing: 6) {
-                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                    ForEach(PlayerController.playbackSpeeds, id: \.self) { rate in
                         Button(action: { controller.setPlaybackRate(rate) }) {
                             HStack(spacing: 6) {
                                 if rate != 0.5 { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
-                                Text(speedLabel(rate))
+                                Text(PlayerController.speedLabel(rate))
                                     .fontWeight(controller.playbackRate == rate ? .semibold : .regular)
                                     .foregroundColor(controller.playbackRate == rate ? SumiTheme.foreground : SumiTheme.muted)
                             }
@@ -2052,10 +2054,6 @@ public struct PlayerView: View {
             releases = found
             releaseError = failure
         }
-    }
-
-    private func speedLabel(_ rate: Double) -> String {
-        rate == rate.rounded() ? "\(Int(rate))x" : String(format: "%.2gx", rate)
     }
 
     enum TrackListKind: Hashable {

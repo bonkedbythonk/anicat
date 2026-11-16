@@ -524,7 +524,7 @@ struct PhoneDetailView: View {
             let target = resumed ?? next ?? first
             let label: String = {
                 if let seconds = resumeSeconds(for: target.number) {
-                    return "Resume Ep \(target.number)  \(MediaDetailView.clock(seconds))"
+                    return "Resume Ep \(target.number)  \(PlayerController.formatTimestamp(Double(seconds), padded: false))"
                 }
                 if aired.count == 1 { return "Play" }
                 if next == nil { return "Watch again from Ep \(first.number)" }
@@ -1049,11 +1049,11 @@ struct PhoneDetailView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if let runtime = episode.runtimeMinutes {
-                        Text(resumeSeconds.map { "\(runtime) min  ·  Resume \(MediaDetailView.clock($0))" } ?? "\(runtime) min")
+                        Text(resumeSeconds.map { "\(runtime) min  ·  Resume \(PlayerController.formatTimestamp(Double($0), padded: false))" } ?? "\(runtime) min")
                             .font(.system(size: 12)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                     } else if let resumeSeconds {
-                        Text("Resume \(MediaDetailView.clock(resumeSeconds))")
+                        Text("Resume \(PlayerController.formatTimestamp(Double(resumeSeconds), padded: false))")
                             .font(.system(size: 12)).monospacedDigit()
                             .foregroundStyle(SumiTheme.muted)
                     }

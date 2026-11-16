@@ -48,29 +48,6 @@ public enum Platform {
         #endif
     }
 
-    /// True on iPhone and iPad, where hover, cursor hiding and window
-    /// toolbars have no meaning and code paths that assume them are
-    /// compiled out rather than stubbed.
-    public static var isTouch: Bool {
-        #if os(iOS)
-        return true
-        #else
-        return false
-        #endif
-    }
-
-    /// True on Apple TV. Neither a pointer nor a touch screen: everything
-    /// is reached by moving focus with the Siri Remote, so hover, drag and
-    /// tap-to-reveal code paths are compiled out and the TV root
-    /// (`TVRootView`) is built around focus instead.
-    public static var isTV: Bool {
-        #if os(tvOS)
-        return true
-        #else
-        return false
-        #endif
-    }
-
     /// The OS name the debug report prints. Hardcoding "macOS" there would
     /// have the iPhone build hand a support report claiming to come from a
     /// Mac, which is exactly the field a reader trusts without checking.
@@ -179,6 +156,22 @@ public extension Image {
         #elseif canImport(UIKit)
         self.init(uiImage: platformImage)
         #endif
+    }
+
+    /// A loose PNG from the resource bundle, by URL: `Image(_:bundle:)`
+    /// looks the name up in an asset catalog, so for a loose file it renders
+    /// nothing and says nothing about why.
+    static func bundledPNG(_ name: String) -> Image? {
+        let candidates = [
+            Bundle.anicatResources.url(forResource: name, withExtension: "png"),
+            Bundle.anicatResources.url(forResource: name, withExtension: "png", subdirectory: "Images"),
+        ]
+        for case let url? in candidates {
+            if let data = try? Data(contentsOf: url), let image = PlatformImage(data: data) {
+                return Image(platformImage: image)
+            }
+        }
+        return nil
     }
 }
 

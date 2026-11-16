@@ -289,10 +289,8 @@ public final class PlayerController {
     public var isMuted: Bool = false
     public var playbackRate: Double = 1.0
 
-    // Anime4K & Video Quality (Single On/Off toggle from Tauri). No longer
-    // surfaced in the player UI — controlled from Settings only — but the
-    // underlying mpv shader toggle stays, since Settings still reads/writes
-    // the same `anicat_gpu_upscaling` default.
+    // Anime4K, one on/off toggle: the player bar's button and Settings
+    // both write the `anicat_gpu_upscaling` default this mirrors.
     public var isAnime4KEnabled: Bool = true
 
     /// `anicat_frame_interpolation`, off unless the viewer turns it on.
@@ -905,7 +903,6 @@ public final class PlayerController {
     var isPointerOverBottomBar: Bool = false
     var isPointerOverChrome: Bool { isPointerOverTopBar || isPointerOverBottomBar }
     private var autohideTask: Task<Void, Never>?
-    private var menuHoldTask: Task<Void, Never>?
 
     public init(title: String = "", episodeNumber: Int = 1) {
         self.title = title
@@ -1079,16 +1076,6 @@ public final class PlayerController {
     public func cycleSideways() {
         onCycleSideways?()
         showControlsBriefly()
-    }
-
-    public func skipIntro() {
-        guard let window = skipWindows.first(where: { $0.kind == .opening }) else { return }
-        performSkip(window, flash: false)
-    }
-
-    public func skipOutro() {
-        guard let window = skipWindows.first(where: { $0.kind == .ending }) else { return }
-        performSkip(window, flash: false)
     }
 
     /// What the Skip pill and its key press do: jump the window the pill is
@@ -1351,7 +1338,7 @@ public final class PlayerController {
         let reached = playedFrom == nil ? 0 : playedTo
         if Self.isEarlyEnd(position: reached, duration: duration) {
             print("[autonext] eof-reached at \(Int(currentTime))s of \(Int(duration))s, mpv reached \(Int(reached))s: treated as a dead stream, not an end")
-            reportPlaybackFailure("The stream stopped at \(Self.clock(currentTime)) of \(Self.clock(duration)).")
+            reportPlaybackFailure("The stream stopped at \(Self.formatTimestamp(currentTime, padded: false)) of \(Self.formatTimestamp(duration, padded: false)).")
             return
         }
         let end = max(duration, currentTime)
@@ -1359,12 +1346,6 @@ public final class PlayerController {
         currentTime = end
         checkIntroStatus()
         onPositionChange?(end, duration)
-    }
-
-    nonisolated static func clock(_ seconds: Double) -> String {
-        let total = Int(max(0, seconds))
-        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
     /// Dismisses the card for this episode. Any key, a click outside it, or
@@ -1450,23 +1431,6 @@ public final class PlayerController {
         #endif
     }
 
-    /// The phone's overflow `Menu` reports neither opening nor closing, so
-    /// the autohide cannot be held for exactly as long as it is up. Held for
-    /// a fixed window from the tap instead: without it the controls went at
-    /// 5s and took the open menu with them (measured: menu opened 3s after
-    /// the controls appeared, gone with the auto-hide at 5s), before the
-    /// second half of its rows could be scrolled to.
-    public func holdControlsForMenu() {
-        isMenuOpen = true
-        menuHoldTask?.cancel()
-        menuHoldTask = Task {
-            try? await Task.sleep(nanoseconds: 15_000_000_000)
-            guard !Task.isCancelled else { return }
-            isMenuOpen = false
-            showControlsBriefly()
-        }
-    }
-
     public var progressFraction: Double {
         guard duration > 0 else { return 0 }
         return currentTime / duration
@@ -1484,14 +1448,23 @@ public final class PlayerController {
         Self.formatTimestamp(seconds)
     }
 
-    /// Shared with the seek bar's hover tooltip, which has to spell a
-    /// position the viewer is only pointing at rather than one this object
-    /// holds.
-    public static func formatTimestamp(_ seconds: Double) -> String {
+    /// The one clock for every player and detail-page label. Without the
+    /// hours field a 2 h film read "121:40" in the bottom bar and "Resume
+    /// 95:12" on its page.
+    /// `padded` keeps the player bar's fixed-width "04:05"; prose such as
+    /// "Resume 4:05" reads it unpadded.
+    public nonisolated static func formatTimestamp(_ seconds: Double, padded: Bool = true) -> String {
         let total = Int(max(seconds, 0))
-        let m = total / 60
-        let s = total % 60
-        return String(format: "%02d:%02d", m, s)
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+        return String(format: padded ? "%02d:%02d" : "%d:%02d", m, s)
+    }
+
+    public nonisolated static let playbackSpeeds: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+
+    /// "1x", "1.25x", "0.5x". `%.2g` printed 1.25 as "1.2x".
+    public nonisolated static func speedLabel(_ rate: Double) -> String {
+        rate == rate.rounded() ? "\(Int(rate))x" : "\(rate)x"
     }
 }
 

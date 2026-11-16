@@ -622,18 +622,10 @@ private struct UpNextTab: View {
 
 
     /// TMDB ids are not AniList ids and the detail fetch is a different call,
-    /// so cinema rows cannot go through `openDetail`. `cinemaCatalog(forId:)`
-    /// is what knows whether an id is a film or a series.
+    /// so cinema rows cannot go through `openDetail`.
     private func openCinema(_ item: MediaCard.Item) {
         showDetail = true
-        Task {
-            await model.openCinemaDetail(
-                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
-                id: item.id,
-                title: item.title,
-                coverURL: item.coverImageURL
-            )
-        }
+        Task { await model.openCinemaDetail(item) }
     }
 
     private func open(_ id: Int64, _ title: String, _ cover: URL?, _ isManga: Bool) {
@@ -1247,14 +1239,7 @@ private struct LibraryTab: View {
     /// so cinema rows cannot go through `openDetail`.
     private func openCinema(_ item: MediaCard.Item) {
         showDetail = true
-        Task {
-            await model.openCinemaDetail(
-                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
-                id: item.id,
-                title: item.title,
-                coverURL: item.coverImageURL
-            )
-        }
+        Task { await model.openCinemaDetail(item) }
     }
 
     private func open(_ item: MediaCard.Item) {
@@ -1555,14 +1540,7 @@ private struct SearchTab: View {
     /// so cinema rows cannot go through `openDetail`.
     private func openCinema(_ item: MediaCard.Item) {
         showDetail = true
-        Task {
-            await model.openCinemaDetail(
-                catalog: item.catalog ?? model.cinemaCatalog(forId: item.id),
-                id: item.id,
-                title: item.title,
-                coverURL: item.coverImageURL
-            )
-        }
+        Task { await model.openCinemaDetail(item) }
     }
 
     private func open(_ item: MediaCard.Item) {

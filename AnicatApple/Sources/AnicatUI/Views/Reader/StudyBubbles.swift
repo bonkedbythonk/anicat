@@ -298,6 +298,7 @@ struct StudyTextPanel: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
+                .accessibilityLabel("Close study mode")
             }
             if let bubble {
                 // Long glosses run past any fixed height, and a panel that

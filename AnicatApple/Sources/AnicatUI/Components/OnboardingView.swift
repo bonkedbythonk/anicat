@@ -42,8 +42,6 @@ public struct OnboardingView: View {
         self.model = model
     }
 
-    private static let authorizeURL = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token")!
-
     /// How it works before anything else, and never filtered out. Every
     /// other step is a preference Settings can change later; the torrent
     /// swarm is the one thing a viewer cannot take back, since the first
@@ -354,7 +352,7 @@ public struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 16) {
                 numbered(1, "Authorize in your browser") {
                     Button {
-                        Platform.openExternal(Self.authorizeURL)
+                        Platform.openExternal(AppModel.aniListAuthorizeURL)
                         tokenFieldFocused = true
                     } label: {
                         // Secondary: step 2's Connect and the footer's

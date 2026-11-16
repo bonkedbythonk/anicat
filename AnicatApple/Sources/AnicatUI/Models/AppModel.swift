@@ -429,11 +429,9 @@ public final class AppModel {
     /// Cancelling this aborts whichever `resolveAndPlay` call is currently
     /// in flight — the Cancel button's target. `resolveStream` itself may
     /// keep running on the Rust side after this (the FFI call isn't
-    /// preemptible mid-flight), same trade-off `torrent/search.rs` already
-    /// makes when it abandons AnimeTosho's grace period rather than wait for
-    /// it: abandoning the *wait* is what matters to the viewer, not whether
-    /// the orphaned work on the other side of the FFI boundary stops
-    /// instantly too.
+    /// preemptible mid-flight): abandoning the *wait* is what matters to the
+    /// viewer, not whether the orphaned work on the other side of the FFI
+    /// boundary stops instantly too.
     public var activeResolveTask: Task<Void, Never>?
     /// Looks for another release made on the viewer's behalf when a file opens
     /// without the language asked for. See `AudioRecovery`.
@@ -539,8 +537,8 @@ public final class AppModel {
     // not spent on episodes nobody reaches. On a 24 min episode this is
     // 6 min of headroom.
     static let nextEpisodePreloadPct: Double = 75.0
-    // Same 85% line the Tauri build's `commands/playback.rs` uses for
-    // "watched" — kept in sync with it, not derived from anything else.
+    // Same 85% line as the engine's `WATCHED_FRACTION` (core/src/db/stats.rs),
+    // which the stats and history read; kept in sync by hand.
     static let watchedThresholdPct: Double = 85.0
     // How close to the real end counts as "the episode is over" for
     // auto-play-next. `eof-reached`/`playback-restart` are the obvious
@@ -639,7 +637,7 @@ public final class AppModel {
     /// It used to just read `trendingItems` directly, which is why switching
     /// Search's Anime/Manga/Novel toggle while browsing (no typed query, no
     /// filter) never changed anything: `trendingItems` is always anime,
-    /// always the same fixed 24 items `loadTrending()` fetched once for Home,
+    /// always the same fixed 24 items fetched once for Home,
     /// with no pagination at all. This is fetched through the same paginated
     /// `searchCatalog` path `search()` uses (an empty query + `TRENDING_DESC`
     /// sort), just kept in its own state so it doesn't collide with a real
@@ -858,6 +856,8 @@ public final class AppModel {
     /// Every downloaded chapter, for the Downloads page.
     public var offlineChapters: [FfiOfflineChapter] = []
     public var offlineBytes: UInt64 = 0
+    /// Only the newest `loadOfflineChapters` walk may write `offlineBytes`.
+    var offlineBytesGeneration = 0
     public var offlineCapBytes: UInt64 = 0
     /// What the offline library may hold, in gigabytes. `0` means no cap.
     /// Settings owns the control; the engine is told at launch and on change.
@@ -1080,7 +1080,6 @@ public final class AppModel {
     /// Initializes the headless Rust engine and opens the SQLite registry.
     public func initialize(anilistToken: String? = nil, tmdbKey: String? = nil) async {
         guard engine == nil else { return }
-        purgeStaleSpotlightIndexOnce()
 
         // Paints last-known home state before the engine has even finished
         // constructing, and skips the launch spinner entirely for a relaunch
@@ -1130,7 +1129,7 @@ public final class AppModel {
             applyOfflineLimit()
             // What is already on disk, from downloads made in earlier
             // sessions -- the engine's own map does not survive a relaunch.
-            loadDownloadedEpisodes()
+            await loadDownloadedEpisodes()
 
             let port = try await coreEngine.streamPort()
             print("Anicat Rust Engine ready! Dynamic stream server on port: \(port)")
@@ -1220,6 +1219,11 @@ public final class AppModel {
             print(errorMessage!)
         }
     }
+
+    /// Anicat's own AniList OAuth client, for every Connect button. One
+    /// copy once held 20822, a third-party app's id, and sent viewers
+    /// through someone else's client.
+    public nonisolated static let aniListAuthorizeURL = URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=20148&response_type=token")!
 
     /// Hands a pasted token to the running engine and reloads everything.
     ///

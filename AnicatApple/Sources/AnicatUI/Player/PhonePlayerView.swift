@@ -26,7 +26,6 @@ struct PhonePlayerView: View {
     let onClose: () -> Void
 
     static let miniBarHeight: CGFloat = 64
-    static let speeds: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
     @State private var audioTracks: [PlayerTrack] = []
     @State private var subtitleTracks: [PlayerTrack] = []
@@ -612,7 +611,7 @@ struct PhonePlayerView: View {
             .font(.system(size: 17, weight: .semibold))
 
         panelHeading("Speed")
-        panelSteps(Self.speeds.map { ($0, Self.speedLabel($0)) }, selected: controller.playbackRate) { rate in
+        panelSteps(PlayerController.playbackSpeeds.map { ($0, PlayerController.speedLabel($0)) }, selected: controller.playbackRate) { rate in
             storedSpeed = rate
             controller.setPlaybackRate(rate)
         }
@@ -1018,10 +1017,6 @@ struct PhonePlayerView: View {
         .allowsHitTesting(false)
     }
 
-    static func speedLabel(_ rate: Double) -> String {
-        rate == rate.rounded() ? "\(Int(rate))x" : "\(rate)x"
-    }
-
     private var audioSelection: Binding<String> {
         Binding(
             get: { audioTracks.first(where: \.isSelected)?.id ?? "" },
@@ -1172,7 +1167,7 @@ struct PhonePlayerView: View {
                     Text(PhonePlayerView.timestamp(position))
                     Spacer()
                     if controller.playbackRate != 1.0 {
-                        Text(PhonePlayerView.speedLabel(controller.playbackRate))
+                        Text(PlayerController.speedLabel(controller.playbackRate))
                             .foregroundStyle(.white)
                     }
                     Spacer()

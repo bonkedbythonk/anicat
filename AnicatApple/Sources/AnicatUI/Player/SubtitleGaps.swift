@@ -153,6 +153,8 @@ enum SubtitleGaps {
             .trimmingCharacters(in: .whitespaces)
     }
 
+    private static let italicTag = try! NSRegularExpression(pattern: #"\\i(\d?)(?![a-z])"#)
+
     /// Every visible character is set in italic, by the style or by `\i1`.
     /// A bare `\i` resets to the style's own setting.
     static func isWhollyItalic(_ text: String, styleItalic: Bool) -> Bool {
@@ -163,8 +165,7 @@ enum SubtitleGaps {
             let character = text[index]
             if character == "{", let close = text[index...].firstIndex(of: "}") {
                 let block = String(text[index...close])
-                let pattern = try! NSRegularExpression(pattern: #"\\i(\d?)(?![a-z])"#)
-                for match in pattern.matches(in: block, range: NSRange(block.startIndex..., in: block)) {
+                for match in italicTag.matches(in: block, range: NSRange(block.startIndex..., in: block)) {
                     let digit = Range(match.range(at: 1), in: block).map { String(block[$0]) } ?? ""
                     italic = digit.isEmpty ? styleItalic : digit == "1"
                 }

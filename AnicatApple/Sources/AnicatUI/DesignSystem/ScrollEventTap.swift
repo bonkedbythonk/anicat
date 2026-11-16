@@ -79,7 +79,9 @@ public final class ScrollEventTap {
     }
 
     private func deliver(_ cgEvent: CGEvent) {
-        guard NSApp.isActive, !handlers.isEmpty, let event = NSEvent(cgEvent: cgEvent) else { return }
+        // `NSApp` is nil in the test process, where a stray scroll event
+        // crashed `swift test` at this line.
+        guard let app = NSApp, app.isActive, !handlers.isEmpty, let event = NSEvent(cgEvent: cgEvent) else { return }
         // Debug only: in release this wrote a log line on every gesture.
         #if DEBUG
         if event.phase == .began { ScrollLagProbe.gestureBegan() }

@@ -170,6 +170,7 @@ struct TVDetailView: View {
     private func play(_ number: Int) {
         guard let details = model.selectedMediaDetails else { return }
         model.errorRetryAction = nil
+        model.activeResolveTask?.cancel()
         model.activeResolveTask = Task {
             do {
                 _ = try await model.resolveAndPlay(

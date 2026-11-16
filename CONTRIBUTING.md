@@ -8,7 +8,8 @@ useful contributions are clear bug reports and small, focused pull requests.
 Open an issue with the **Bug report** template. The things that make a report
 fixable:
 
-- **The app version** (Anicat > About Anicat) and your macOS version.
+- **The app version** (Anicat > About Anicat), and whether it is the Mac,
+  iPhone or Windows build, with its OS version.
 - **Which mode** you were in: Anime, Manga, Light novels, or Films and TV.
 - **The log.** Settings > Advanced > Reveal Log File opens
   `~/Library/Logs/Anicat/anicat.log`. Attach the part around the problem;
@@ -45,8 +46,9 @@ and [Rust](https://rustup.rs/) stable with the Apple targets:
 rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-tvos aarch64-apple-tvos-sim
 ```
 
-No mpv install: libmpv and FFmpeg come from [MPVKit](https://github.com/mpvkit/MPVKit)
-as SwiftPM binaries (about 1.7 GB on first resolve).
+No mpv install: libmpv and FFmpeg come from a fork of
+[MPVKit](https://github.com/mpvkit/MPVKit) as SwiftPM binaries (about 1.7 GB
+on first resolve).
 
 ```bash
 bash scripts/build-xcframework.sh   # after cloning, and after any change to core/src/ffi.rs
@@ -55,9 +57,11 @@ bash dev-run.sh                     # copies the binary into dist/Anicat.app and
 ```
 
 `scripts/package-anicat-macos-app.sh release` builds a standalone `.app` in
-`AnicatApple/dist/`. The iPhone and Apple TV apps are not released; build
-them from Xcode after `cd AnicatApple && xcodegen generate` (needs a full
-Xcode and [xcodegen](https://github.com/yonaskolb/XcodeGen)).
+`AnicatApple/dist/`. The iPhone and Apple TV apps build from Xcode after
+`cd AnicatApple && xcodegen generate` (needs a full Xcode and
+[xcodegen](https://github.com/yonaskolb/XcodeGen)); releases carry an
+unsigned iPhone `.ipa`, and no Apple TV build. The Windows build is the
+`server/` crate (`cd server && cargo test`).
 
 Stale bindings link fine and then call the wrong symbols at runtime, so rerun
 `build-xcframework.sh` whenever `core/src/ffi.rs` or a type it exports changes.
@@ -68,15 +72,19 @@ Run the checks CI runs:
 
 ```bash
 cd core && cargo test --lib && cargo clippy --lib --tests -- -D warnings
+cd server && cargo test && cargo clippy --all-targets -- -D warnings
 cd AnicatApple && swift build --product Anicat && swift test
+python3 scripts/generate-third-party-notices.py --check
 ```
 
-Three Swift test suites query the live AniList API and fail during its
-outages; that is not your change. If you touched a shared view, also confirm
-it still compiles for the iOS Simulator:
+Four Swift suites query the live AniList API; they skip unless
+`ANICAT_LIVE=1` is set, and fail during AniList outages when it is. If you
+touched a shared view, also confirm it still compiles for the iOS and tvOS
+Simulators, as CI does:
 
 ```bash
 cd AnicatApple && swift build --product AnicatUI --triple arm64-apple-ios18.0-simulator --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" --scratch-path .build-ios
+cd AnicatApple && swift build --product AnicatUI --triple arm64-apple-tvos18.0-simulator --sdk "$(xcrun --sdk appletvsimulator --show-sdk-path)" --scratch-path .build-tvos
 ```
 
 If your change touches `Cargo.lock`, regenerate the third-party notices with

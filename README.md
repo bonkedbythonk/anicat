@@ -4,11 +4,11 @@
     <img src="assets/branding/logo.png" alt="Anicat" width="140">
   </picture>
   <h1>Anicat</h1>
-  <p>Watch anime, read manga and light novels, and keep your AniList up to date. A native Mac app.</p>
+  <p>Watch anime, read manga and light novels, and keep your AniList up to date. A native Mac app, with Windows and iPhone builds.</p>
 
   <p>
     <img src="https://img.shields.io/github/v/release/bonkedbythonk/anicat?style=flat-square&label=latest" alt="Latest Release">
-    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform">
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20iPhone-lightgrey?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License">
   </p>
 
@@ -20,7 +20,7 @@
 - Search a show, press play. No sites, no mirrors, no waiting for a download.
 - Progress syncs to [AniList](https://anilist.co) on its own.
 - Skip openings and endings, auto-play the next episode, optional upscaling.
-- Manga reader (MangaDex) and light novel reader.
+- Manga reader (MangaDex, MangaKatana) and light novel reader.
 - Films and TV too.
 
 ## Screenshots
@@ -53,6 +53,11 @@ irm https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/instal
 ```
 
 Run the same line again to update.
+
+**iPhone** (iOS 18 or later): each stable release on
+[Releases](https://github.com/bonkedbythonk/anicat/releases) carries an
+unsigned `.ipa`. Installing it needs a sideloading tool such as SideStore,
+and a free Apple ID's signature lasts seven days.
 
 <details>
 <summary>Other ways to install</summary>

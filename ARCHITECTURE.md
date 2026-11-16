@@ -1,14 +1,15 @@
 # Anicat Architecture
 
 Anicat is a native Apple app for streaming, reading, and tracking anime, manga
-and light novels against [AniList](https://anilist.co), with films and TV
-against [TMDB](https://themoviedb.org) on the way. It is a Swift package
+and light novels against [AniList](https://anilist.co), and films and TV
+against [TMDB](https://themoviedb.org). It is a Swift package
 (`AnicatApple/`) over a headless Rust engine (`core/`), joined by
 [UniFFI](https://mozilla.github.io/uniffi-rs/). Video plays through libmpv
 inside the process.
 
 The Tauri/React app that preceded it, and the Python scraper that served it,
-were removed in September 2026; the `legacy/tauri` tag marks their last commit.
+were removed in September 2026; their history lives in a separate archive
+repository, not in this one.
 
 `Package.swift` declares macOS 15, iOS 18 and tvOS 18. All three build: the
 macOS app through SwiftPM plus `scripts/package-anicat-macos-app.sh`, and the
@@ -24,8 +25,9 @@ Remote -- `.card` buttons for posters, `focusSection` per shelf,
 `onMoveCommand` for seeking, `onExitCommand` for Menu. Anime and cinema
 only; no readers, no Schedule, Stats or History. What the tvOS SDK lacks
 (WebKit, `DragGesture`, `Slider`, haptics, the pasteboard, notification
-text) is gated at the few shared sites that used it. Only the macOS build
-is released; there is no distributed `.ipa` and no TV build outside Xcode.
+text) is gated at the few shared sites that used it. Releases carry the
+macOS app, an unsigned iPhone `.ipa` for sideloading, and the Windows build
+(below); there is no TV build outside Xcode.
 
 CI builds all three on `macos-26`. The runner's Xcode is load-bearing rather than
 incidental: on `macos-15` the older Swift refuses main-actor writes inside
@@ -41,7 +43,7 @@ absent from its SDK whatever `if #available` says.
  │  Anicat          the executable; window, menu bar, Handoff   │
  │  AnicatUI        SwiftUI views, AppModel, player chrome,     │
  │                  caches, design system, continuity           │
- │  MPVKit-GPL      libmpv + FFmpeg, static xcframeworks         │
+ │  MPVKit          libmpv + FFmpeg, static xcframeworks        │
  │  AnicatCoreKit   generated Swift bindings + Sendable shims   │
  └───────────────┬────────────────────────────┬─────────────────┘
                  │ UniFFI (sync + async calls) │ wid = CAMetalLayer
@@ -50,8 +52,9 @@ absent from its SDK whatever `if #available` says.
  │                                    │   │  Vulkan via MoltenVK │
  │  ffi.rs      AnicatEngine surface  │   │  hwdec, Anime4K      │
  │  catalog/    AniList, TMDB, cache  │   └───▲──────────────────┘
- │  reader/     MangaDex, MangaKatana │       │ HTTP range reads
- │              Syosetu               │       │ (loopback, OS port)
+ │  reader/     MangaDex, MangaKatana,│       │ HTTP range reads
+ │              Sen Manga, Syosetu,   │       │ (loopback, OS port)
+ │              Lnori                 │       │
  │  torrent/    search, layout,       │   ┌───┴──────────────────┐
  │              librqbit session,  ───┼──▶│  torrent/stream.rs   │
  │              seadex, cinema        │   │  range server        │
@@ -91,11 +94,11 @@ absent from its SDK whatever `if #available` says.
   signature that wrote it, and a debug binary is re-signed on every build.
 - **Design system** (`DesignSystem/`): `SumiTheme` tokens resolved through
   `ThemeStore` (Ink & Index, Paper, OLED, follow system; `ThemedRoot`
-  reroots the tree on a switch), bundled Geist and IBM Plex Mono,
+  reroots the tree on a switch), bundled Geist (reader body face) and the
+  Rajdhani and Shippori Mincho skin headings,
   `CachedAsyncImage` (decodes at display size off the main actor),
   `MotionPolicy` (springs that collapse to fades under Reduce Motion),
-  `Haptics` (gesture and event haptics),
-  an FPS and main-thread-stall HUD.
+  `Haptics` (gesture and event haptics).
 - **Scrolling** (`DesignSystem/ResponsiveScrollingPatch.swift`,
   `ScrollEventTap.swift`): SwiftUI's `HostingScrollView` opts out of
   AppKit's responsive scrolling and scrolls at every second refresh, so the
@@ -166,7 +169,9 @@ lives here, and nothing here knows there is a UI.
   HTML fallback for titles MangaDex has matched but has nothing readable
   under, and as the fill for a sparse feed (a licensed title keeps only its
   newest simulpub chapters on MangaDex; the rest of the run is merged in
-  from MangaKatana, deduplicated by chapter number). Syosetu for web novels.
+  from MangaKatana, deduplicated by chapter number). Sen Manga for raw
+  Japanese chapters (study mode). Syosetu for pasted web novels; Lnori for
+  official light-novel volumes.
 - **`torrent/`** — the anime source. Candidates come from two independent
   indexes fired as one wave (SubsPlease, Nyaa RSS) plus SeaDex's
   curated per-entry pick. `layout.rs` decides which file inside a pack is the
@@ -220,5 +225,5 @@ effort, and less tested than the Mac app.
   it, which is what gives the process Dock and Cmd-Tab presence.
 - `scripts/package-anicat-macos-app.sh` produces a distributable `.app` with
   libmpv's dylib closure vendored in. `scripts/bump-version.sh` writes
-  `version.txt` and `core/Cargo.toml`; the packaging scripts stamp the bundle
+  `version.txt`, `core/Cargo.toml` and the iOS/TV versions in `project.yml`; the packaging scripts stamp the bundle
   version from `version.txt`.

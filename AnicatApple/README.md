@@ -1,6 +1,7 @@
 # AnicatApple
 
-The Mac app: a Swift package over the Rust engine in `../core`.
+The Mac, iPhone and Apple TV apps: a Swift package over the Rust engine in
+`../core`. The iPhone and TV targets live in `project.yml` (`xcodegen generate`).
 
 ## Build
 
@@ -19,4 +20,5 @@ cd AnicatApple && swift build --product Anicat
 cd AnicatApple && swift test
 ```
 
-A few suites hit the live AniList API and fail during its outages.
+Four suites hit the live AniList API. They skip unless `ANICAT_LIVE=1` is set,
+and fail during AniList outages when it is.

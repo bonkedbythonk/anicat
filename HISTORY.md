@@ -67,3 +67,14 @@ scraper, and `legacy/tauri` was tagged so the old app stays reachable.
 
 Cinema mode (films and TV from TMDB), an iPhone target, and reading progress
 for manga followed over the days after.
+
+## Fresh repository, September 2026 -- v1.0.0
+
+**2026-09-16** · `23b4b097` *initial commit: Anicat 1.0.0*
+
+The native app moved to a new repository under the same name, and the
+version count restarted at 1.0.0. Everything above, the Tauri app and the
+`legacy/tauri` tag included, lives in a separate archive repository; the
+hashes in this file point there. Since then: a Windows build (the same
+engine behind a local page and an external mpv), an unsigned iPhone `.ipa`
+on stable releases, an Apple TV target and Play on TV.

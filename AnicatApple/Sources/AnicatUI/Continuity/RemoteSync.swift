@@ -16,11 +16,25 @@ enum RemoteSync {
     /// handed an engine: both ends of this protocol run inside the one app,
     /// and threading an engine through the Network callbacks would mean
     /// keeping a second reference alive across a connection's lifetime.
-    private static var engine: AnicatEngine? { AppModel.shared?.engine }
+    ///
+    /// Runs a registry call on `engineIOQueue`, never on main. Both ends call
+    /// these from their frame handlers, and a synchronous FFI call there
+    /// waits on the registry mutex behind every progress write already
+    /// queued, freezing the UI for as long as that queue takes to drain.
+    /// The queue is serial, so a merge followed by an export still reads the
+    /// rows that merge wrote.
+    private static func onEngineQueue<T: Sendable>(
+        _ work: @escaping @Sendable (AnicatEngine) -> T,
+        orElse fallback: T
+    ) async -> T {
+        guard let model = AppModel.shared, let engine = model.engine else { return fallback }
+        return await withCheckedContinuation { continuation in
+            model.engineIOQueue.async { continuation.resume(returning: work(engine)) }
+        }
+    }
 
-    static func export() -> [SyncRelease] {
-        guard let engine else { return [] }
-        guard let rows = try? engine.exportResolvedReleases() else { return [] }
+    static func export() async -> [SyncRelease] {
+        let rows = await onEngineQueue({ try? $0.exportResolvedReleases() }, orElse: nil) ?? []
         return rows.map {
             SyncRelease(
                 catalog: catalogName($0.catalog),
@@ -40,8 +54,8 @@ enum RemoteSync {
     /// Newest `resolvedAt` wins inside the engine, so this is safe in both
     /// directions and safe to repeat.
     @discardableResult
-    static func merge(_ incoming: [SyncRelease]) -> UInt32 {
-        guard let engine, !incoming.isEmpty else { return 0 }
+    static func merge(_ incoming: [SyncRelease]) async -> UInt32 {
+        guard !incoming.isEmpty else { return 0 }
         let mapped = incoming.compactMap { row -> FfiResolvedRelease? in
             // A catalog name this build cannot place is dropped rather than
             // guessed: the name says which id space `catalogId` is in.
@@ -58,7 +72,7 @@ enum RemoteSync {
                 resolvedAt: row.resolvedAt
             )
         }
-        return (try? engine.importResolvedReleases(rows: mapped)) ?? 0
+        return await onEngineQueue({ (try? $0.importResolvedReleases(rows: mapped)) ?? 0 }, orElse: 0)
     }
 
     // The enum travels as the same string the database column holds, not as

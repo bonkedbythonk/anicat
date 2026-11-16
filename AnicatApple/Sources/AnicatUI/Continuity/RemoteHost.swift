@@ -32,6 +32,11 @@ public final class RemoteHost {
     }
 
     public private(set) var pendingPairing: PairingRequest?
+    /// The one session `pendingPairing` was raised for. By `deviceId` the
+    /// Allow click went to whichever session in dictionary order carried
+    /// that id, and the id travels in clear, so a second connection
+    /// repeating it could be the one approved.
+    private var pendingKey: ObjectIdentifier?
     /// The name of whichever remote is currently attached, for the status
     /// row in Settings. Nil when nothing is controlling this Mac.
     public private(set) var attachedRemoteName: String?
@@ -131,6 +136,9 @@ public final class RemoteHost {
     private func handle(_ frame: RemoteFrame, from session: Session, key: ObjectIdentifier) {
         switch frame {
         case .hello(let deviceId, let deviceName, let nonce, let authKey):
+            // One hello per connection: a second could swap the key or the
+            // name under an alert that is already showing.
+            guard session.deviceId == nil else { return }
             session.deviceId = deviceId
             session.deviceName = deviceName
             session.phoneKey = authKey
@@ -149,6 +157,14 @@ public final class RemoteHost {
             } else if authKey != nil {
                 // Unknown, or a phone that lost its secret: ask the person at
                 // this Mac. Nothing it sends is acted on before they answer.
+                // A request already showing is not replaced: swapping one in
+                // just before the click would put the approval on a device
+                // the person never saw named.
+                guard pendingKey == nil else {
+                    refuse(session)
+                    return
+                }
+                pendingKey = key
                 pendingPairing = PairingRequest(id: deviceId, deviceName: deviceName)
             } else {
                 // No key to pair with: a build from before this handshake.
@@ -194,8 +210,14 @@ public final class RemoteHost {
             // including what just arrived. The other device drops its own
             // rows back on the floor as older-or-equal, so one round trip
             // leaves both sides holding the same set.
-            RemoteSync.merge(rows)
-            session.connection.sendFrame(.syncReply(RemoteSync.export()))
+            Task {
+                await RemoteSync.merge(rows)
+                let reply = await RemoteSync.export()
+                // Both wait on the engine queue; a phone unpaired or gone
+                // meanwhile must not be sent the table.
+                guard self.sessions[key] === session, session.isApproved else { return }
+                session.connection.sendFrame(.syncReply(reply))
+            }
         case .helloAck, .challenge, .hostInfo, .tracks, .state, .syncReply:
             // Host-to-controller frames. A peer sending them is confused;
             // ignoring is cheaper than disconnecting over it.
@@ -206,16 +228,20 @@ public final class RemoteHost {
     private func drop(_ key: ObjectIdentifier) {
         guard let session = sessions.removeValue(forKey: key) else { return }
         session.connection.cancel()
-        if pendingPairing?.id == session.deviceId { pendingPairing = nil }
+        if pendingKey == key {
+            pendingKey = nil
+            pendingPairing = nil
+        }
         refreshAttachment()
     }
 
     // MARK: - Pairing
 
     public func answerPairing(approved: Bool) {
-        guard let request = pendingPairing else { return }
+        guard let request = pendingPairing, let sessionKey = pendingKey else { return }
         pendingPairing = nil
-        guard let session = sessions.values.first(where: { $0.deviceId == request.id }) else { return }
+        pendingKey = nil
+        guard let session = sessions[sessionKey] else { return }
         guard approved, let phoneKey = session.phoneKey else {
             refuse(session)
             return

@@ -81,7 +81,7 @@ public final class RemoteClient {
         (UserDefaults.standard.dictionary(forKey: hostSecretsKey) as? [String: String])?[nodeId]
     }
 
-    private static func store(secret: String, for nodeId: String) {
+    private static func store(secret: String?, for nodeId: String) {
         var secrets = UserDefaults.standard.dictionary(forKey: hostSecretsKey) as? [String: String] ?? [:]
         secrets[nodeId] = secret
         UserDefaults.standard.set(secrets, forKey: hostSecretsKey)
@@ -319,13 +319,26 @@ public final class RemoteClient {
                 return
             }
             // First pairing: the Mac's public half arrives here, and the same
-            // secret falls out of it on both sides.
-            if let hostKey, let pairKey, let hostNodeId,
+            // secret falls out of it on both sides. Only when this phone held
+            // no secret and so set no challenge: otherwise anything wearing
+            // the paired Mac's Bonjour name could skip the proof, answer with
+            // a key of its own, overwrite the real secret and be handed the
+            // queued commands and the sync table.
+            if myNonce == nil, let hostKey, let pairKey, let hostNodeId,
                let secret = RemoteAuth.secret(mine: pairKey, theirs: hostKey) {
                 Self.store(secret: secret, for: hostNodeId)
                 markAuthenticated()
             }
             guard isAuthenticated else {
+                // A fresh key where a proof was owed is also what the real
+                // Mac sends after "Forget all" there. Kept, the dead secret
+                // left this host in `knownHosts`, every discovery change
+                // redialled it and raised the Mac's approval alert again,
+                // and the phone has no forget of its own to end that. Dropped,
+                // the next tap pairs from scratch.
+                if myNonce != nil, hostKey != nil, let hostNodeId {
+                    Self.store(secret: nil, for: hostNodeId)
+                }
                 disconnect()
                 status = .failed("This Mac could not prove it is the one you paired with")
                 return
@@ -337,7 +350,14 @@ public final class RemoteClient {
                 // Every connection syncs, not just the quiet ones: opening
                 // the remote at all means both apps are up and on the same
                 // Wi-Fi, which is exactly the moment this is free.
-                connection.sendFrame(.syncOffer(RemoteSync.export()))
+                Task {
+                    let rows = await RemoteSync.export()
+                    // The export waits on the engine queue; the connection
+                    // may have been dropped or replaced by another dial
+                    // meanwhile, and the table must not reach that one.
+                    guard self.connection === connection, self.isAuthenticated else { return }
+                    connection.sendFrame(.syncOffer(rows))
+                }
             }
             queued.removeAll()
         case .hostInfo(let version, let features):
@@ -353,7 +373,7 @@ public final class RemoteClient {
             // point of the activity is being reachable with the app closed.
             #endif
         case .syncReply(let rows):
-            RemoteSync.merge(rows)
+            Task { await RemoteSync.merge(rows) }
             if isQuietSync { disconnect() }
         case .hello, .proof, .command, .syncOffer:
             break

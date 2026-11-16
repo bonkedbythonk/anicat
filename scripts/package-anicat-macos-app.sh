@@ -199,6 +199,47 @@ if [ -d "$PACKAGED_RB/Symbols.xcassets" ]; then
     fi
 fi
 
+# Shortcuts and Siri list an app's App Intents only from
+# Contents/Resources/Metadata.appintents, which Xcode's ExtractAppIntentsMetadata
+# step writes and `swift build` never does: the intents compiled into every
+# build and Shortcuts showed none of them. This is that step's invocation,
+# copied from the iOS xcodebuild log, run on AnicatUI (where the intents live)
+# straight into the app. One pass rather than Xcode's module-then-app pair:
+# the app pass drops the AppShortcutsProvider when it sits in a dependency
+# (the iOS app's extract.actionsdata has "autoShortcuts": []).
+# It needs the compiler's .swiftconstvalues, which Xcode 27's SwiftPM emits
+# and the older native build system (Xcode 26, the CI runner) does not; there
+# the bundle ships without intents, as every build did before this.
+UI_OBJ="$BUILD_DIR/../../Intermediates.noindex/AnicatApple.build/$(basename "$BUILD_DIR")/AnicatUI-t.build/Objects-normal/arm64"
+if [ -f "$UI_OBJ/AnicatUI-OutputFileMap.json" ]; then
+    # .build is shared by every worktree, so these intermediates belong to
+    # whichever tree built last; refuse to describe another tree's intents.
+    if ! grep -qx "$SRC/Sources/AnicatUI/System/AnicatAppIntents.swift" "$UI_OBJ/AnicatUI.SwiftFileList"; then
+        echo "package-anicat-macos-app: AnicatUI intermediates are not from $SRC (another worktree built since)" >&2
+        exit 1
+    fi
+    echo "=== Extracting App Intents metadata ==="
+    # From the output file map, not a glob: the directory also holds stale
+    # .swiftconstvalues for files that no longer exist (174 files, 173 sources).
+    jq -r '.[]."const-values" // empty' "$UI_OBJ/AnicatUI-OutputFileMap.json" > "$BUILD_DIR/AnicatUI.SwiftConstValuesFileList"
+    xcrun appintentsmetadataprocessor \
+        --toolchain-dir "$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain" \
+        --module-name AnicatUI --bundle-identifier com.anicat.app \
+        --sdk-root "$(xcrun --sdk macosx --show-sdk-path)" \
+        --xcode-version "$(xcodebuild -version | awk '/Build version/ {print $3}')" \
+        --platform-family macOS --deployment-target 15.0 --target-triple arm64-apple-macos15.0 \
+        --output "$APP/Contents/Resources" --binary-file "$APP/Contents/MacOS/$EXE_NAME" \
+        --source-file-list "$UI_OBJ/AnicatUI.SwiftFileList" \
+        --swift-const-vals-list "$BUILD_DIR/AnicatUI.SwiftConstValuesFileList" \
+        --force --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization
+    if [ ! -f "$APP/Contents/Resources/Metadata.appintents/extract.actionsdata" ]; then
+        echo "package-anicat-macos-app: appintentsmetadataprocessor wrote no Metadata.appintents" >&2
+        exit 1
+    fi
+else
+    echo "package-anicat-macos-app: warning: no .swiftconstvalues from this SwiftPM; Shortcuts will not list Anicat's intents" >&2
+fi
+
 # Ad-hoc unless told otherwise. macOS keys the privacy database to the code
 # signature, and an ad-hoc one gets a fresh cdhash on every build -- so every
 # rebuild looked like a different app and re-asked for Documents and

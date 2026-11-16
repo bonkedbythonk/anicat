@@ -109,8 +109,8 @@ absent from its SDK whatever `if #available` says.
   listen-only CGEvent tap instead. `FullScreenGuard` serialises fullscreen
   toggles so two inside one transition cannot wedge the window.
 - **System** (`System/`): `anicat://` deep links (`DeepLink`), App Intents
-  (compiled, but Shortcuts lists them only once an Xcode target runs the
-  metadata extractor), all routed through `AppModel.handleDeepLink`.
+  (the package script runs Xcode's metadata extractor so Shortcuts lists
+  them; needs Xcode 27's SwiftPM, and `dev-run.sh` bundles go without), all routed through `AppModel.handleDeepLink`.
 - **People and studios** (`Models/AppModel+People.swift`, `PersonPageView`):
   character, staff, thread and studio pages render inside the content
   column on a stack above the detail page; Escape, swipe back and the mouse

@@ -32,7 +32,7 @@ struct HomeSectionView: View {
     /// appended when there are any, matching HomeView.tsx.
     private var upNextSubtitle: String {
         let inProgress = model.upNextItems.count
-        let new = model.upNextItems.filter(\.hasNewEpisode).count
+        let new = model.upNextItems.lazy.filter(\.hasNewEpisode).count
         var out = "\(inProgress) in progress"
         if new > 0 {
             out += " · \(new) new episode\(new == 1 ? "" : "s")"
@@ -131,7 +131,7 @@ struct HomeSectionView: View {
                     NextSeasonShelf(model: model, onOpenDetail: onOpenDetail)
                 }
 
-                if !model.scheduleItems.filter({ $0.isWatching }).isEmpty {
+                if model.scheduleItems.contains(where: \.isWatching) {
                     WeekStrip(items: model.scheduleItems) { item in
                         onOpenDetail(item.id, item.title, item.coverImageURL, false, nil)
                     }

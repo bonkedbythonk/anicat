@@ -71,8 +71,7 @@ public struct WeekStrip: View {
     }
 
     public var body: some View {
-        let watching = items.filter { $0.isWatching }
-        if watching.isEmpty {
+        if !items.contains(where: \.isWatching) {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 12) {

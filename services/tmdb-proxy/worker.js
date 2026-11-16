@@ -133,15 +133,22 @@ export default {
     // anything on this account, not even at a limit of one request per ten
     // seconds (five in a row, all answered, 2026-09-22). No binding (the
     // tests, a deploy without it) means no limit rather than an outage.
-    const ip = request.headers.get("cf-connecting-ip") || "unknown";
+    const ip = limiterKey(request.headers.get("cf-connecting-ip") || "unknown");
     const isSearch = url.pathname.startsWith("/3/search/");
     if (env.LIMITER) {
       const bucket = isSearch ? LIMITS.search : LIMITS.any;
-      const stub = env.LIMITER.get(env.LIMITER.idFromName(ip));
-      const verdict = await stub.fetch(
-        `https://limiter/hit?bucket=${bucket.name}&limit=${bucket.limit}&period=${bucket.periodMs}`,
-      );
-      if (verdict.status === 429) {
+      // A Durable Object error or an exhausted DO quota must not become a
+      // 500 for every viewer: the limiter is a brake, so it fails open.
+      let verdict = null;
+      try {
+        const stub = env.LIMITER.get(env.LIMITER.idFromName(ip));
+        verdict = await stub.fetch(
+          `https://limiter/hit?bucket=${bucket.name}&limit=${bucket.limit}&period=${bucket.periodMs}`,
+        );
+      } catch (e) {
+        console.warn("limiter unavailable", e);
+      }
+      if (verdict && verdict.status === 429) {
         // The app's TMDB client parks every caller for the Retry-After it
         // names (catalog/tmdb/client.rs), so this slows it rather than
         // breaking a page.
@@ -211,3 +218,15 @@ export default {
     });
   },
 };
+
+/** The rate-limit key for a client address. An IPv6 client is handed a
+ * whole /64 and can rotate through it at will, so a per-address count lets
+ * one machine spend the account's quota; the first four groups name it. */
+export function limiterKey(ip) {
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups = [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+  return groups.slice(0, 4).map((g) => g.toLowerCase().replace(/^0+(?=.)/, "")).join(":") + "::/64";
+}

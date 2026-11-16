@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import worker, { RateLimiter } from "./worker.js";
+import worker, { RateLimiter, limiterKey } from "./worker.js";
 
 /** Captures the upstream request the worker would have made. */
 function stubFetch() {
@@ -200,4 +200,30 @@ test("the limiter's window resets after its period", async () => {
   assert.equal((await hit()).status, 429);
   await new Promise((r) => setTimeout(r, 60));
   assert.equal((await hit()).status, 204);
+});
+
+test("one IPv6 /64 shares a limiter key; IPv4 is per address", () => {
+  assert.equal(limiterKey("203.0.113.7"), "203.0.113.7");
+  assert.equal(limiterKey("2001:db8:abcd:12:1:2:3:4"), "2001:db8:abcd:12::/64");
+  assert.equal(limiterKey("2001:db8:abcd:12::ffff"), "2001:db8:abcd:12::/64");
+  assert.equal(limiterKey("2001:DB8::1"), "2001:db8:0:0::/64");
+});
+
+test("a failing limiter lets the request through", async () => {
+  const env = {
+    TMDB_KEY: "k",
+    LIMITER: { idFromName: () => "id", get: () => ({ fetch: async () => { throw new Error("quota"); } }) },
+  };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const res = await worker.fetch(
+      new Request("https://proxy/3/movie/popular", { headers: { "x-anicat-client": "anicat" } }),
+      env,
+      { waitUntil() {} },
+    );
+    assert.notEqual(res.status, 500);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

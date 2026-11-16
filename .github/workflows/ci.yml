@@ -93,6 +93,12 @@ jobs:
         working-directory: AnicatApple
         run: swift build --product Anicat
 
+      # Releases are built optimised, and an expression that type-checked in
+      # debug has failed to compile under -O; the debug build above passes it.
+      - name: swift build (release)
+        working-directory: AnicatApple
+        run: swift build -c release --product Anicat
+
       # AnicatUI compiles for the iOS Simulator since 2026-09-06 and has to
       # stay that way; AppKit leaking into a shared view only shows up here.
       - name: swift build (iOS Simulator)
@@ -187,6 +193,12 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: server -> target
+
+      # The only place the `cfg(windows)` code (job object, installer) is
+      # linted: clippy on a Mac never compiles it.
+      - name: cargo clippy --locked
+        working-directory: server
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: cargo test --locked
         working-directory: server

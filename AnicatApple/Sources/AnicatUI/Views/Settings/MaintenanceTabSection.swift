@@ -279,7 +279,7 @@ struct MaintenanceTabSection: View {
                     }
                 }
             } message: {
-                Text("Your Films and TV list, watch history and resume positions, remembered releases and per-title preferences are deleted from this Mac. Your list on AniList is not changed. This cannot be undone.")
+                Text("Your Films and TV list, watch and reading history, resume positions, remembered and rejected releases, skip timings and per-title preferences are deleted from this Mac. Downloads stay. Your list on AniList is not changed. This cannot be undone.")
             }
 
             Button {

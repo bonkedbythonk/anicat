@@ -301,8 +301,9 @@ extension AppModel {
         }
     }
 
-    /// Wipes resume positions, provider overrides, and the offline list
-    /// mirror. Settings' "Clear Local Registry" action.
+    /// Wipes what the registry learned (history, resume positions, release
+    /// picks, skip timings) and keeps the rows that index downloaded files.
+    /// Settings' "Clear Local Registry" action.
     public func clearLocalRegistry() async -> Bool {
         guard let engine else { return false }
         do {

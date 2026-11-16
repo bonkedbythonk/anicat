@@ -193,6 +193,13 @@ targets:
         CFBundleDisplayName: Anicat
         CFBundleShortVersionString: 1.1.0
         CFBundleVersion: "1"
+        # Playback keeps going while another app has the screen? No: a TV
+        # has no pocket. What the audio background mode buys here is that
+        # the AVAudioSession survives the app being sent to the background
+        # by a Siri interruption, which is the same session teardown the
+        # phone hits on lock.
+        UIBackgroundModes:
+          - audio
         # See the iOS target: librqbit talks to peers on the local subnet
         # and BonjourDiscovery advertises `_anicat-stream._tcp`; tvOS
         # refuses both silently without the declaration.

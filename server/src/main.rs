@@ -120,6 +120,12 @@ fn main() {
         let http = reqwest::Client::builder()
             // GitHub's API refuses requests with no User-Agent.
             .user_agent(format!("Anicat-Server/{} (+https://github.com/bonkedbythonk/anicat)", version::current()))
+            // reqwest has no default timeout and `/api/version` awaits the
+            // release check inline, so a GitHub connection that stalls would
+            // hold the page's request open with no end. Aniskip sets its own
+            // shorter per-request limit.
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(20))
             .build()
             .expect("reqwest client");
         let prefs = Arc::new(player::prefs::PrefsStore::load(&data_dir));

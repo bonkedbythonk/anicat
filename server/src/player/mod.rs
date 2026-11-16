@@ -5,7 +5,7 @@
 mod aniskip;
 mod ipc;
 mod mpv;
-mod policy;
+pub mod policy;
 pub mod prefs;
 mod proc;
 pub mod routes;
@@ -23,7 +23,7 @@ use prefs::{Prefs, PrefsPatch, PrefsStore};
 /// Past this fraction a recorded position replays from the start. Same 85%
 /// the watched mark uses; resuming at 23:40 of 24:00 put a rewatch into the
 /// credits and straight into auto-next (`AppModel.resolveAndPlay`).
-const REPLAY_FROM_START_FRACTION: f64 = 0.85;
+const REPLAY_FROM_START_FRACTION: f64 = anicat_core::db::stats::WATCHED_FRACTION;
 
 /// Where a play of an episode starts, and its recorded duration: shared by
 /// `POST /api/play` and the next and previous keys in mpv.
@@ -60,9 +60,6 @@ pub struct PlayRequest {
     pub prefer_dub: bool,
     /// Where to start, in seconds; 0 for the beginning.
     pub start_seconds: f64,
-    /// The recorded duration, when there is one.
-    #[allow(dead_code)] // mpv reports the real one as soon as the file loads
-    pub duration_seconds: Option<f64>,
 }
 
 /// `GET /api/player`. The page codes against these exact field names.

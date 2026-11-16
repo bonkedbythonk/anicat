@@ -75,7 +75,6 @@ impl Writer {
         .await
     }
 
-    #[allow(dead_code)] // the caller is wave 2's playback tick handler
     pub async fn record_progress(
         &self,
         catalog: FfiCatalog,

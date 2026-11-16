@@ -1,5 +1,4 @@
-//! What every route and the player share. Wave 2 (player loop, tray, page)
-//! builds on this; keep its fields stable.
+//! What every route and the player share.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -20,8 +19,10 @@ pub struct AppState {
     pub port: u16,
     /// Whether stdout and stderr were redirected into `anicat.log`.
     pub log_redirected: bool,
-    /// The token the engine holds. The engine can take one but not report
-    /// whether it has one, and the page needs to know which state to draw.
+    /// The token the engine holds. `AnicatEngine` can take one but exposes
+    /// no way to read it or ask whether it has one, and the page needs to
+    /// know which state to draw; `set_token` also restores the previous
+    /// token when AniList rejects a pasted one.
     pub token: Arc<Mutex<Option<String>>>,
     /// For the GitHub release check; core's client is private to it.
     pub http: reqwest::Client,

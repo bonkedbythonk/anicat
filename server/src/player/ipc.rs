@@ -179,3 +179,50 @@ async fn open(
     let (r, w) = tokio::io::split(client);
     Ok((Box::new(r), Box::new(w)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A client over an in-memory pipe, and the far end playing mpv.
+    fn pair() -> (IpcClient, mpsc::UnboundedReceiver<Value>, BufReader<tokio::io::DuplexStream>, tokio::io::DuplexStream) {
+        let (client_read, mpv_write) = tokio::io::duplex(4096);
+        let (client_write, mpv_read) = tokio::io::duplex(4096);
+        let (client, events) = IpcClient::start(Box::new(client_read), Box::new(client_write));
+        (client, events, BufReader::new(mpv_read), mpv_write)
+    }
+
+    async fn request_id(mpv_read: &mut BufReader<tokio::io::DuplexStream>) -> u64 {
+        let mut line = String::new();
+        mpv_read.read_line(&mut line).await.unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()["request_id"].as_u64().unwrap()
+    }
+
+    #[tokio::test]
+    async fn replies_reach_their_command_and_events_the_receiver() {
+        let (client, mut events, mut mpv_read, mut mpv_write) = pair();
+        let first = tokio::spawn({
+            let client = client.clone();
+            async move { client.command(json!(["get_property", "pause"])).await }
+        });
+        let first_id = request_id(&mut mpv_read).await;
+        let second = tokio::spawn({
+            let client = client.clone();
+            async move { client.command(json!(["seek", "x"])).await }
+        });
+        let second_id = request_id(&mut mpv_read).await;
+
+        // Out of order, with an event and a garbage line between them.
+        let reply = format!(
+            "{{\"request_id\":{second_id},\"error\":\"invalid parameter\"}}\n\
+             {{\"event\":\"file-loaded\"}}\n\
+             not json\n\
+             {{\"request_id\":{first_id},\"error\":\"success\",\"data\":true}}\n"
+        );
+        mpv_write.write_all(reply.as_bytes()).await.unwrap();
+
+        assert_eq!(first.await.unwrap(), Ok(Value::Bool(true)));
+        assert_eq!(second.await.unwrap(), Err("invalid parameter".to_string()));
+        assert_eq!(events.recv().await.unwrap()["event"], "file-loaded");
+    }
+}

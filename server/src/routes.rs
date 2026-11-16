@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use anicat_core::ffi::{FfiCatalog, SearchFilters, StreamRequest};
 
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult};
+use crate::player::policy::list_entry_update;
 use crate::player::PlayRequest;
 use crate::state::AppState;
 
@@ -308,7 +309,6 @@ async fn play(State(s): State<AppState>, ApiJson(b): ApiJson<PlayBody>) -> ApiRe
         title: b.title,
         prefer_dub: b.prefer_dub,
         start_seconds: start,
-        duration_seconds: duration,
     };
     s.player.play(&handle, &request).await.map_err(ApiError::internal)?;
     Ok(Json(json!({
@@ -381,17 +381,26 @@ struct WatchedBody {
     episode: i64,
 }
 
-/// Marks the episode finished locally, then advances AniList's progress to
-/// it when signed in. Both halves: the local one alone leaves AniList
-/// behind, the AniList one alone leaves Up Next offering the episode again.
+/// Marks the episode finished locally, then sets AniList's progress to it
+/// when signed in. Both halves: the local one alone leaves AniList behind,
+/// the AniList one alone leaves Up Next offering the episode again.
+///
+/// The Mac checkbox's rule (`AppModel.setEpisodeWatched`): not forward-only,
+/// since ticking an earlier episode is how a viewer corrects an overshot
+/// list, and the status the 85% path sets. Sending progress alone leaves a
+/// finished season's entry on CURRENT at `total`, the bug the Mac's shared
+/// `listEntryUpdate` exists to prevent.
 async fn watched(State(s): State<AppState>, ApiJson(b): ApiJson<WatchedBody>) -> ApiResult<Json<Value>> {
     s.writer
         .mark_episode_completed(b.catalog, b.catalog_id, b.episode)
         .await?;
     let synced = b.catalog == FfiCatalog::Anilist && s.signed_in();
     if synced {
+        let detail = s.engine.media_detail(b.catalog_id, false).await?;
+        let count = detail.episode_count.or(detail.chapter_count).map(i64::from);
+        let (progress, status) = list_entry_update(b.episode, count, detail.list_status.as_deref());
         s.writer
-            .update_list_entry(b.catalog_id, None, None, Some(b.episode))
+            .update_list_entry(b.catalog_id, status, None, Some(progress))
             .await?;
     }
     Ok(Json(json!({ "anilist_synced": synced })))

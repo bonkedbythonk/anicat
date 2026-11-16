@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 use anicat_core::ffi::FfiCatalog;
 
-/// `AppModel.watchedThresholdPct`. Same line `record_progress` uses for its
-/// own `completed` flag (`db::stats::WATCHED_FRACTION`).
-pub const WATCHED_THRESHOLD_PCT: f64 = 85.0;
+/// `AppModel.watchedThresholdPct`. The line `record_progress` uses for its
+/// own `completed` flag, taken from it so the two cannot drift.
+pub const WATCHED_THRESHOLD_PCT: f64 = anicat_core::db::stats::WATCHED_FRACTION * 100.0;
 /// `AppModel.nextEpisodePreloadPct`: far enough from the end that a cold
 /// resolve (2 to 10 s, more on a slow swarm) lands before mpv reaches the
 /// end of the file, late enough that the second download slot is not spent

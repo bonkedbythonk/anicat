@@ -636,7 +636,6 @@ impl Session {
                 title,
                 prefer_dub,
                 start_seconds: start,
-                duration_seconds: duration,
             };
             let _ = tx.send(Internal::Switched { generation, request, result });
         });

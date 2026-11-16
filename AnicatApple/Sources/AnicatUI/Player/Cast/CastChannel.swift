@@ -22,7 +22,12 @@ final class CastChannel {
         /// The receiver numbers each LOAD; the session uses it to tell the
         /// stream it replaced from the one it just asked for.
         var mediaSessionId: Int?
+        /// The stream's own mute, nil when the status leaves it out.
+        var muted: Bool?
     }
+
+    /// The receiver has launched and this sender joined its session.
+    var isJoined: Bool { transportId != nil && !closed }
 
     /// The media session of the last status received, nil before any LOAD.
     var currentMediaSessionId: Int? { mediaSessionId }
@@ -136,6 +141,14 @@ final class CastChannel {
     func play() { sendMediaCommand("PLAY") }
     func pause() { sendMediaCommand("PAUSE") }
     func requestStatus() { sendMediaCommand("GET_STATUS") }
+    /// Mutes the stream on the TV, not the TV itself: the stream always
+    /// carries the sound, so moving it between the Mac and the TV needs no
+    /// new encode.
+    func setStreamMuted(_ muted: Bool) {
+        guard let mediaSessionId else { return }
+        sendMedia(["type": "SET_VOLUME", "mediaSessionId": mediaSessionId, "volume": ["muted": muted]])
+    }
+
     /// Moves the TV inside the stream it already has, in stream time.
     func seek(to seconds: Double) {
         guard let mediaSessionId else { return }
@@ -257,7 +270,8 @@ final class CastChannel {
                     idleReason: entry["idleReason"] as? String,
                     currentTime: entry["currentTime"] as? Double ?? 0,
                     receivedAt: now,
-                    mediaSessionId: entry["mediaSessionId"] as? Int))
+                    mediaSessionId: entry["mediaSessionId"] as? Int,
+                    muted: (entry["volume"] as? [String: Any])?["muted"] as? Bool))
             }
         case (Namespace.media, "LOAD_FAILED") where payload["requestId"] as? Int == loadRequestId:
             onLoadFailed?("LOAD_FAILED")

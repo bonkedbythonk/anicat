@@ -41,17 +41,19 @@ final class CastSession {
     static let audioDelayKey = "anicat_cast_audio_delay"
 
     /// Where the sound plays: false is the Mac (AirPods included), the
-    /// stream stays silent and the Mac player is the one heard; true puts
-    /// the audio track in the stream and mutes the Mac, which keeps playing
-    /// for progress, skip and auto-next. Switching mid-cast restarts the
-    /// stream, since the audio is part of the encode.
+    /// stream is muted on the TV and the Mac player is the one heard; true
+    /// unmutes the stream and mutes the Mac, which keeps playing for
+    /// progress, skip and auto-next. The stream always carries the audio
+    /// track, so switching is two mutes, not a new encode.
     var soundOnTV: Bool = UserDefaults.standard.bool(forKey: CastSession.soundOnTVKey) {
         didSet {
             guard soundOnTV != oldValue else { return }
             UserDefaults.standard.set(soundOnTV, forKey: Self.soundOnTVKey)
-            guard isActive, phase != .connecting, let controller else { return }
+            guard isActive, phase != .connecting else { return }
+            // Switching used to restart the stream for its audio track: 7 s
+            // of black at 4K for every switch (2026-11-16).
             applyMacSound()
-            beginStream(at: controller.currentTime)
+            channel?.setStreamMuted(!soundOnTV)
         }
     }
     static let soundOnTVKey = "anicat_cast_sound_on_tv"
@@ -120,6 +122,9 @@ final class CastSession {
     /// seeked the Mac back 5-9 s within the 900 ms, the viewer seeked again,
     /// and one scrub became seven stream restarts in 25 s.
     @ObservationIgnored private var seekPending = false
+    /// `generation` as this connect left it.
+    @ObservationIgnored private var connectGeneration = 0
+    @ObservationIgnored private var lastMuteSent: TimeInterval = 0
     /// What the running encode burned in: a change to any of them needs a
     /// new one.
     @ObservationIgnored private var streamTracks: (sid: String?, aid: String?, upscale: Bool, height: Int)?
@@ -159,7 +164,7 @@ final class CastSession {
         // ran `stop`, and left its 160 MB file behind.
         try? FileManager.default.removeItem(at: Self.cacheDirectory)
         generation += 1
-        let generation = generation
+        connectGeneration = generation
         Task {
             do {
                 let server = CastStreamServer()
@@ -179,23 +184,30 @@ final class CastSession {
                 // cast. A ready one still gets the launch, which took the
                 // TV 7.5 s.
                 var channel = makeChannel(device.endpoint)
+                // Encoding from the click on, not from the join: the first
+                // fragment took 2.6-3.6 s at 4K, all of it added to the TV's
+                // own launch before.
+                controller.onSetVideoEnabled?(false)
+                applyMacSound()
+                beginStream(at: controller.currentTime)
+                // The encode bumped the generation; a stop or a new cast
+                // bumps it again.
+                connectGeneration = generation
                 do {
                     try await channel.open(timeout: .seconds(20), readyWithin: .seconds(1))
                 } catch {
-                    guard generation == self.generation else { return }
+                    guard connectGeneration == generation else { return }
                     AppLog.write("[cast] first connect stalled (\(error.localizedDescription)), retrying")
                     channel.close()
                     channel = makeChannel(device.endpoint)
                     try await channel.open(timeout: .seconds(20))
                 }
-                guard generation == self.generation else { return }
+                guard connectGeneration == generation else { return }
                 AppLog.write("[cast] connected to \(device.name)")
-                controller.onSetVideoEnabled?(false)
-                applyMacSound()
-                beginStream(at: controller.currentTime)
+                phase = .starting
                 startSyncLoop()
             } catch {
-                guard generation == self.generation else { return }
+                guard connectGeneration == generation else { return }
                 fail("Could not reach \(device.name): \(error.localizedDescription). Check that the TV is on and on this network.")
             }
         }
@@ -288,10 +300,12 @@ final class CastSession {
                 AppLog.write(String(format: "[cast] seek inside the stream to %.0fs", position))
                 return
             }
-            // Long enough to cover a run of +5 s presses (the owner's came
-            // 0.6 and 1.4 s apart): each restart costs the TV two seconds
-            // of black, so one restart at the end beats three on the way.
-            try? await Task.sleep(for: .milliseconds(650))
+            // A seek past the stream restarts it, and a scrub calls this
+            // per drag tick: one restart where it settles beats three on the
+            // way. Runs of +5 s presses (the owner's came 0.6 and 1.4 s
+            // apart) mostly land inside the stream now, so 0.6 s in all
+            // rather than the 0.9 s every far seek used to wait.
+            try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
             // A new file is loading: the next-file restart in the sync
             // places the stream, and it waits for this flag to clear.
@@ -322,7 +336,7 @@ final class CastSession {
         removeOutput()
         awaitingStart = true
         seekPending = false
-        phase = .starting
+        if phase != .connecting { phase = .starting }
         bufferingSince = nil
         holdingTV = false
         hold(true)
@@ -351,7 +365,7 @@ final class CastSession {
                 start: position,
                 output: output,
                 subtitleId: props["sid"].flatMap { $0 == "no" ? nil : $0 },
-                audioId: soundOnTV ? props["aid"].flatMap { $0 == "no" ? nil : $0 } : nil,
+                audioId: props["aid"].flatMap { $0 == "no" ? nil : $0 },
                 subtitleOptions: subtitleOptions,
                 videoFilter: CastEncoder.videoFilter(shaderPath: upscale ? Self.shaderFile() : nil),
                 fps: fps,
@@ -375,7 +389,7 @@ final class CastSession {
             playlist += "#EXT-X-ENDLIST\n"
             let base = position
             server.serve(CastStreamServer.Stream(
-                file: output, token: token, mediaPlaylist: playlist, audio: soundOnTV,
+                file: output, token: token, mediaPlaylist: playlist, audio: props["aid"].map { $0 != "no" } ?? false,
                 megabits: Self.bitrates[bitrateStep],
                 isFinished: { [encoder] in encoder.isFinished },
                 wants: { [encoder] index in encoder.setLimit(base + segment * Double(index + 1) + 10) }))
@@ -389,7 +403,14 @@ final class CastSession {
                 if size > 1_000_000 || encoder.isFinished { break }
                 try? await Task.sleep(for: .milliseconds(100))
             }
-            guard generation == self.generation else { return }
+            // The encode starts while the TV is still launching its
+            // receiver (7.5 s on the 55POS9002), so the first stream waits
+            // here for the session rather than the session for the stream.
+            // A retried connect replaced the channel meanwhile.
+            while generation == self.generation, self.channel?.isJoined != true {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard generation == self.generation, let channel = self.channel else { return }
             guard let host = channel.localHost else {
                 fail("No network address for this Mac")
                 return
@@ -399,6 +420,14 @@ final class CastSession {
     }
 
     private func handle(_ status: CastChannel.MediaStatus) {
+        // Kept to what the TV reports rather than sent once per stream: a
+        // SET_VOLUME made while a new stream was still loading came back
+        // INVALID_MEDIA_SESSION_ID. Set before PLAYING, sound on the Mac
+        // never plays on the TV too.
+        if isActive, let muted = status.muted, muted == soundOnTV, Self.now - lastMuteSent > 1 {
+            lastMuteSent = Self.now
+            channel?.setStreamMuted(!soundOnTV)
+        }
         if let seek = inStreamSeek,
            abs(streamBase + status.currentTime - seek.target) < 3 || Self.now > seek.deadline {
             inStreamSeek = nil
@@ -458,8 +487,13 @@ final class CastSession {
             hold(true)
         case "PAUSED":
             // Paused on the TV's own remote: follow it. Not when this session
-            // paused it for the Mac's own buffering.
-            if !awaitingStart, !holdingMac, !holdingTV, controller?.isPlaying == true {
+            // paused it for the Mac's own buffering, and not within two
+            // seconds of the viewer's own play: the answer to a status poll
+            // sent while still paused landed 0.1 s after a PLAY, the Mac
+            // followed it and paused the TV again, and the cast sat paused
+            // under a viewer who had pressed play (2026-11-16 soak).
+            if !awaitingStart, !holdingMac, !holdingTV, controller?.isPlaying == true,
+               Self.now - lastViewerChange > 2 {
                 viewerPaused = true
                 controller?.pause()
             }
@@ -516,7 +550,7 @@ final class CastSession {
         // the TV until some later seek restarted the stream.
         if let started = streamTracks, props["path"] == sourcePath {
             let upscale = controller.isAnime4KEnabled && !controller.isLiveAction && started.height < 2160
-            if props["sid"] != started.sid || (soundOnTV && props["aid"] != started.aid) || upscale != started.upscale {
+            if props["sid"] != started.sid || props["aid"] != started.aid || upscale != started.upscale {
                 AppLog.write("[cast] subtitles, audio track or upscaling changed, restarting the stream")
                 beginStream(at: props["time-pos"].flatMap(Double.init) ?? controller.currentTime)
                 return

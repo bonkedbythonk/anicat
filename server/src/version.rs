@@ -98,15 +98,22 @@ pub async fn check(http: &reqwest::Client, data_dir: &Path) -> VersionInfo {
 /// from this process. The installer stops anicat.exe to replace it, so it
 /// must outlive its parent, and it reopens Anicat when it is done.
 #[cfg(windows)]
-pub fn start_install() -> std::io::Result<()> {
+pub fn start_install(version: &str) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     // The window is hidden, so a failure would leave no trace; the installer's
     // output goes to a file the owner can open.
+    // The installer comes from the release's tag, not master: anything
+    // pushed to master would otherwise run on every machine that clicked
+    // Update. The version lands inside a PowerShell command, so it must be a
+    // plain version string.
+    if version.is_empty() || !version.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a version"));
+    }
     let script = format!(
-        "irm {INSTALLER_URL} | iex *> (Join-Path $env:TEMP 'anicat-update.log')"
+        "irm {INSTALLER_BASE}/v{version}/scripts/install_windows.ps1 | iex *> (Join-Path $env:TEMP 'anicat-update.log')"
     );
     std::process::Command::new("powershell.exe")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
@@ -116,8 +123,7 @@ pub fn start_install() -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-const INSTALLER_URL: &str =
-    "https://raw.githubusercontent.com/bonkedbythonk/anicat/master/scripts/install_windows.ps1";
+const INSTALLER_BASE: &str = "https://raw.githubusercontent.com/bonkedbythonk/anicat";
 
 async fn fetch(http: &reqwest::Client) -> Result<GithubRelease, String> {
     http.get(ENDPOINT)

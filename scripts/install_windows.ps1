@@ -129,10 +129,10 @@
             }
 
             # The release publishes SHA256SUMS (the Mac side writes it, the
-            # Windows workflow appends this zip's line). A release without
-            # one predates the checksums and is installed with a warning; a
-            # file that exists and does not match is refused, because the
-            # next steps strip the Mark of the Web from every file in it.
+            # Windows workflow appends this zip's line). No sums means no
+            # install, as on the Mac: a proxy or captive portal can withhold
+            # that one request, and the next steps strip the Mark of the Web
+            # from every file in the zip.
             $sumsUrl = ($downloadUrl -replace '/[^/]+$', '/SHA256SUMS')
             $sums = $null
             # GitHub serves release assets as application/octet-stream, so
@@ -169,7 +169,8 @@
                 }
                 Say 'Checksum verified.'
             } else {
-                Say 'This release publishes no SHA256SUMS, so the download could not be verified.'
+                Complain 'Could not get the release checksums (SHA256SUMS), so the download cannot be verified. Nothing was installed; try again later.'
+                return
             }
 
             Say 'Step 3: Installing...'

@@ -530,14 +530,21 @@ async fn version(State(s): State<AppState>) -> Json<Value> {
 
 /// Update now. 202 once the installer is running; it quits this process
 /// itself, so a reply is all the page gets before the connection drops.
-async fn update() -> ApiResult<StatusCode> {
+async fn update(State(s): State<AppState>) -> ApiResult<StatusCode> {
     #[cfg(windows)]
     {
-        crate::version::start_install().map_err(|e| ApiError::internal(format!("could not start the installer: {e}")))?;
+        let latest = crate::version::check(&s.http, &s.data_dir)
+            .await
+            .latest
+            .ok_or_else(|| ApiError::internal("no release is known yet; check for updates first".to_string()))?;
+        crate::version::start_install(&latest).map_err(|e| ApiError::internal(format!("could not start the installer: {e}")))?;
         Ok(StatusCode::ACCEPTED)
     }
     #[cfg(not(windows))]
-    Err(ApiError::bad_request("updating from the page is only available on Windows"))
+    {
+        let _ = s;
+        Err(ApiError::bad_request("updating from the page is only available on Windows"))
+    }
 }
 
 async fn debug_report(State(s): State<AppState>) -> impl IntoResponse {

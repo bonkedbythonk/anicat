@@ -520,8 +520,10 @@ extension AppModel {
     /// priority: it must never be what a real fetch is queued behind.
     public func prefetchCinemaDetail(catalog: MediaCard.CardCatalog, id: Int64) {
         guard let engine, catalog != .anilist, cinemaAvailable else { return }
-        guard DetailCache.load(id: id, isManga: false, catalog: catalog) == nil else { return }
         guard !activePrefetches.contains(id) else { return }
+        // Existence only, for `prefetchDetail`'s reason: a full snapshot read
+        // and decode on the main actor per hovered card.
+        guard !FileManager.default.fileExists(atPath: DetailCache.fileURL(id: id, isManga: false, catalog: catalog).path) else { return }
         activePrefetches.insert(id)
         let ffiCatalog: FfiCatalog = catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv
         Task(priority: .background) { [weak self] in

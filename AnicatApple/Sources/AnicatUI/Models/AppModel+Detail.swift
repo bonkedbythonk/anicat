@@ -550,8 +550,12 @@ extension AppModel {
     /// Speculatively warms up in-memory/disk caches for a title when hovered on desktop.
     public func prefetchDetail(id: Int64, isManga: Bool) {
         guard let engine, !isAniListDown else { return }
-        if DetailCache.load(id: id, isManga: isManga) != nil { return }
         guard !activePrefetches.contains(id) else { return }
+        // An existence check, not `DetailCache.load`: this runs on the main
+        // actor for every card the pointer crosses, and `load` reads the
+        // whole snapshot, rewrites its mtime and decodes every episode and
+        // character just to be compared against nil.
+        if FileManager.default.fileExists(atPath: DetailCache.fileURL(id: id, isManga: isManga).path) { return }
         activePrefetches.insert(id)
         Task(priority: .background) { [weak self, weak engine] in
             guard let self, let engine else { return }

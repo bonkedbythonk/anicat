@@ -154,8 +154,21 @@ impl TorrentMetadata {
         let file_infos = info
             .iter_file_details_ext(&lengths)?
             .map(|fd| {
+                let relative_filename = fd.details.filename.to_pathbuf()?;
+                // anicat patch: librqbit-core refuses only ".." and separators in
+                // a name part, so a part like "C:version.dll" passes; on Windows
+                // PathBuf::push treats it as a new root and the file is created
+                // (and later deleted) outside the output folder -- beside
+                // anicat.exe, in the working directory. Every part must be a
+                // plain name.
+                if !relative_filename
+                    .components()
+                    .all(|c| matches!(c, std::path::Component::Normal(_)))
+                {
+                    anyhow::bail!("refusing torrent file path {relative_filename:?}");
+                }
                 Ok::<_, anyhow::Error>(FileInfo {
-                    relative_filename: fd.details.filename.to_pathbuf()?,
+                    relative_filename,
                     offset_in_torrent: fd.offset,
                     piece_range: fd.pieces,
                     len: fd.details.len,

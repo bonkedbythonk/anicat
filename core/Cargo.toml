@@ -58,7 +58,10 @@ uniffi = { version = "0.28", features = ["build"] }
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 
-# librqbit with one change, marked "anicat patch" in
+# librqbit with two changes, each marked "anicat patch". In
+# vendor/librqbit/src/torrent_state/mod.rs, a torrent whose file path has any
+# part other than a plain name is refused (a "C:x.dll" part escaped the
+# download folder on Windows). In
 # vendor/librqbit/src/torrent_state/live/mod.rs: a peer may take over the
 # piece a stream is blocked on once its holder has been at it longer than the
 # taker needs for a whole piece. Upstream (8.1.1 and 9.1.0 alike) gives each

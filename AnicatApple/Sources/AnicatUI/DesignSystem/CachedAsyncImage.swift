@@ -137,22 +137,28 @@ final class ImageDecodeCache: @unchecked Sendable {
         cache.setObject(Box(image), forKey: nsKey, cost: image.bytesPerRow * image.height)
     }
 
-    private nonisolated func takeInFlight(key: String) -> Task<CGImage?, Never>? {
+    /// Joins the fetch in flight for `key`, or starts `make()` as it, under
+    /// one lock. A look-up and an insert taken separately let two callers
+    /// both miss and both fetch, and the first to finish cleared the
+    /// second's entry, so a third caller started a third fetch.
+    private nonisolated func joinOrStart(
+        key: String,
+        make: () -> Task<CGImage?, Never>
+    ) -> (task: Task<CGImage?, Never>, started: Bool) {
         inFlightLock.lock()
         defer { inFlightLock.unlock() }
-        return inFlight[key]
-    }
-
-    private nonisolated func setInFlight(key: String, task: Task<CGImage?, Never>) {
-        inFlightLock.lock()
-        defer { inFlightLock.unlock() }
+        if let existing = inFlight[key] { return (existing, false) }
+        let task = make()
         inFlight[key] = task
+        return (task, true)
     }
 
-    private nonisolated func clearInFlight(key: String) {
+    /// Removes `task`, and only `task`: the entry under `key` may already
+    /// belong to a later fetch.
+    private nonisolated func clearInFlight(key: String, task: Task<CGImage?, Never>) {
         inFlightLock.lock()
         defer { inFlightLock.unlock() }
-        inFlight[key] = nil
+        if inFlight[key] == task { inFlight[key] = nil }
     }
 
     func image(for url: URL, maxPixelSize: CGFloat) async -> CGImage? {
@@ -172,22 +178,20 @@ final class ImageDecodeCache: @unchecked Sendable {
             return hit
         }
 
-        if let existing = takeInFlight(key: key) {
-            return await existing.value
-        }
-
         let session = Self.session
         // Runs on a background cooperative worker thread rather than inheriting @MainActor:
         // CGImageSource thumbnail decoding is CPU-heavy and must never block the 120Hz display link.
-        let task = Task.detached(priority: priority) { () -> CGImage? in
-            guard let data = await Self.fetch(url, session: session) else { return nil }
-            return Self.downsample(data: data, fit: fit)
+        let (task, started) = joinOrStart(key: key) {
+            Task.detached(priority: priority) { () -> CGImage? in
+                guard let data = await Self.fetch(url, session: session) else { return nil }
+                return Self.downsample(data: data, fit: fit)
+            }
         }
-        setInFlight(key: key, task: task)
 
         let result = await task.value
+        guard started else { return result }
 
-        clearInFlight(key: key)
+        clearInFlight(key: key, task: task)
 
         if let result {
             storeCache(nsKey: nsKey, image: result)
@@ -374,7 +378,12 @@ public struct CachedAsyncImage<Content: View, Placeholder: View>: View {
                 }
                 return
             }
-            cgImage = await ImageDecodeCache.shared.image(for: url, fit: fit)
+            let image = await ImageDecodeCache.shared.image(for: url, fit: fit)
+            // The shared fetch is not cancelled with this task, so an old
+            // url's slow fetch finishing after the key moved on would paint
+            // the previous image over the new one.
+            guard !Task.isCancelled else { return }
+            cgImage = image
         }
     }
 

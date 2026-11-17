@@ -36,6 +36,9 @@ public struct TVRootView: View {
     /// switching tabs must not read as a dismissal on the tab being left.
     @State private var detailOwner: Tab?
     @Environment(\.scenePhase) private var scenePhase
+    /// Set on the way into the background, so the wake-up work runs once
+    /// per real sleep and not after every pass through inactive.
+    @State private var wasInBackground = false
     // Observed so a skin picked in Settings recolours the tab words now.
     @State private var store = ThemeStore.shared
 
@@ -177,8 +180,30 @@ public struct TVRootView: View {
         .onChange(of: store.palette.id) { _, _ in TVTabBarStyle.apply() }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .background: BonjourDiscovery.shared.stopAdvertising()
-            case .active: model.applyLanSharingSetting(AppModel.isLanSharingEnabled)
+            case .background:
+                BonjourDiscovery.shared.stopAdvertising()
+                wasInBackground = true
+                // Paused on the way out: the TV target keeps audio running in
+                // the background, so an episode left playing when the box
+                // slept could go on unseen past 85%, be marked watched and
+                // roll into the next one. The pause also writes the position.
+                if model.activeStreamURL != nil, model.playerController.isPlaying {
+                    model.playerController.togglePlayPause()
+                }
+            case .active:
+                model.applyLanSharingSetting(AppModel.isLanSharingEnabled)
+                // Only back from the background: Control Center and Siri
+                // pass through inactive and need none of this. A flag, not
+                // the old phase: waking goes background, inactive, active.
+                guard wasInBackground else { break }
+                wasInBackground = false
+                // Peers and sockets do not survive a night's sleep; the
+                // phone's foreground path does the same two things.
+                model.warmEngineAfterResume()
+                model.refreshListsOnForeground()
+                // Back on the paused frame with the controls up, so Play is
+                // one press away.
+                if model.activeStreamURL != nil { model.playerController.showControlsBriefly() }
             default: break
             }
         }

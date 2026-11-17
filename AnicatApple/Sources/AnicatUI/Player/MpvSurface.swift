@@ -694,6 +694,17 @@ public struct MpvSurface {
                         MainActor.assumeIsolated { self.fullScreenTransitionEnded(view: view) }
                     }
                     #endif
+                    #if os(tvOS)
+                    // Not didBecomeActive: that also fires after Control
+                    // Center or Siri, and re-asking the mode already set cost
+                    // 15 dropped frames and a freeze (see `matchDisplay`).
+                    self.resumeObserver = NotificationCenter.default.addObserver(
+                        forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+                    ) { [weak self, weak view] _ in
+                        guard let self else { return }
+                        MainActor.assumeIsolated { self.redisplayAfterResume(view: view) }
+                    }
+                    #endif
                     if ambientGlowAvailable,
                        let layer = view.metalView?.metalLayer,
                        let device = layer.device ?? MTLCreateSystemDefaultDevice(),
@@ -1141,6 +1152,9 @@ public struct MpvSurface {
             set { crossThreadLock.withLock { _lastDrawableSize = newValue } }
         }
         private var fullScreenObserver: NSObjectProtocol?
+        #if os(tvOS)
+        private var resumeObserver: NSObjectProtocol?
+        #endif
         private var _reconfigAttemptsForSize = 0
         private var reconfigAttemptsForSize: Int {
             get { crossThreadLock.withLock { _reconfigAttemptsForSize } }
@@ -1641,6 +1655,22 @@ public struct MpvSurface {
             )
             displayMatchedWindow = window
             PlayerLog.write(String(format: "[display] asked for %.3f Hz %@", fps, range))
+        }
+
+        /// The box woke from sleep with a paused episode on screen. The
+        /// owner: the stream "looked not sharp" after resuming. Sleep hands
+        /// the HDMI link back to the box's menu mode, and `matchDisplay`
+        /// skips a mode it already asked for, so nothing asked again; the
+        /// swapchain also outlives the sleep at whatever size it had. A
+        /// nudge reconfigures the output, which re-reads the drawable and
+        /// runs `matchDisplay` again with the request forgotten.
+        @MainActor
+        func redisplayAfterResume(view: MpvHostView?) {
+            lastDisplayRequest = nil
+            view?.metalView?.syncDrawableSize()
+            reconfigAttemptsForSize = 0
+            PlayerLog.write("[display] resumed, asking again")
+            nudgeVideoReconfig(reason: "resumed")
         }
         #endif
 
@@ -2549,6 +2579,8 @@ public struct MpvSurface {
             #if os(tvOS)
             let window = displayMatchedWindow
             Task { @MainActor in window?.avDisplayManager.preferredDisplayCriteria = nil }
+            if let resumeObserver { NotificationCenter.default.removeObserver(resumeObserver) }
+            resumeObserver = nil
             #endif
             controller.onSeek = nil
             controller.onSetPause = nil

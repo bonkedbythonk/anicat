@@ -44,6 +44,9 @@ struct TVPlayerView: View {
     /// player, which takes no focus and leaves the controls down.
     @State private var seekBarVisible = false
     @State private var seekBarHide: Task<Void, Never>?
+    @State private var lastSeekPress = Date.distantPast
+    @State private var seekDirection: Double = 0
+    @State private var seekStreak = 0
 
     var body: some View {
         ZStack {
@@ -80,8 +83,8 @@ struct TVPlayerView: View {
                 // second press or swipe moved focus instead of seeking.
                 .onMoveCommand { direction in
                     switch direction {
-                    case .left: seekQuietly(by: -10)
-                    case .right: seekQuietly(by: 10)
+                    case .left: seekQuietly(by: acceleratedStep(-1))
+                    case .right: seekQuietly(by: acceleratedStep(1))
                     default: showControls()
                     }
                 }
@@ -251,7 +254,7 @@ struct TVPlayerView: View {
                 VStack(spacing: 28) {
                     // Its own view: the clock changes four times a second,
                     // and read here it redrew the whole chrome each time.
-                    TVTimeline(controller: controller, focus: $focus, onSeek: seek(by:))
+                    TVTimeline(controller: controller, focus: $focus, onSeek: { seek(by: acceleratedStep($0 < 0 ? -1 : 1)) })
                     transport
                 }
             }
@@ -406,6 +409,22 @@ struct TVPlayerView: View {
     private func seek(by delta: Double) {
         controller.seekRelative(by: delta)
         controller.showControlsBriefly()
+    }
+
+    /// Presses in one direction less than 1.2 s apart jump further each
+    /// time, so a long way into an episode is a run of presses rather than
+    /// a hundred: with every press 10 s, "i can only skip 10 secs".
+    private func acceleratedStep(_ direction: Double) -> Double {
+        let steps: [Double] = [10, 10, 20, 30, 60, 120]
+        let now = Date()
+        if direction == seekDirection, now.timeIntervalSince(lastSeekPress) < 1.2 {
+            seekStreak = min(seekStreak + 1, steps.count - 1)
+        } else {
+            seekStreak = 0
+        }
+        seekDirection = direction
+        lastSeekPress = now
+        return direction * steps[seekStreak]
     }
 
     private func seekQuietly(by delta: Double) {

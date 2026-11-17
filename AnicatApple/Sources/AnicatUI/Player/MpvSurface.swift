@@ -704,6 +704,23 @@ public struct MpvSurface {
                         guard let self else { return }
                         MainActor.assumeIsolated { self.redisplayAfterResume(view: view) }
                     }
+                    // The TV goes black for seconds while it locks onto the
+                    // mode `matchDisplay` asked for, and the owner heard the
+                    // episode start over a black screen ("the tv goes black
+                    // when starting a stream but the audio does already
+                    // play"). Playback waits out the switch.
+                    self.modeSwitchObservers = [
+                        NotificationCenter.default.addObserver(
+                            forName: .AVDisplayManagerModeSwitchStart, object: nil, queue: .main
+                        ) { [weak self] _ in
+                            MainActor.assumeIsolated { self?.holdForModeSwitch() }
+                        },
+                        NotificationCenter.default.addObserver(
+                            forName: .AVDisplayManagerModeSwitchEnd, object: nil, queue: .main
+                        ) { [weak self] _ in
+                            MainActor.assumeIsolated { self?.releaseModeSwitchHold(reason: "switch ended") }
+                        },
+                    ]
                     #endif
                     if ambientGlowAvailable,
                        let layer = view.metalView?.metalLayer,
@@ -841,6 +858,9 @@ public struct MpvSurface {
                 self?.seek(to: seconds)
             }
             controller.onSetPause = { [weak self] paused in
+                #if os(tvOS)
+                self?.heldForModeSwitch = false
+                #endif
                 self?.setPaused(paused)
             }
             controller.onSelectAudioLanguage = { [weak self] preferDub, completion in
@@ -1154,6 +1174,11 @@ public struct MpvSurface {
         private var fullScreenObserver: NSObjectProtocol?
         #if os(tvOS)
         private var resumeObserver: NSObjectProtocol?
+        private var modeSwitchObservers: [NSObjectProtocol] = []
+        /// Set when a TV mode switch paused playback, so its end resumes
+        /// only a pause this code made, not one the viewer made.
+        private var heldForModeSwitch = false
+        private var modeSwitchFallback: DispatchWorkItem?
         #endif
         private var _reconfigAttemptsForSize = 0
         private var reconfigAttemptsForSize: Int {
@@ -1664,6 +1689,38 @@ public struct MpvSurface {
         /// swapchain also outlives the sleep at whatever size it had. A
         /// nudge reconfigures the output, which re-reads the drawable and
         /// runs `matchDisplay` again with the request forgotten.
+        @MainActor
+        private func holdForModeSwitch() {
+            guard let mpv, !heldForModeSwitch else { return }
+            var paused: Int32 = 0
+            mpv_get_property(mpv, "pause", MPV_FORMAT_FLAG, &paused)
+            PlayerLog.write("[display] mode switch started, \(paused != 0 ? "already paused" : "holding playback")")
+            guard paused == 0 else { return }
+            heldForModeSwitch = true
+            // `setPaused` skips a value it believes it already wrote, and the
+            // wake reopen writes "pause" past it.
+            lastPausedWritten = nil
+            setPaused(true)
+            // An end notification that never comes must not leave the
+            // episode paused with nothing on screen saying why.
+            let fallback = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated { self?.releaseModeSwitchHold(reason: "8 s fallback") }
+            }
+            modeSwitchFallback = fallback
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: fallback)
+        }
+
+        @MainActor
+        private func releaseModeSwitchHold(reason: String) {
+            modeSwitchFallback?.cancel()
+            modeSwitchFallback = nil
+            guard heldForModeSwitch else { return }
+            heldForModeSwitch = false
+            PlayerLog.write("[display] resuming playback: \(reason)")
+            lastPausedWritten = nil
+            setPaused(false)
+        }
+
         @MainActor
         func redisplayAfterResume(view: MpvHostView?) {
             lastDisplayRequest = nil
@@ -2624,6 +2681,9 @@ public struct MpvSurface {
             Task { @MainActor in window?.avDisplayManager.preferredDisplayCriteria = nil }
             if let resumeObserver { NotificationCenter.default.removeObserver(resumeObserver) }
             resumeObserver = nil
+            modeSwitchObservers.forEach(NotificationCenter.default.removeObserver)
+            modeSwitchObservers = []
+            heldForModeSwitch = false
             #endif
             controller.onSeek = nil
             controller.onSetPause = nil

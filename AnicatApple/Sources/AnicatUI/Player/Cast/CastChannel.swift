@@ -26,6 +26,8 @@ final class CastChannel {
         var muted: Bool?
     }
 
+    /// The connection got as far as the TV, whatever happened after.
+    private(set) var reachedTV = false
     /// The receiver has launched and this sender joined its session.
     var isJoined: Bool { transportId != nil && !closed }
 
@@ -182,6 +184,7 @@ final class CastChannel {
     private func handle(_ state: NWConnection.State) {
         switch state {
         case .ready:
+            reachedTV = true
             send(to: "receiver-0", namespace: Namespace.connection, ["type": "CONNECT"])
             send(to: "receiver-0", namespace: Namespace.receiver, ["type": "LAUNCH", "appId": Self.defaultReceiver])
             receive()

@@ -148,6 +148,8 @@ final class CastSession {
     /// Encoded seconds a seek target needs past it to stay in the stream:
     /// the TV buffers about three two-second segments before it plays.
     private static let inStreamMargin: Double = 8
+    /// Seconds before the container's stated end that the stream stops.
+    private static let tailMargin: Double = 5
 
     func start(_ device: CastDevice) {
         if isActive { stop() }
@@ -177,9 +179,9 @@ final class CastSession {
                 // once: on most launches of one evening the first attempt
                 // timed out, and every retry in the same process connected
                 // within a second. Why is not known.
-                // So a short first try, then a fresh connection. The stuck
-                // one never leaves "preparing" while the retry is ready in
-                // 50 ms (2026-11-16), so the first try is cut at a second of
+                // So short tries, then fresh connections. The stuck one never
+                // leaves "preparing" while the retry is ready in 50 ms
+                // (2026-11-16), so a try is cut after a second or so of
                 // preparing: a whole 5 s launch timeout was lost on every
                 // cast. A ready one still gets the launch, which took the
                 // TV 7.5 s.
@@ -193,14 +195,25 @@ final class CastSession {
                 // The encode bumped the generation; a stop or a new cast
                 // bumps it again.
                 connectGeneration = generation
-                do {
-                    try await channel.open(timeout: .seconds(20), readyWithin: .seconds(1))
-                } catch {
-                    guard connectGeneration == generation else { return }
-                    AppLog.write("[cast] first connect stalled (\(error.localizedDescription)), retrying")
-                    channel.close()
-                    channel = makeChannel(device.endpoint)
-                    try await channel.open(timeout: .seconds(20))
+                // One fresh connection was not always enough: after a TV
+                // restart the retry sat in "preparing" for its whole 20 s too
+                // and the cast failed (1 launch in about 10, 2026-11-16).
+                // Fresh ones until one reaches the TV, each allowed a little
+                // longer, the last the full timeout.
+                var attempt = 0
+                while true {
+                    do {
+                        try await channel.open(timeout: .seconds(20),
+                                               readyWithin: attempt < 3 ? .seconds(attempt + 1) : nil)
+                        break
+                    } catch {
+                        guard connectGeneration == generation else { return }
+                        guard !channel.reachedTV, attempt < 3 else { throw error }
+                        attempt += 1
+                        AppLog.write("[cast] connect stalled before reaching the TV (\(error.localizedDescription)), retry \(attempt)")
+                        channel.close()
+                        channel = makeChannel(device.endpoint)
+                    }
                 }
                 guard connectGeneration == generation else { return }
                 AppLog.write("[cast] connected to \(device.name)")
@@ -379,7 +392,12 @@ final class CastSession {
             // them exists: a VOD playlist, so the TV knows the length and
             // treats a lost segment as one to fetch again.
             let segment = Double(CastEncoder.gop(fps: fps)) / (fps > 0 ? fps : 24)
-            let remaining = max(controller.duration - position, segment)
+            // Short of the container's length: Clannad AS 01 claims 1454.7 s
+            // and its video ends at 1451.4, so the last segment listed never
+            // existed, the TV asked for it four times and ended the cast at
+            // every episode's end. The tail is the Mac's alone; the TV
+            // finishes cleanly and the next file restarts the stream.
+            let remaining = max(controller.duration - position - Self.tailMargin, segment)
             let count = Int((remaining / segment).rounded(.up))
             var playlist = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:\(Int(segment.rounded(.up)))\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MAP:URI=\"init.mp4\"\n"
             for index in 0..<count {

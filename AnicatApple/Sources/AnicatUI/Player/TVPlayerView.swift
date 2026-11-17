@@ -28,6 +28,10 @@ struct TVPlayerView: View {
     @State private var releaseFailure: String?
     @State private var isLoadingReleases = false
     @State private var showReleases = false
+    @State private var showOptions = false
+    /// Release picked from the options panel: its sheet opens once the
+    /// options sheet has gone, since tvOS will not stack the two.
+    @State private var releasesAfterOptions = false
     // Same keys as the phone's menu, so a speed or size picked on one
     // device's player is the one the other starts at.
     @AppStorage("anicat_playback_speed") private var storedSpeed: Double = 1.0
@@ -127,6 +131,30 @@ struct TVPlayerView: View {
             }
         }
         .sheet(isPresented: $showReleases) { releaseSheet }
+        .sheet(isPresented: $showOptions, onDismiss: {
+            if releasesAfterOptions {
+                releasesAfterOptions = false
+                showReleases = true
+            } else {
+                controller.showControlsBriefly()
+            }
+        }) {
+            TVPlayerOptions(
+                controller: controller,
+                onReleases: {
+                    releasesAfterOptions = true
+                    showOptions = false
+                },
+                onClose: {
+                    showOptions = false
+                    onClose()
+                }
+            )
+        }
+        // The chrome must not time out under the panel and drop focus.
+        .onChange(of: showOptions) { _, open in
+            if open { controller.cancelAutohide() }
+        }
         .task {
             controller.showControlsBriefly()
             focus = .playPause
@@ -289,12 +317,13 @@ struct TVPlayerView: View {
                 .focused($focus, equals: .next)
             }
 
-            // Its own view, compared by controller only: built inline, the
-            // menu was rebuilt by every one-second clock tick of this view,
-            // and on a real Apple TV an open menu glitched mid-episode.
-            TVPlayerMenu(controller: controller, showReleases: $showReleases, onClose: onClose)
-                .equatable()
-                .focused($focus, equals: .tracks)
+            // A panel of lists, not a `Menu`: on a real Apple TV the menu's
+            // nested pickers glitched mid-episode and Back closed the whole
+            // menu instead of the submenu it was in.
+            Button { showOptions = true } label: {
+                Image(anicat: "ellipsis.circle")
+            }
+            .focused($focus, equals: .tracks)
         }
         .font(.system(size: 30))
         .focusSection()
@@ -371,7 +400,7 @@ struct TVPlayerView: View {
     }
 
     private func seekQuietly(by delta: Double) {
-        controller.seekRelative(by: delta)
+        controller.seekRelative(by: delta, showControls: false)
         withAnimation(.easeOut(duration: 0.15)) { seekBarVisible = true }
         seekBarHide?.cancel()
         seekBarHide = Task {
@@ -429,14 +458,12 @@ struct TVPlayerView: View {
     }
 }
 
-/// The player's options menu (audio, subtitles, speed, look, release).
-///
-/// Equatable on the controller alone, so the parent's one-second redraws
-/// pass it by; it still redraws when anything it reads on the controller
-/// changes, through observation.
-private struct TVPlayerMenu: View, @MainActor Equatable {
+/// The player's options (audio, subtitles, speed, look, release) as a
+/// sheet with a navigation stack: each choice is a list one level down,
+/// and Back steps up one level at a time, as in the system Settings.
+private struct TVPlayerOptions: View {
     @Bindable var controller: PlayerController
-    @Binding var showReleases: Bool
+    let onReleases: () -> Void
     let onClose: () -> Void
 
     @State private var audioTracks: [PlayerTrack] = []
@@ -447,156 +474,96 @@ private struct TVPlayerMenu: View, @MainActor Equatable {
     @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
     @AppStorage(SubtitleStyle.key) private var subtitleStyleRaw: String = SubtitleStyle.release.rawValue
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.controller === rhs.controller }
+    private static let sizes: [(Double, String)] = [(0.8, "Small"), (1.0, "Normal"), (1.25, "Large"), (1.5, "Huge")]
+    private static let zooms: [(Double, String)] = [(0, "Fit"), (0.25, "A little"), (0.5, "Halfway"), (0.75, "Most"), (1, "Fill height")]
 
     var body: some View {
-        Menu {
-            if !audioTracks.isEmpty {
-                Picker("Audio", selection: audioSelection) {
-                    ForEach(audioTracks) { track in
-                        Text(track.label).tag(track.id)
+        NavigationStack {
+            List {
+                if !audioTracks.isEmpty {
+                    choice("Audio", audioTracks.map { ($0.id, $0.label) },
+                           selected: audioTracks.first(where: \.isSelected)?.id ?? "") { id in
+                        controller.onSelectAudioTrack?(id)
+                        if let track = audioTracks.first(where: { $0.id == id }) { controller.rememberAudioTrack(track) }
+                        fetchTracks()
                     }
                 }
-                // A submenu with its name and current value: inline, tvOS
-                // listed every choice under one another with no heading.
-                .pickerStyle(.menu)
-            }
-            if !subtitleTracks.isEmpty {
-                Picker("Subtitles", selection: subtitleSelection) {
-                    Text("Off").tag(PlayerTrack.off)
-                    ForEach(subtitleTracks) { track in
-                        Text(track.label).tag(track.id)
+                if !subtitleTracks.isEmpty {
+                    choice("Subtitles", [(PlayerTrack.off, "Off")] + subtitleTracks.map { ($0.id, $0.label) },
+                           selected: subtitleTracks.first(where: \.isSelected)?.id ?? PlayerTrack.off) { id in
+                        controller.onSelectSubtitleTrack?(id == PlayerTrack.off ? nil : id)
+                        controller.rememberSubtitleTrack(subtitleTracks.first(where: { $0.id == id }))
+                        fetchTracks()
                     }
                 }
-                .pickerStyle(.menu)
-            }
-            Picker("Speed", selection: Binding(
-                get: { controller.playbackRate },
-                set: { rate in
+                choice("Speed", PlayerController.playbackSpeeds.map { ($0, $0 == 1 ? "Normal" : PlayerController.speedLabel($0)) },
+                       selected: controller.playbackRate) { rate in
                     storedSpeed = rate
                     controller.setPlaybackRate(rate)
                 }
-            )) {
-                ForEach(PlayerController.playbackSpeeds, id: \.self) { rate in
-                    Text(rate == 1 ? "Normal" : PlayerController.speedLabel(rate)).tag(rate)
-                }
-            }
-            .pickerStyle(.menu)
-            Picker("Subtitle size", selection: Binding(
-                get: { subtitleScale },
-                set: { scale in
+                choice("Subtitle size", Self.sizes, selected: subtitleScale) { scale in
                     subtitleScale = scale
                     controller.setSubtitleScale(scale)
                 }
-            )) {
-                Text("Small").tag(0.8)
-                Text("Normal").tag(1.0)
-                Text("Large").tag(1.25)
-                Text("Huge").tag(1.5)
-            }
-            .pickerStyle(.menu)
-            // The Mac player's "Subtitle look" tiles, as a list: the same
-            // presets, applied at once and kept for the next episode.
-            Picker("Subtitle style", selection: Binding(
-                get: { SubtitleStyle(rawValue: subtitleStyleRaw) ?? .release },
-                set: { style in
-                    subtitleStyleRaw = style.rawValue
-                    controller.onSetSubtitleStyle?(style)
+                // The Mac player's "Subtitle look" presets.
+                choice("Subtitle style", SubtitleStyle.allCases.map { ($0.rawValue, $0.label) },
+                       selected: subtitleStyleRaw) { raw in
+                    subtitleStyleRaw = raw
+                    controller.onSetSubtitleStyle?(SubtitleStyle(rawValue: raw) ?? .release)
                 }
-            )) {
-                ForEach(SubtitleStyle.allCases) { style in
-                    Text(style.label).tag(style)
+                // Only for a picture wider than the screen: on a 16:9 episode
+                // `panscan` crops nothing and the choice would do nothing.
+                if (controller.videoAspectRatio ?? 0) > 1.85 {
+                    choice("Zoom", Self.zooms, selected: controller.zoomAmount) { controller.setZoom($0) }
                 }
-            }
-            .pickerStyle(.menu)
-            // Only for a picture wider than the screen: on a 16:9 episode
-            // `panscan` crops nothing and the choice would do nothing.
-            if (controller.videoAspectRatio ?? 0) > 1.85 {
-                Picker("Zoom", selection: Binding(
-                    get: { controller.zoomAmount },
-                    set: { controller.setZoom($0) }
-                )) {
-                    Text("Fit").tag(0.0)
-                    Text("A little").tag(0.25)
-                    Text("Halfway").tag(0.5)
-                    Text("Most").tag(0.75)
-                    Text("Fill height").tag(1.0)
-                }
-                .pickerStyle(.menu)
-            }
-            // Auto-skip is on by default, and while it is the Skip pill never
-            // shows: the intro just goes. Here so it can be turned off for one
-            // show's opening without leaving the episode for Settings.
-            Toggle("Skip intros automatically", isOn: Binding(
-                get: { controller.autoSkipEnabled },
-                set: { on in if on != controller.autoSkipEnabled { controller.toggleAutoSkip() } }
-            ))
-            // In the player, not Settings: whether the box keeps up is only
-            // known mid-episode, and a stutter should be one click from off.
-            Toggle("Upscaling", isOn: Binding(
-                get: { controller.isAnime4KEnabled },
-                set: { on in if on != controller.isAnime4KEnabled { controller.toggleAnime4K() } }
-            ))
-            if !controller.chapters.isEmpty {
-                Menu {
-                    ForEach(controller.chapters) { chapter in
-                        Button("\(PlayerController.formatTimestamp(chapter.time))  \(chapter.title)") {
-                            controller.seek(to: chapter.time)
-                            controller.showControlsBriefly()
-                        }
+                // Auto-skip is on by default, and while it is the Skip pill
+                // never shows. Here so one show's opening can be kept without
+                // leaving the episode for Settings.
+                Toggle("Skip intros automatically", isOn: Binding(
+                    get: { controller.autoSkipEnabled },
+                    set: { on in if on != controller.autoSkipEnabled { controller.toggleAutoSkip() } }
+                ))
+                // In the player, not Settings: whether the box keeps up is only
+                // known mid-episode, and a stutter should be one press from off.
+                Toggle("Upscaling", isOn: Binding(
+                    get: { controller.isAnime4KEnabled },
+                    set: { on in if on != controller.isAnime4KEnabled { controller.toggleAnime4K() } }
+                ))
+                if !controller.chapters.isEmpty {
+                    NavigationLink("Chapters") {
+                        TVChoiceList(
+                            title: "Chapters",
+                            options: controller.chapters.map { ($0.time, "\(PlayerController.formatTimestamp($0.time))  \($0.title)") },
+                            selected: nil
+                        ) { controller.seek(to: $0) }
                     }
-                } label: {
-                    Label("Chapters", anicat: "list.number")
                 }
+                Button("Release", action: onReleases)
+                if controller.hasPreviousEpisode {
+                    Button("Previous episode") { controller.previousEpisode() }
+                }
+                Button("Close player", role: .destructive, action: onClose)
             }
-            Button {
-                showReleases = true
-            } label: {
-                Label("Release", anicat: "square.stack.3d.up")
-            }
-            if controller.hasPreviousEpisode {
-                Button("Previous episode") { controller.previousEpisode() }
-            }
-            Button("Close player", role: .destructive, action: onClose)
-        } label: {
-            Image(anicat: "ellipsis.circle")
-        }
-        // A menu open on tvOS is a modal; the chrome under it must not time
-        // out and drop focus from under the picker.
-        .onChange(of: controller.isMenuOpen) { _, open in
-            if open { controller.cancelAutohide() } else { controller.showControlsBriefly() }
+            .navigationTitle("Options")
+            // The focused row grows, and against the sheet's own edges
+            // its sides were cut off.
+            .padding(.horizontal, 40)
         }
         .task { fetchTracks() }
-        // The chrome can come up before mpv has opened the file, when the
-        // track list is empty. A duration means the file is loaded.
-        .onChange(of: controller.duration) { _, duration in
-            if duration > 0 { fetchTracks() }
+    }
+
+    /// One row showing the current value, opening its list of choices.
+    private func choice<T: Hashable>(
+        _ title: String,
+        _ options: [(T, String)],
+        selected: T,
+        pick: @escaping (T) -> Void
+    ) -> some View {
+        NavigationLink {
+            TVChoiceList(title: title, options: options, selected: selected, pick: pick)
+        } label: {
+            LabeledContent(title, value: options.first(where: { $0.0 == selected })?.1 ?? "")
         }
-    }
-
-    private var audioSelection: Binding<String> {
-        Binding(
-            get: { audioTracks.first(where: \.isSelected)?.id ?? "" },
-            set: { id in
-                controller.onSelectAudioTrack?(id)
-                if let track = audioTracks.first(where: { $0.id == id }) {
-                    controller.rememberAudioTrack(track)
-                }
-                fetchTracks()
-            }
-        )
-    }
-
-    private var subtitleSelection: Binding<String> {
-        Binding(
-            get: { subtitleTracks.first(where: \.isSelected)?.id ?? PlayerTrack.off },
-            set: { id in
-                let track = subtitleTracks.first(where: { $0.id == id })
-                controller.onSelectSubtitleTrack?(id == PlayerTrack.off ? nil : id)
-                controller.rememberSubtitleTrack(track)
-                fetchTracks()
-            }
-        )
     }
 
     private func fetchTracks() {
@@ -604,6 +571,36 @@ private struct TVPlayerMenu: View, @MainActor Equatable {
             audioTracks = audio
             subtitleTracks = subtitle
         }
+    }
+}
+
+/// One level of `TVPlayerOptions`: the choices with a checkmark on the
+/// current one. Picking steps back up, so a second Back leaves the panel.
+private struct TVChoiceList<T: Hashable>: View {
+    let title: String
+    let options: [(T, String)]
+    let selected: T?
+    let pick: (T) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List(options.indices, id: \.self) { index in
+            let option = options[index]
+            Button {
+                pick(option.0)
+                dismiss()
+            } label: {
+                HStack {
+                    Text(option.1)
+                    Spacer()
+                    if option.0 == selected {
+                        Image(anicat: "checkmark")
+                    }
+                }
+            }
+        }
+        .navigationTitle(title)
+        .padding(.horizontal, 40)
     }
 }
 

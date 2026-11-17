@@ -234,9 +234,8 @@ private struct ModeToggle: View {
             // Words, as on the Mac and the phone: the chosen one in the
             // foreground colour, the other muted. The stock segmented
             // control read as a box floating over the hero.
-            // Room for tvOS's focus platter, which grows past the word and
-            // at 8pt covered the one beside it.
-            HStack(spacing: 28) {
+            // The pill's own padding keeps the words apart.
+            HStack(spacing: 12) {
                 word("Anime", .anime)
                 Text("/")
                     .font(.system(size: 28))
@@ -250,13 +249,16 @@ private struct ModeToggle: View {
         Button { model.setAppMode(mode) } label: {
             Word(title: title, isOn: model.appMode == mode)
         }
-        // `.plain`: tvOS lifts it onto a white platter under focus.
-        // `.borderless` drew nothing, so the switch worked blind, and a
-        // custom style took the words out of the focus engine altogether.
+        // `.plain` with its lift switched off and a small pill drawn by the
+        // label. The lift put the word on tvOS's white platter, which the
+        // owner found too big for a two-word switch. `.borderless` drew
+        // nothing, and both a custom `ButtonStyle` and plain focusable text
+        // left the words unreachable: up from Resume went to the tab bar.
         .buttonStyle(.plain)
+        .hoverEffectDisabled()
+        .focusEffectDisabled()
     }
 
-    /// Dark on the white focus platter: the light word vanished on it.
     private struct Word: View {
         let title: String
         let isOn: Bool
@@ -265,7 +267,12 @@ private struct ModeToggle: View {
         var body: some View {
             Text(title)
                 .font(.system(size: 28, weight: isOn ? .semibold : .regular))
-                .foregroundStyle(isFocused ? Color.black : (isOn ? SumiTheme.foreground : SumiTheme.muted))
+                .foregroundStyle(isFocused ? SumiTheme.background : (isOn ? SumiTheme.foreground : SumiTheme.muted))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(isFocused ? SumiTheme.foreground : .clear))
+                .scaleEffect(isFocused ? 1.05 : 1)
+                .animation(.easeOut(duration: 0.15), value: isFocused)
         }
     }
 }

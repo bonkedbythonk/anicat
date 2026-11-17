@@ -1000,13 +1000,16 @@ public final class PlayerController {
         }
     }
 
-    public func seek(to seconds: Double) {
+    /// `showControls: false` is the Apple TV's left/right on the hidden
+    /// player: brought up, the controls took focus onto the play button
+    /// and only the first of several presses seeked.
+    public func seek(to seconds: Double, showControls: Bool = true) {
         currentTime = max(seconds, 0)
         if duration > 0 {
             currentTime = min(currentTime, duration)
         }
         checkIntroStatus()
-        showControlsBriefly()
+        if showControls { showControlsBriefly() }
         onSeek?(currentTime)
         #if os(macOS)
         cast.viewerSeeked(to: currentTime)
@@ -1014,8 +1017,8 @@ public final class PlayerController {
         onPositionChange?(currentTime, duration)
     }
 
-    public func seekRelative(by delta: Double) {
-        seek(to: currentTime + delta)
+    public func seekRelative(by delta: Double, showControls: Bool = true) {
+        seek(to: currentTime + delta, showControls: showControls)
         flashSeek(delta)
     }
 

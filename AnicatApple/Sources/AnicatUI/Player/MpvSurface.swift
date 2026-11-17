@@ -728,6 +728,13 @@ public struct MpvSurface {
                 mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
                 mpv_set_option_string(handle, "vo", "gpu-next")
                 mpv_set_option_string(handle, "gpu-api", "vulkan")
+                #if os(tvOS)
+                // Lets an HDR file reach the screen as HDR (the swapchain
+                // takes the file's colourspace when the display accepts it)
+                // instead of being tone-mapped to SDR. SDR files are drawn as
+                // before. `matchDisplay` asks the TV for the matching mode.
+                mpv_set_option_string(handle, "target-colorspace-hint", "yes")
+                #endif
                 mpv_set_option_string(handle, "gpu-context", "moltenvk")
                 // None of mpv's own input: the event catcher hears the
                 // pointer and the app owns the keyboard.
@@ -1373,8 +1380,47 @@ public struct MpvSurface {
         }
 
         func seek(to seconds: Double) {
+            #if os(tvOS)
+            // Silent until playback restarts, then faded back in. On a real
+            // Apple TV the sound after a seek started at full level in the
+            // middle of a waveform: "audio is rough when seeking its like an
+            // abrupt cut".
+            fadeGeneration += 1
+            // mpv's own flag: this runs off the main actor.
+            if stringProperty("mute") != "yes" {
+                fadePending = true
+                setTransport("volume", double: 0)
+                // A seek that never restarts playback (a failed one) must
+                // not leave the episode silent.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    MainActor.assumeIsolated { self?.fadeInAfterSeek() }
+                }
+            }
+            #endif
             runCommand(["seek", String(format: "%.2f", seconds), "absolute"], async: Self.asyncTransport)
         }
+
+        #if os(tvOS)
+        private var fadePending = false
+        private var fadeGeneration = 0
+
+        /// 200 ms back to the viewer's level in 20 ms steps. A newer seek
+        /// bumps the generation and this one stops where it is.
+        @MainActor
+        func fadeInAfterSeek() {
+            guard fadePending else { return }
+            fadePending = false
+            let generation = fadeGeneration
+            let target = controller.volume * 100
+            Task { @MainActor [weak self] in
+                for step in 1...10 {
+                    try? await Task.sleep(for: .milliseconds(20))
+                    guard let self, self.fadeGeneration == generation else { return }
+                    self.setTransport("volume", double: target * Double(step) / 10)
+                }
+            }
+        }
+        #endif
 
         func setVolume(_ volume: Double) { setTransport("volume", double: volume * 100) }
 
@@ -1544,29 +1590,37 @@ public struct MpvSurface {
         }
 
         #if os(tvOS)
-        /// Asks the TV for the file's frame rate in SDR. Without it the box
-        /// stays in its menu mode (often 4K HDR or Dolby Vision at 60 Hz):
-        /// 23.976 fps anime judders against 60 Hz, and the SDR picture mpv
-        /// draws is converted into HDR, which on a real Apple TV looked off.
-        /// Always SDR, HDR files included: mpv tone-maps those into an SDR
-        /// surface, so an HDR mode would only convert them back. Acts only
-        /// with Settings > Video and Audio > Match Content turned on.
+        /// Asks the TV for the file's frame rate and dynamic range. Without
+        /// it the box stays in its menu mode (often 4K HDR or Dolby Vision at
+        /// 60 Hz): 23.976 fps judders against 60 Hz, and an SDR picture is
+        /// converted into HDR, which on a real Apple TV looked off. HDR10
+        /// and HLG files ask for their own mode, which mpv fills through
+        /// `target-colorspace-hint`. Acts only with Settings > Video and
+        /// Audio > Match Content turned on.
         @MainActor
-        func matchDisplay(fps: Double, width: Int, height: Int) {
+        func matchDisplay(fps: Double, width: Int, height: Int, gamma: String) {
             // The selector check keeps a build without AVKit linked playing
             // instead of aborting on an unrecognized selector.
             guard fps > 0, width > 0, height > 0,
                   let window = hostView?.window,
                   window.responds(to: NSSelectorFromString("avDisplayManager")) else { return }
+            let transfer: CFString
+            let range: String
+            switch gamma {
+            case "pq": transfer = kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ; range = "HDR10"
+            case "hlg": transfer = kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG; range = "HLG"
+            default: transfer = kCMFormatDescriptionTransferFunction_ITU_R_709_2; range = "SDR"
+            }
+            let hdr = range != "SDR"
             let extensions: [CFString: Any] = [
-                kCMFormatDescriptionExtension_TransferFunction: kCMFormatDescriptionTransferFunction_ITU_R_709_2,
-                kCMFormatDescriptionExtension_ColorPrimaries: kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
-                kCMFormatDescriptionExtension_YCbCrMatrix: kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2,
+                kCMFormatDescriptionExtension_TransferFunction: transfer,
+                kCMFormatDescriptionExtension_ColorPrimaries: hdr ? kCMFormatDescriptionColorPrimaries_ITU_R_2020 : kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
+                kCMFormatDescriptionExtension_YCbCrMatrix: hdr ? kCMFormatDescriptionYCbCrMatrix_ITU_R_2020 : kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2,
             ]
             var format: CMVideoFormatDescription?
             guard CMVideoFormatDescriptionCreate(
                 allocator: kCFAllocatorDefault,
-                codecType: kCMVideoCodecType_H264,
+                codecType: hdr ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264,
                 width: Int32(width),
                 height: Int32(height),
                 extensions: extensions as CFDictionary,
@@ -1577,7 +1631,7 @@ public struct MpvSurface {
                 formatDescription: format
             )
             displayMatchedWindow = window
-            PlayerLog.write(String(format: "[display] asked for %.3f Hz SDR", fps))
+            PlayerLog.write(String(format: "[display] asked for %.3f Hz %@", fps, range))
         }
         #endif
 
@@ -2106,6 +2160,9 @@ public struct MpvSurface {
                     }
                     if ev.event_id == MPV_EVENT_PLAYBACK_RESTART {
                         self.rearmSizeCheck(after: "restart")
+                        #if os(tvOS)
+                        await MainActor.run { self.fadeInAfterSeek() }
+                        #endif
                     }
                     if ev.event_id == MPV_EVENT_VIDEO_RECONFIG {
                         let gamma = self.stringProperty("video-params/gamma") ?? ""
@@ -2120,7 +2177,10 @@ public struct MpvSurface {
                         }
                         #if os(tvOS)
                         let fps = Double(self.stringProperty("container-fps") ?? "") ?? 0
-                        await MainActor.run { self.matchDisplay(fps: fps, width: vw, height: vh) }
+                        await MainActor.run { self.matchDisplay(fps: fps, width: vw, height: vh, gamma: gamma) }
+                        // What mpv actually draws out, so a log off the box says
+                        // whether an HDR file reached the screen as HDR.
+                        PlayerLog.write("[display] source \(gamma) \(self.stringProperty("video-params/primaries") ?? "-"), output \(self.stringProperty("video-target-params/gamma") ?? "-") \(self.stringProperty("video-target-params/primaries") ?? "-")")
                         #endif
                         PlayerLog.write(String(format: "[libmpv] video reconfig: out %@x%@ osd %@x%@ time-pos %@", self.stringProperty("video-out-params/dw") ?? "-", self.stringProperty("video-out-params/dh") ?? "-", self.stringProperty("osd-dimensions/w") ?? "-", self.stringProperty("osd-dimensions/h") ?? "-", self.stringProperty("time-pos") ?? "-"))
                         // Read here as well as from the property observer.

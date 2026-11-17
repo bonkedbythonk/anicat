@@ -20,9 +20,16 @@ import Foundation
 /// it would miss mpv and Swift, and two files is two things to attach.
 public enum AppLog {
     public static let directoryURL: URL = {
-        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return library.appendingPathComponent("Logs/Anicat", isDirectory: true)
+        #if os(tvOS)
+        // A real Apple TV lets an app write only under Caches and tmp: the
+        // Logs folder was never created there and the box kept no log at
+        // all, while the simulator allowed it.
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+        #else
+        let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+        #endif
+        return (base ?? URL(fileURLWithPath: NSTemporaryDirectory()))
+            .appendingPathComponent("Logs/Anicat", isDirectory: true)
     }()
     public static let fileURL = directoryURL.appendingPathComponent("anicat.log")
 

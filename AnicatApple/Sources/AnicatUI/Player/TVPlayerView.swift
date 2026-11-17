@@ -40,6 +40,7 @@ struct TVPlayerView: View {
         case surface, back, playPause, forward, timeline, tracks, previous, next, playNextNow, cancelNext
     }
     @FocusState private var focus: Focus?
+    @Environment(\.scenePhase) private var scenePhase
     /// A thin timeline shown for a moment after a seek from the hidden
     /// player, which takes no focus and leaves the controls down.
     @State private var seekBarVisible = false
@@ -170,6 +171,14 @@ struct TVPlayerView: View {
             // The bottom fifth is the transport and timeline; the dialogue
             // goes above it while they are up.
             controller.liftSubtitles(by: visible ? 0.2 : 0)
+        }
+        // Set again on the way back into the app. The pause on leaving
+        // brings the chrome up while the app is in the background, where a
+        // focus change does not take, so focus was wherever tvOS put it on
+        // return. The owner: "it goes to the next ep if i leave the app".
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            focus = controller.areControlsVisible ? .playPause : .surface
         }
         // The card takes the remote: Play now is one press away, Back
         // dismisses it. Left on the surface, a press would only have

@@ -114,6 +114,27 @@ struct TVDetailView: View {
                 .prefersDefaultFocus(in: pageFocus)
             }
 
+            // A film's or series' place on this TV's own list. The Library's
+            // Films & TV page reads it, and nothing on the TV could set it.
+            if catalog != .anilist {
+                Menu {
+                    Picker("List", selection: Binding(
+                        get: { model.cinemaListStatus ?? "" },
+                        set: { model.setCinemaListStatus($0.isEmpty ? nil : $0) }
+                    )) {
+                        ForEach(Self.cinemaStatuses, id: \.raw) { Text($0.label).tag($0.raw) }
+                    }
+                    if model.cinemaListStatus != nil {
+                        Button("Remove from list", role: .destructive) { model.setCinemaListStatus(nil) }
+                    }
+                } label: {
+                    Label(
+                        Self.cinemaStatuses.first { $0.raw == model.cinemaListStatus }?.label ?? "Add to list",
+                        anicat: "list.bullet"
+                    )
+                }
+            }
+
             // AniList's list and favourite. A film or series is not on
             // AniList, and these wrote to whatever anime shares its id.
             if catalog == .anilist, model.isSignedIn, details.listEntryId != nil || details.listStatus == nil {
@@ -144,6 +165,11 @@ struct TVDetailView: View {
         .focusScope(pageFocus)
         .focusSection()
     }
+
+    /// The local list's statuses, named as on the Mac's Films & TV page.
+    static let cinemaStatuses: [(raw: String, label: String)] = [
+        ("PLANNING", "Planning"), ("CURRENT", "Watching"), ("COMPLETED", "Completed"), ("DROPPED", "Dropped"),
+    ]
 
     /// " episode 4" for anime, " S2 E3" for a series, nothing for a film,
     /// which has one "episode" that is the film.

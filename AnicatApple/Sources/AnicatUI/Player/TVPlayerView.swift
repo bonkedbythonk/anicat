@@ -437,6 +437,24 @@ struct TVPlayerView: View {
     @ViewBuilder
     private var bufferingIndicator: some View {
         VStack(spacing: 16) {
+            // Until the first frame, the title too: the screen was plain
+            // black for the half second before it, which on a real Apple TV
+            // read as part of the TV's own mode switch.
+            if controller.awaitingNewFile || controller.currentTime < 0.5 {
+                Text(controller.title)
+                    .font(.sumiHeading(size: 44, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 1200)
+                if controller.episodeNumber > 0, !controller.isLiveAction || !controller.episodeTitle.isEmpty {
+                    Text(controller.episodeTitle.isEmpty ? "Episode \(controller.episodeNumber)" : "Episode \(controller.episodeNumber) · \(controller.episodeTitle)")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                        .padding(.bottom, 12)
+                }
+            }
             ProgressView()
                 .progressViewStyle(.circular)
                 .tint(.white)

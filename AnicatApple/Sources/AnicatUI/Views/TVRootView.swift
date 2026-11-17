@@ -814,10 +814,11 @@ private struct LibraryTab: View {
                     TabHeader(title: "Library", model: model)
 
                     if model.appMode == .cinema {
+                        cinemaStatusRow
                         if model.cinemaWatchlist.isEmpty {
                             TVEmptyHint(
-                                title: "Nothing saved",
-                                detail: "Films and series you add to your watchlist show up here."
+                                title: "Nothing on this list",
+                                detail: "Films and series you watch on this Apple TV land in Watching and Completed. Add others from their page."
                             )
                         } else {
                             countLine(model.cinemaWatchlist.count)
@@ -857,6 +858,15 @@ private struct LibraryTab: View {
                 await model.loadLibrary(status: storedStatus)
             }
         }
+        // Every time the page shows in Films & TV, not once: a film watched
+        // or added since lands on the list, and nothing else reloads it.
+        // Before this the page never loaded it at all and always read empty.
+        .task(id: model.appMode) {
+            if model.appMode == .cinema { await model.loadCinemaWatchlist() }
+        }
+        .onAppear {
+            if model.appMode == .cinema { Task { await model.loadCinemaWatchlist() } }
+        }
     }
 
     @ViewBuilder
@@ -871,6 +881,28 @@ private struct LibraryTab: View {
     /// tvOS is a modal list that steals the screen, and six words fit the
     /// width with room to spare.
     @ViewBuilder
+    /// The anime row's twin for the local film and series list.
+    private var cinemaStatusRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 20) {
+                ForEach(TVDetailView.cinemaStatuses, id: \.raw) { status in
+                    Button {
+                        model.cinemaWatchlistFilter = status.raw
+                        Task { await model.loadCinemaWatchlist() }
+                    } label: {
+                        Text(status.label)
+                            .font(.system(size: 24, weight: model.cinemaWatchlistFilter == status.raw ? .semibold : .regular))
+                    }
+                    .tint(model.cinemaWatchlistFilter == status.raw ? SumiTheme.indigo : nil)
+                }
+            }
+            .padding(.horizontal, TVMetrics.gutter)
+            .padding(.vertical, 20)
+        }
+        .scrollClipDisabled()
+        .focusSection()
+    }
+
     private var statusRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 20) {

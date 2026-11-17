@@ -1148,6 +1148,29 @@ extension AppModel {
             }
         }
 
+        #if os(tvOS)
+        // The TV keeps its own film and series history on the local list:
+        // there is no account behind TMDB titles, and with the status set
+        // only by hand the Watching and Completed lists stayed empty however
+        // much was watched. The Mac and phone still leave it to the viewer.
+        if currentPlaybackCatalog != .anilist, !hasAdvancedAniListForCurrentEpisode,
+           completionRulesApply, dur > 0,
+           Double(stopTime) / Double(dur) * 100 >= Self.watchedThresholdPct {
+            hasAdvancedAniListForCurrentEpisode = true
+            let finished = currentPlaybackCatalog == .tmdbMovie || !playerController.hasNextEpisode
+            let catalog = currentPlaybackCatalog
+            engineIOQueue.async {
+                let status = try? engine.cinemaListStatus(catalog: catalog, catalogId: catalogId)
+                // A rewatch of something completed stays completed until its
+                // last episode; anything else moves forward.
+                let next = finished ? "COMPLETED" : (status == "COMPLETED" ? nil : "CURRENT")
+                if let next, next != status {
+                    try? engine.setCinemaListStatus(catalog: catalog, catalogId: catalogId, status: next)
+                }
+            }
+        }
+        #endif
+
         // Any catalog, not just AniList's: a downloaded film is as much space.
         if !hasQueuedWatchedDownloadRemoval, completionRulesApply, dur > 0,
            Double(stopTime) / Double(dur) * 100 >= Self.watchedThresholdPct {

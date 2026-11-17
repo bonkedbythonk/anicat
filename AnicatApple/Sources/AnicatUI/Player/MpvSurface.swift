@@ -949,6 +949,7 @@ public struct MpvSurface {
             mpv_observe_property(handle, 9, "video-params/dh", MPV_FORMAT_INT64)
 
             startEventLoop()
+            startFrameStatsLog()
 
             applyAnime4K(enabled: controller.isAnime4KEnabled)
             applyInterpolation(enabled: controller.isSmoothMotionActive)
@@ -1653,6 +1654,9 @@ public struct MpvSurface {
         @discardableResult
         func selectAudioLanguage(preferDub: Bool) -> Bool {
             guard let mpv else { return false }
+            // Switching language re-decides the subtitles, an earlier hand
+            // pick included: English subtitles stayed on over the dub.
+            explicitSubtitleTrackId = nil
             defer { applySubtitlePreference(preferDub: preferDub) }
             // Re-applied on the next file too: `alang` is a load-time option,
             // so setting it here is what makes the choice stick across an
@@ -1720,12 +1724,22 @@ public struct MpvSurface {
         /// allowed to make the blocking property reads `trackList` is built
         /// out of.
         func applyTrackMemory(_ memory: PlayerController.TrackMemory?) {
-            guard mpv != nil, let memory, !didApplyTrackMemory else { return }
+            guard mpv != nil, !didApplyTrackMemory else { return }
             didApplyTrackMemory = true
             let tracks = trackList()
+            var audio = tracks.audio.first(where: \.isSelected)
+            defer { applySubtitleRule(forAudio: audio) }
+            guard let memory else { return }
             if let lang = memory.audioLang,
                let match = Self.matchTrack(in: tracks.audio, lang: lang, title: nil) {
-                selectAudioTrack(id: match.id)
+                mpv_set_property_string(mpv, "aid", match.id)
+                audio = match
+            } else {
+                // The remembered subtitles went with a remembered audio
+                // language this file does not have: the language rule
+                // decides instead. Restored anyway, a Sub episode's English
+                // track came back over a dub.
+                return
             }
             if let lang = memory.subtitleLang,
                let match = Self.matchTrack(in: tracks.subtitle, lang: lang, title: memory.subtitleTitle) {
@@ -1806,6 +1820,27 @@ public struct MpvSurface {
         func selectAudioTrack(id: String) {
             guard let mpv else { return }
             mpv_set_property_string(mpv, "aid", id)
+            // The subtitles follow, as they do for the Sub/Dub switch: the TV
+            // picks audio from a list and kept English subtitles on a dub.
+            // Off the main thread for the track walk, through the handle lock.
+            explicitSubtitleTrackId = nil
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.withHandle { _ in
+                    guard let self else { return }
+                    self.applySubtitleRule(forAudio: self.trackList().audio.first { $0.id == id })
+                }
+            }
+        }
+
+        /// Full English subtitles under Japanese audio, signs only (or none)
+        /// under English audio; nothing for a language that is neither.
+        private func applySubtitleRule(forAudio track: PlayerTrack?) {
+            guard let track else { return }
+            if track.isEnglishAudio {
+                applySubtitlePreference(preferDub: true)
+            } else if track.isJapaneseAudio {
+                applySubtitlePreference(preferDub: false)
+            }
         }
 
         /// `vid=no` stops the decoder and the vo without touching the audio
@@ -2103,6 +2138,54 @@ public struct MpvSurface {
             }
             return chapters
         }
+
+        private var frameStatsTimer: DispatchSourceTimer?
+
+        /// Dropped and late frames every 10 s of playback, in the log. "A
+        /// slight visual lag" on the Apple TV could not be told apart from
+        /// the upscaling load, the main thread or nothing without numbers.
+        private func startFrameStatsLog() {
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+            timer.schedule(deadline: .now() + 10, repeating: 10)
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.withHandle { _ in
+                    let value = { (name: String) in self.stringProperty(name) ?? "-" }
+                    PlayerLog.write("[frames] at \(value("time-pos")) pause \(value("pause")) cache-wait \(value("paused-for-cache")) idle \(value("core-idle")) dropped \(value("frame-drop-count")) decoder-dropped \(value("decoder-frame-drop-count")) late \(value("vo-delayed-frame-count")) fps \(value("estimated-vf-fps")) display \(value("display-fps")) avsync \(value("avsync"))")
+                }
+            }
+            timer.resume()
+            frameStatsTimer = timer
+
+            // Main-queue twin that reads only the controller: when mpv itself
+            // hangs, every property read above blocks with it and the frame
+            // line simply stops, which is all three freezes seen on the box
+            // left behind. This one still gets written.
+            let watchdog = DispatchSource.makeTimerSource(queue: .main)
+            watchdog.schedule(deadline: .now() + 5, repeating: 5)
+            var lastTime = -1.0
+            var stillFor = 0
+            watchdog.setEventHandler { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let c = self.controller
+                    let moving = c.currentTime != lastTime
+                    lastTime = c.currentTime
+                    if !c.isPlaying || c.isBuffering || c.awaitingNewFile || moving {
+                        stillFor = 0
+                        return
+                    }
+                    stillFor += 5
+                    if stillFor == 10 {
+                        PlayerLog.write(String(format: "[stall] playing, not buffering, position stuck at %.1fs for 10 s", c.currentTime))
+                    }
+                }
+            }
+            watchdog.resume()
+            stallWatchdog = watchdog
+        }
+
+        private var stallWatchdog: DispatchSourceTimer?
 
         private func startEventLoop() {
             guard let mpv = mpv else { return }
@@ -2436,6 +2519,10 @@ public struct MpvSurface {
         func stop() {
             guard isRunning else { return }
             isRunning = false
+            frameStatsTimer?.cancel()
+            frameStatsTimer = nil
+            stallWatchdog?.cancel()
+            stallWatchdog = nil
             #if os(tvOS)
             let window = displayMatchedWindow
             Task { @MainActor in window?.avDisplayManager.preferredDisplayCriteria = nil }

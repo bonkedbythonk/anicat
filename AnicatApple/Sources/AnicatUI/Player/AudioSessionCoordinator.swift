@@ -82,7 +82,15 @@ final class AudioSessionCoordinator {
                 MainActor.assumeIsolated { self?.handleRouteChange(reasonRaw: reason) }
             },
             center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.controller?.onSetVideoEnabled?(false) }
+                MainActor.assumeIsolated {
+                    self?.controller?.onSetVideoEnabled?(false)
+                    #if os(tvOS)
+                    // The box going to sleep is also an interruption, and
+                    // its end on wake carries shouldResume: the owner turned
+                    // the TV off mid-episode and came back to it playing.
+                    self?.resumeAfterInterruption = false
+                    #endif
+                }
             },
             center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.controller?.onSetVideoEnabled?(true) }

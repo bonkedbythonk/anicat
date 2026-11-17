@@ -187,9 +187,9 @@ public struct TVRootView: View {
                 // the background, so an episode left playing when the box
                 // slept could go on unseen past 85%, be marked watched and
                 // roll into the next one. The pause also writes the position.
-                if model.activeStreamURL != nil, model.playerController.isPlaying {
-                    model.playerController.togglePlayPause()
-                }
+                // pause(), never a toggle: on a stale isPlaying a toggle
+                // starts the episode in the background instead.
+                if model.activeStreamURL != nil { model.playerController.pause() }
             case .active:
                 model.applyLanSharingSetting(AppModel.isLanSharingEnabled)
                 // Only back from the background: Control Center and Siri

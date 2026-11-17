@@ -39,6 +39,14 @@ public enum AppLog {
     static let keptLaunches = 3
 
     private static let queue = DispatchQueue(label: "app.anicat.log", qos: .utility)
+
+    /// The file is emptied when it passes this. A run on the Apple TV grew
+    /// one launch's log past 4.65 GB and the app to 50 GB, until SQLite
+    /// could not write the registry ("disk i/o error") and the app would
+    /// not start. Truncating is safe under the `O_APPEND` writers: the next
+    /// write lands at the new end.
+    static let maxBytes: UInt64 = 50 * 1024 * 1024
+    nonisolated(unsafe) private static var sizeTimer: DispatchSourceTimer?
     private static let stamp: DateFormatter = {
         let f = DateFormatter()
         // UTC and ISO, the same shape `env_logger` stamps its lines with,
@@ -79,6 +87,17 @@ public enum AppLog {
         } else {
             fileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         }
+
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 30, repeating: 30)
+        timer.setEventHandler {
+            let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? UInt64) ?? 0
+            guard size > maxBytes, truncate(fileURL.path, 0) == 0 else { return }
+            let note = "\(stamp.string(from: Date())) [log] emptied at \(size / 1_048_576) MB\n"
+            FileHandle.standardError.write(Data(note.utf8))
+        }
+        timer.resume()
+        sizeTimer = timer
 
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "dev"

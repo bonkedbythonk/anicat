@@ -4,6 +4,10 @@ import AppKit
 #else
 import UIKit
 #endif
+#if os(tvOS)
+import AVKit
+import CoreMedia
+#endif
 import Libmpv
 
 /// Carries a non-`Sendable` value across an explicit `@Sendable` closure
@@ -595,6 +599,11 @@ public struct MpvSurface {
         /// HDR or above 1080p: the filter's 8-bit 4:2:0 input would flatten HDR, and
         /// nothing anime ships above 1080p. Read from the decoder's own params.
         private var smoothBlockedByContent = false
+        #if os(tvOS)
+        /// The window whose display mode was asked to match the file, kept
+        /// so `stop` can hand the mode back after the view is gone.
+        private weak var displayMatchedWindow: UIWindow?
+        #endif
         private var sidewaysSavedHwdec: String?
         /// The `sid` the viewer picked from the subtitle list, so a later
         /// Sub/Dub toggle re-applies it rather than running the language
@@ -880,6 +889,9 @@ public struct MpvSurface {
             controller.onSetFillScreen = { [weak self] fill, crop in
                 self?.setFillScreen(fill, crop: crop)
             }
+            controller.onSetPanscan = { [weak self] amount in
+                self?.setPanscan(amount)
+            }
             controller.onLiftSubtitles = { [weak self] share in
                 self?.setSubtitleLift(share)
             }
@@ -933,6 +945,7 @@ public struct MpvSurface {
 
             applyAnime4K(enabled: controller.isAnime4KEnabled)
             applyInterpolation(enabled: controller.isSmoothMotionActive)
+            if controller.zoomAmount > 0 { setPanscan(controller.zoomAmount) }
             setPaused(!controller.isPlaying)
             setVolume(controller.volume)
             setMuted(controller.isMuted)
@@ -1384,6 +1397,12 @@ public struct MpvSurface {
         /// overhang to zero before libass sees it. So the dialogue styles'
         /// `MarginV` is raised by the crop instead; signs with their own
         /// position still crop with the picture, as in the system player.
+        func setPanscan(_ amount: Double) {
+            guard let mpv = mpv else { return }
+            var value = amount
+            mpv_set_property(mpv, "panscan", MPV_FORMAT_DOUBLE, &value)
+        }
+
         func setFillScreen(_ fill: Bool, crop: Double) {
             guard let mpv = mpv else { return }
             var value: Double = fill ? 1 : 0
@@ -1523,6 +1542,44 @@ public struct MpvSurface {
                 PlayerLog.write("[smooth] off")
             }
         }
+
+        #if os(tvOS)
+        /// Asks the TV for the file's frame rate in SDR. Without it the box
+        /// stays in its menu mode (often 4K HDR or Dolby Vision at 60 Hz):
+        /// 23.976 fps anime judders against 60 Hz, and the SDR picture mpv
+        /// draws is converted into HDR, which on a real Apple TV looked off.
+        /// Always SDR, HDR files included: mpv tone-maps those into an SDR
+        /// surface, so an HDR mode would only convert them back. Acts only
+        /// with Settings > Video and Audio > Match Content turned on.
+        @MainActor
+        func matchDisplay(fps: Double, width: Int, height: Int) {
+            // The selector check keeps a build without AVKit linked playing
+            // instead of aborting on an unrecognized selector.
+            guard fps > 0, width > 0, height > 0,
+                  let window = hostView?.window,
+                  window.responds(to: NSSelectorFromString("avDisplayManager")) else { return }
+            let extensions: [CFString: Any] = [
+                kCMFormatDescriptionExtension_TransferFunction: kCMFormatDescriptionTransferFunction_ITU_R_709_2,
+                kCMFormatDescriptionExtension_ColorPrimaries: kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
+                kCMFormatDescriptionExtension_YCbCrMatrix: kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2,
+            ]
+            var format: CMVideoFormatDescription?
+            guard CMVideoFormatDescriptionCreate(
+                allocator: kCFAllocatorDefault,
+                codecType: kCMVideoCodecType_H264,
+                width: Int32(width),
+                height: Int32(height),
+                extensions: extensions as CFDictionary,
+                formatDescriptionOut: &format
+            ) == noErr, let format else { return }
+            window.avDisplayManager.preferredDisplayCriteria = AVDisplayCriteria(
+                refreshRate: Float(fps),
+                formatDescription: format
+            )
+            displayMatchedWindow = window
+            PlayerLog.write(String(format: "[display] asked for %.3f Hz SDR", fps))
+        }
+        #endif
 
         // Backward compatibility overload
         @MainActor
@@ -2061,6 +2118,10 @@ public struct MpvSurface {
                             if blocked { PlayerLog.write("[smooth] off for this file: \(vw)x\(vh) \(gamma)") }
                             self.applyInterpolation(enabled: self.controller.isSmoothMotionActive)
                         }
+                        #if os(tvOS)
+                        let fps = Double(self.stringProperty("container-fps") ?? "") ?? 0
+                        await MainActor.run { self.matchDisplay(fps: fps, width: vw, height: vh) }
+                        #endif
                         PlayerLog.write(String(format: "[libmpv] video reconfig: out %@x%@ osd %@x%@ time-pos %@", self.stringProperty("video-out-params/dw") ?? "-", self.stringProperty("video-out-params/dh") ?? "-", self.stringProperty("osd-dimensions/w") ?? "-", self.stringProperty("osd-dimensions/h") ?? "-", self.stringProperty("time-pos") ?? "-"))
                         // Read here as well as from the property observer.
                         // `resolveAndPlay` clears the displayed size for every
@@ -2315,6 +2376,10 @@ public struct MpvSurface {
         func stop() {
             guard isRunning else { return }
             isRunning = false
+            #if os(tvOS)
+            let window = displayMatchedWindow
+            Task { @MainActor in window?.avDisplayManager.preferredDisplayCriteria = nil }
+            #endif
             controller.onSeek = nil
             controller.onSetPause = nil
             controller.onSelectAudioLanguage = nil
@@ -2331,6 +2396,7 @@ public struct MpvSurface {
             controller.onCycleSideways = nil
             controller.sidewaysState = 0
             controller.onSetFillScreen = nil
+            controller.onSetPanscan = nil
             controller.onLiftSubtitles = nil
             controller.isFillingScreen = false
             sidewaysSavedHwdec = nil

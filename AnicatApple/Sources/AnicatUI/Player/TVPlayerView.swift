@@ -24,8 +24,6 @@ struct TVPlayerView: View {
     let streamURL: URL
     let onClose: () -> Void
 
-    @State private var audioTracks: [PlayerTrack] = []
-    @State private var subtitleTracks: [PlayerTrack] = []
     @State private var releases: [MediaDetailView.ReleaseCandidateItem] = []
     @State private var releaseFailure: String?
     @State private var isLoadingReleases = false
@@ -33,12 +31,15 @@ struct TVPlayerView: View {
     // Same keys as the phone's menu, so a speed or size picked on one
     // device's player is the one the other starts at.
     @AppStorage("anicat_playback_speed") private var storedSpeed: Double = 1.0
-    @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
 
-    private enum Focus: Hashable {
+    fileprivate enum Focus: Hashable {
         case surface, back, playPause, forward, timeline, tracks, next, playNextNow, cancelNext
     }
     @FocusState private var focus: Focus?
+    /// A thin timeline shown for a moment after a seek from the hidden
+    /// player, which takes no focus and leaves the controls down.
+    @State private var seekBarVisible = false
+    @State private var seekBarHide: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -70,10 +71,13 @@ struct TVPlayerView: View {
                 .buttonStyle(TVInvisibleButtonStyle())
                 .focusEffectDisabled()
                 .focused($focus, equals: .surface)
+                // Seeks without bringing the controls up. Showing them
+                // moved focus onto the play button, so on a real Apple TV a
+                // second press or swipe moved focus instead of seeking.
                 .onMoveCommand { direction in
                     switch direction {
-                    case .left: seek(by: -10)
-                    case .right: seek(by: 10)
+                    case .left: seekQuietly(by: -10)
+                    case .right: seekQuietly(by: 10)
                     default: showControls()
                     }
                 }
@@ -85,6 +89,15 @@ struct TVPlayerView: View {
             }
 
             skipPill
+
+            if seekBarVisible && !controller.areControlsVisible {
+                TVTimeline(controller: controller, focus: $focus, onSeek: seek(by:))
+                    .disabled(true)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.horizontal, TVMetrics.gutter)
+                    .padding(.vertical, 60)
+                    .transition(.opacity)
+            }
 
             if controller.areControlsVisible {
                 controls
@@ -117,13 +130,7 @@ struct TVPlayerView: View {
         .task {
             controller.showControlsBriefly()
             focus = .playPause
-            fetchTracks()
             if controller.playbackRate != storedSpeed { controller.setPlaybackRate(storedSpeed) }
-        }
-        // The `task` above runs before mpv has opened the file, when the
-        // track list is empty. A duration means the file is loaded.
-        .onChange(of: controller.duration) { _, duration in
-            if duration > 0 { fetchTracks() }
         }
         // Focus follows the chrome: onto the play button as it comes up, back
         // onto the surface as it goes, since the button it sat on is gone.
@@ -214,7 +221,9 @@ struct TVPlayerView: View {
                 titleRow
                 Spacer()
                 VStack(spacing: 28) {
-                    timeline
+                    // Its own view: the clock changes four times a second,
+                    // and read here it redrew the whole chrome each time.
+                    TVTimeline(controller: controller, focus: $focus, onSeek: seek(by:))
                     transport
                 }
             }
@@ -246,37 +255,6 @@ struct TVPlayerView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The scrubbed position as a bar with the times at each end. Focusable
-    /// so the ring can seek from it: a `Slider` does not exist on tvOS, and
-    /// there is nothing to drag with anyway.
-    @ViewBuilder
-    private var timeline: some View {
-        HStack(spacing: 24) {
-            Text(PlayerController.formatTimestamp(controller.currentTime))
-                .font(.system(size: 22)).monospacedDigit()
-                .foregroundStyle(.white.opacity(0.85))
-                .frame(width: 130, alignment: .leading)
-
-            TimelineBar(fraction: controller.progressFraction, isFocused: focus == .timeline)
-                .frame(height: 12)
-                .frame(maxWidth: .infinity)
-                .focusable()
-                .focused($focus, equals: .timeline)
-                .onMoveCommand { direction in
-                    switch direction {
-                    case .left: seek(by: -10)
-                    case .right: seek(by: 10)
-                    default: break
-                    }
-                }
-
-            Text("-" + PlayerController.formatTimestamp(max(0, controller.duration - controller.currentTime)))
-                .font(.system(size: 22)).monospacedDigit()
-                .foregroundStyle(.white.opacity(0.85))
-                .frame(width: 140, alignment: .trailing)
-        }
     }
 
     @ViewBuilder
@@ -311,108 +289,15 @@ struct TVPlayerView: View {
                 .focused($focus, equals: .next)
             }
 
-            tracksMenu
+            // Its own view, compared by controller only: built inline, the
+            // menu was rebuilt by every one-second clock tick of this view,
+            // and on a real Apple TV an open menu glitched mid-episode.
+            TVPlayerMenu(controller: controller, showReleases: $showReleases, onClose: onClose)
+                .equatable()
                 .focused($focus, equals: .tracks)
         }
         .font(.system(size: 30))
         .focusSection()
-    }
-
-    @ViewBuilder
-    private var tracksMenu: some View {
-        Menu {
-            if !audioTracks.isEmpty {
-                Picker("Audio", selection: audioSelection) {
-                    ForEach(audioTracks) { track in
-                        Text(track.label).tag(track.id)
-                    }
-                }
-                // A submenu with its name and current value: inline, tvOS
-                // listed every choice under one another with no heading.
-                .pickerStyle(.menu)
-            }
-            if !subtitleTracks.isEmpty {
-                Picker("Subtitles", selection: subtitleSelection) {
-                    Text("Off").tag(PlayerTrack.off)
-                    ForEach(subtitleTracks) { track in
-                        Text(track.label).tag(track.id)
-                    }
-                }
-                // A submenu with its name and current value: inline, tvOS
-                // listed every choice under one another with no heading.
-                .pickerStyle(.menu)
-            }
-            Picker("Speed", selection: Binding(
-                get: { controller.playbackRate },
-                set: { rate in
-                    storedSpeed = rate
-                    controller.setPlaybackRate(rate)
-                }
-            )) {
-                ForEach(PlayerController.playbackSpeeds, id: \.self) { rate in
-                    Text(rate == 1 ? "Normal" : PlayerController.speedLabel(rate)).tag(rate)
-                }
-            }
-            // A submenu with its name and current value: inline, tvOS
-            // listed every choice under one another with no heading.
-            .pickerStyle(.menu)
-            Picker("Subtitle size", selection: Binding(
-                get: { subtitleScale },
-                set: { scale in
-                    subtitleScale = scale
-                    controller.setSubtitleScale(scale)
-                }
-            )) {
-                Text("Small").tag(0.8)
-                Text("Normal").tag(1.0)
-                Text("Large").tag(1.25)
-                Text("Huge").tag(1.5)
-            }
-            // A submenu with its name and current value: inline, tvOS
-            // listed every choice under one another with no heading.
-            .pickerStyle(.menu)
-            // Auto-skip is on by default, and while it is the Skip pill never
-            // shows: the intro just goes. Here so it can be turned off for one
-            // show's opening without leaving the episode for Settings.
-            Toggle("Skip intros automatically", isOn: Binding(
-                get: { controller.autoSkipEnabled },
-                set: { on in if on != controller.autoSkipEnabled { controller.toggleAutoSkip() } }
-            ))
-            // In the player, not Settings: whether the box keeps up is only
-            // known mid-episode, and a stutter should be one click from off.
-            Toggle("Upscaling", isOn: Binding(
-                get: { controller.isAnime4KEnabled },
-                set: { on in if on != controller.isAnime4KEnabled { controller.toggleAnime4K() } }
-            ))
-            if !controller.chapters.isEmpty {
-                Menu {
-                    ForEach(controller.chapters) { chapter in
-                        Button("\(PlayerController.formatTimestamp(chapter.time))  \(chapter.title)") {
-                            controller.seek(to: chapter.time)
-                            controller.showControlsBriefly()
-                        }
-                    }
-                } label: {
-                    Label("Chapters", anicat: "list.number")
-                }
-            }
-            Button {
-                showReleases = true
-            } label: {
-                Label("Release", anicat: "square.stack.3d.up")
-            }
-            if controller.hasPreviousEpisode {
-                Button("Previous episode") { controller.previousEpisode() }
-            }
-            Button("Close player", role: .destructive, action: onClose)
-        } label: {
-            Image(anicat: "ellipsis.circle")
-        }
-        // A menu open on tvOS is a modal; the chrome under it must not time
-        // out and drop focus from under the picker.
-        .onChange(of: controller.isMenuOpen) { _, open in
-            if open { controller.cancelAutohide() } else { controller.showControlsBriefly() }
-        }
     }
 
     /// Which release is being streamed: the engine races candidates and
@@ -480,41 +365,20 @@ struct TVPlayerView: View {
         }
     }
 
-    private var audioSelection: Binding<String> {
-        Binding(
-            get: { audioTracks.first(where: \.isSelected)?.id ?? "" },
-            set: { id in
-                controller.onSelectAudioTrack?(id)
-                if let track = audioTracks.first(where: { $0.id == id }) {
-                    controller.rememberAudioTrack(track)
-                }
-                fetchTracks()
-            }
-        )
-    }
-
-    private var subtitleSelection: Binding<String> {
-        Binding(
-            get: { subtitleTracks.first(where: \.isSelected)?.id ?? PlayerTrack.off },
-            set: { id in
-                let track = subtitleTracks.first(where: { $0.id == id })
-                controller.onSelectSubtitleTrack?(id == PlayerTrack.off ? nil : id)
-                controller.rememberSubtitleTrack(track)
-                fetchTracks()
-            }
-        )
-    }
-
-    private func fetchTracks() {
-        controller.onFetchTracks? { audio, subtitle in
-            audioTracks = audio
-            subtitleTracks = subtitle
-        }
-    }
-
     private func seek(by delta: Double) {
         controller.seekRelative(by: delta)
         controller.showControlsBriefly()
+    }
+
+    private func seekQuietly(by delta: Double) {
+        controller.seekRelative(by: delta)
+        withAnimation(.easeOut(duration: 0.15)) { seekBarVisible = true }
+        seekBarHide?.cancel()
+        seekBarHide = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { seekBarVisible = false }
+        }
     }
 
     // MARK: Skip intro / outro
@@ -562,6 +426,220 @@ struct TVPlayerView: View {
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// The player's options menu (audio, subtitles, speed, look, release).
+///
+/// Equatable on the controller alone, so the parent's one-second redraws
+/// pass it by; it still redraws when anything it reads on the controller
+/// changes, through observation.
+private struct TVPlayerMenu: View, @MainActor Equatable {
+    @Bindable var controller: PlayerController
+    @Binding var showReleases: Bool
+    let onClose: () -> Void
+
+    @State private var audioTracks: [PlayerTrack] = []
+    @State private var subtitleTracks: [PlayerTrack] = []
+    // Same keys as the phone's and the Mac's menus, so a speed, size or look
+    // picked on one device's player is the one the others start at.
+    @AppStorage("anicat_playback_speed") private var storedSpeed: Double = 1.0
+    @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
+    @AppStorage(SubtitleStyle.key) private var subtitleStyleRaw: String = SubtitleStyle.release.rawValue
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.controller === rhs.controller }
+
+    var body: some View {
+        Menu {
+            if !audioTracks.isEmpty {
+                Picker("Audio", selection: audioSelection) {
+                    ForEach(audioTracks) { track in
+                        Text(track.label).tag(track.id)
+                    }
+                }
+                // A submenu with its name and current value: inline, tvOS
+                // listed every choice under one another with no heading.
+                .pickerStyle(.menu)
+            }
+            if !subtitleTracks.isEmpty {
+                Picker("Subtitles", selection: subtitleSelection) {
+                    Text("Off").tag(PlayerTrack.off)
+                    ForEach(subtitleTracks) { track in
+                        Text(track.label).tag(track.id)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+            Picker("Speed", selection: Binding(
+                get: { controller.playbackRate },
+                set: { rate in
+                    storedSpeed = rate
+                    controller.setPlaybackRate(rate)
+                }
+            )) {
+                ForEach(PlayerController.playbackSpeeds, id: \.self) { rate in
+                    Text(rate == 1 ? "Normal" : PlayerController.speedLabel(rate)).tag(rate)
+                }
+            }
+            .pickerStyle(.menu)
+            Picker("Subtitle size", selection: Binding(
+                get: { subtitleScale },
+                set: { scale in
+                    subtitleScale = scale
+                    controller.setSubtitleScale(scale)
+                }
+            )) {
+                Text("Small").tag(0.8)
+                Text("Normal").tag(1.0)
+                Text("Large").tag(1.25)
+                Text("Huge").tag(1.5)
+            }
+            .pickerStyle(.menu)
+            // The Mac player's "Subtitle look" tiles, as a list: the same
+            // presets, applied at once and kept for the next episode.
+            Picker("Subtitle style", selection: Binding(
+                get: { SubtitleStyle(rawValue: subtitleStyleRaw) ?? .release },
+                set: { style in
+                    subtitleStyleRaw = style.rawValue
+                    controller.onSetSubtitleStyle?(style)
+                }
+            )) {
+                ForEach(SubtitleStyle.allCases) { style in
+                    Text(style.label).tag(style)
+                }
+            }
+            .pickerStyle(.menu)
+            // Only for a picture wider than the screen: on a 16:9 episode
+            // `panscan` crops nothing and the choice would do nothing.
+            if (controller.videoAspectRatio ?? 0) > 1.85 {
+                Picker("Zoom", selection: Binding(
+                    get: { controller.zoomAmount },
+                    set: { controller.setZoom($0) }
+                )) {
+                    Text("Fit").tag(0.0)
+                    Text("A little").tag(0.25)
+                    Text("Halfway").tag(0.5)
+                    Text("Most").tag(0.75)
+                    Text("Fill height").tag(1.0)
+                }
+                .pickerStyle(.menu)
+            }
+            // Auto-skip is on by default, and while it is the Skip pill never
+            // shows: the intro just goes. Here so it can be turned off for one
+            // show's opening without leaving the episode for Settings.
+            Toggle("Skip intros automatically", isOn: Binding(
+                get: { controller.autoSkipEnabled },
+                set: { on in if on != controller.autoSkipEnabled { controller.toggleAutoSkip() } }
+            ))
+            // In the player, not Settings: whether the box keeps up is only
+            // known mid-episode, and a stutter should be one click from off.
+            Toggle("Upscaling", isOn: Binding(
+                get: { controller.isAnime4KEnabled },
+                set: { on in if on != controller.isAnime4KEnabled { controller.toggleAnime4K() } }
+            ))
+            if !controller.chapters.isEmpty {
+                Menu {
+                    ForEach(controller.chapters) { chapter in
+                        Button("\(PlayerController.formatTimestamp(chapter.time))  \(chapter.title)") {
+                            controller.seek(to: chapter.time)
+                            controller.showControlsBriefly()
+                        }
+                    }
+                } label: {
+                    Label("Chapters", anicat: "list.number")
+                }
+            }
+            Button {
+                showReleases = true
+            } label: {
+                Label("Release", anicat: "square.stack.3d.up")
+            }
+            if controller.hasPreviousEpisode {
+                Button("Previous episode") { controller.previousEpisode() }
+            }
+            Button("Close player", role: .destructive, action: onClose)
+        } label: {
+            Image(anicat: "ellipsis.circle")
+        }
+        // A menu open on tvOS is a modal; the chrome under it must not time
+        // out and drop focus from under the picker.
+        .onChange(of: controller.isMenuOpen) { _, open in
+            if open { controller.cancelAutohide() } else { controller.showControlsBriefly() }
+        }
+        .task { fetchTracks() }
+        // The chrome can come up before mpv has opened the file, when the
+        // track list is empty. A duration means the file is loaded.
+        .onChange(of: controller.duration) { _, duration in
+            if duration > 0 { fetchTracks() }
+        }
+    }
+
+    private var audioSelection: Binding<String> {
+        Binding(
+            get: { audioTracks.first(where: \.isSelected)?.id ?? "" },
+            set: { id in
+                controller.onSelectAudioTrack?(id)
+                if let track = audioTracks.first(where: { $0.id == id }) {
+                    controller.rememberAudioTrack(track)
+                }
+                fetchTracks()
+            }
+        )
+    }
+
+    private var subtitleSelection: Binding<String> {
+        Binding(
+            get: { subtitleTracks.first(where: \.isSelected)?.id ?? PlayerTrack.off },
+            set: { id in
+                let track = subtitleTracks.first(where: { $0.id == id })
+                controller.onSelectSubtitleTrack?(id == PlayerTrack.off ? nil : id)
+                controller.rememberSubtitleTrack(track)
+                fetchTracks()
+            }
+        )
+    }
+
+    private func fetchTracks() {
+        controller.onFetchTracks? { audio, subtitle in
+            audioTracks = audio
+            subtitleTracks = subtitle
+        }
+    }
+}
+
+/// The scrubbed position as a bar with the times at each end. Focusable
+/// so the ring can seek from it: a `Slider` does not exist on tvOS, and
+/// there is nothing to drag with anyway.
+private struct TVTimeline: View {
+    let controller: PlayerController
+    var focus: FocusState<TVPlayerView.Focus?>.Binding
+    let onSeek: (Double) -> Void
+
+    var body: some View {
+        HStack(spacing: 24) {
+            Text(PlayerController.formatTimestamp(controller.currentTime))
+                .font(.system(size: 22)).monospacedDigit()
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 130, alignment: .leading)
+
+            TimelineBar(fraction: controller.progressFraction, isFocused: focus.wrappedValue == .timeline)
+                .frame(height: 12)
+                .frame(maxWidth: .infinity)
+                .focusable()
+                .focused(focus, equals: .timeline)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .left: onSeek(-10)
+                    case .right: onSeek(10)
+                    default: break
+                    }
+                }
+
+            Text("-" + PlayerController.formatTimestamp(max(0, controller.duration - controller.currentTime)))
+                .font(.system(size: 22)).monospacedDigit()
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 140, alignment: .trailing)
+        }
     }
 }
 

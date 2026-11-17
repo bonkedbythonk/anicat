@@ -409,6 +409,18 @@ public final class PlayerController {
     /// `crop` is the share of the picture's height cut off each edge, which
     /// the coordinator lifts the dialogue by.
     public var onSetFillScreen: (@Sendable (_ fill: Bool, _ crop: Double) -> Void)?
+
+    /// Apple TV zoom for films wider than the screen, as mpv's `panscan`:
+    /// 0 shows the whole picture, 1 fills the height and crops the sides.
+    /// Steps between, because the owner wanted to give up "a few bits" of
+    /// the sides for some of the height, not all or nothing. Kept for the
+    /// session, so the next film opens at the same step.
+    public var zoomAmount: Double = 0
+    public var onSetPanscan: (@Sendable (_ amount: Double) -> Void)?
+    public func setZoom(_ amount: Double) {
+        zoomAmount = amount
+        onSetPanscan?(amount)
+    }
     public func setFillScreen(_ fill: Bool) {
         isFillingScreen = fill
         onSetFillScreen?(fill, fill ? fillCrop : 0)

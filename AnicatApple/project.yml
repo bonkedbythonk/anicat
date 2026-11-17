@@ -187,6 +187,10 @@ targets:
         product: AnicatUI
       - package: AnicatApple
         product: AnicatCoreKit
+      # UIWindow.avDisplayManager is an AVKit category. Autolinking from the
+      # static AnicatUI did not reach the app: a real Apple TV aborted with
+      # "unrecognized selector" at the first frame-rate match.
+      - sdk: AVKit.framework
     info:
       path: Generated/Info-tvOS.plist
       properties:

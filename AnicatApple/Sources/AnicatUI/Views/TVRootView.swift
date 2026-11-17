@@ -64,7 +64,7 @@ public struct TVRootView: View {
             // tab bar sits at the top of the screen and a stray swipe up
             // would land on it, behind the picture, and start switching
             // tabs under a playing episode.
-            .disabled(model.activeStreamURL != nil || model.isPersonPageOpen)
+            .disabled(model.activeStreamURL != nil || model.isPersonPageOpen || model.openCinemaPersonId != nil)
             .opacity(model.activeStreamURL != nil ? 0 : 1)
 
             // A character, voice actor or studio, over whatever page opened
@@ -74,6 +74,12 @@ public struct TVRootView: View {
                 TVPersonView(model: model)
                     .transition(.opacity)
                     .zIndex(20)
+            }
+
+            if let personId = model.openCinemaPersonId {
+                TVCinemaPersonView(model: model, personId: personId)
+                    .transition(.opacity)
+                    .zIndex(21)
             }
 
             // One call site, outside the TabView, and not inside an `if` per

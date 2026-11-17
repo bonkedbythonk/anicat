@@ -312,4 +312,117 @@ struct TVPersonCard: View {
         }
     }
 }
+/// A film or series actor on the TV: photo, name, biography, and what they
+/// are known for, each opening that title. Without it a film's cast card
+/// sent its TMDB person id to the AniList character page.
+struct TVCinemaPersonView: View {
+    @Bindable var model: AppModel
+    let personId: Int64
+
+    @State private var person: CinemaPerson?
+    @State private var failed = false
+    /// The first credit. Put there on load: the page underneath is
+    /// disabled, and tvOS otherwise left focus with it (see `TVPersonView`).
+    @FocusState private var focused: Int64?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: TVMetrics.rowSpacing) {
+                if let person {
+                    HStack(alignment: .top, spacing: 60) {
+                        CachedAsyncImage(url: person.photoUrl.flatMap(URL.init(string:)), maxPixelSize: 600) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            TVMetrics.placeholder
+                        }
+                        .frame(width: 200, height: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(person.name)
+                                .font(.sumiHeading(size: 60, weight: .bold))
+                                .foregroundStyle(SumiTheme.foreground)
+                            let line = [person.knownFor, person.birthday.flatMap(TVDetailView.longDate), person.placeOfBirth]
+                                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+                            if !line.isEmpty {
+                                Text(line)
+                                    .font(.system(size: 24))
+                                    .foregroundStyle(SumiTheme.muted)
+                            }
+                            if let bio = person.biography, !bio.isEmpty {
+                                Text(bio)
+                                    .font(.system(size: 24))
+                                    .lineSpacing(6)
+                                    .foregroundStyle(SumiTheme.foreground.opacity(0.85))
+                                    .lineLimit(4)
+                                    .frame(maxWidth: 1200, alignment: .leading)
+                                    .padding(.top, 10)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, TVMetrics.gutter)
+
+                    if !person.credits.isEmpty {
+                        VStack(alignment: .leading, spacing: 18) {
+                            TVSectionHeader("Known for")
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                LazyHStack(alignment: .top, spacing: TVMetrics.shelfSpacing) {
+                                    ForEach(person.credits, id: \.catalogId) { credit in
+                                        TVPersonCard(
+                                            imageURL: credit.coverImage,
+                                            title: credit.title,
+                                            subtitle: [credit.character, credit.year.map(String.init)]
+                                                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} "),
+                                            focus: $focused,
+                                            focusID: credit.catalogId
+                                        ) {
+                                            open(credit)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, TVMetrics.gutter)
+                                .padding(.vertical, 30)
+                            }
+                            .scrollClipDisabled()
+                        }
+                        .focusSection()
+                    }
+                } else if failed {
+                    TVEmptyHint(title: "Could not load this person", detail: "TMDB did not answer. Press Back and try again.")
+                        .padding(.top, 200)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 300)
+                }
+            }
+            .padding(.vertical, 40)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollClipDisabled()
+        .background(SumiTheme.background.ignoresSafeArea())
+        .onExitCommand { model.openCinemaPersonId = nil }
+        .task(id: personId) {
+            person = nil
+            failed = false
+            person = await model.cinemaPerson(id: personId)
+            failed = person == nil
+            if let first = person?.credits.first { focused = first.catalogId }
+        }
+    }
+
+    /// The credit's page replaces the one underneath, and this page closes
+    /// so Back lands on it.
+    private func open(_ credit: CinemaCredit) {
+        model.openCinemaPersonId = nil
+        Task {
+            await model.openCinemaDetail(
+                catalog: credit.catalog == .tmdbMovie ? .tmdbMovie : .tmdbTv,
+                id: credit.catalogId,
+                title: credit.title,
+                coverURL: credit.coverImage.flatMap(URL.init(string:))
+            )
+        }
+    }
+}
 #endif

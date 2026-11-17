@@ -1,5 +1,6 @@
 #if os(tvOS)
 import SwiftUI
+import AnicatCoreKit
 
 /// The pushed detail page on Apple TV.
 ///
@@ -12,15 +13,22 @@ struct TVDetailView: View {
     @Bindable var model: AppModel
 
     @State private var synopsisExpanded = false
+    /// The series season the episode row shows; nil follows Resume.
+    @State private var pickedSeason: Int?
     @Namespace private var pageFocus
+
+    private var catalog: MediaCard.CardCatalog { model.currentDetailCatalog }
+    private var isFilm: Bool { catalog == .tmdbMovie }
+    private var isSeries: Bool { catalog == .tmdbTv }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
                 if let details = model.selectedMediaDetails {
-                    Hero(details: details)
-                    actions(details)
-                    episodeList
+                    Hero(details: details, catalog: catalog, extras: model.cinemaExtras) {
+                        actions(details)
+                    }
+                    if !isFilm { episodeList }
                     cast
                     about(details)
                 } else if let message = model.errorMessage {
@@ -55,6 +63,7 @@ struct TVDetailView: View {
         }
         .ignoresSafeArea(edges: .top)
         .task(id: model.selectedMediaDetails?.coverURL) { await followCoverAccent() }
+        .onChange(of: model.selectedMediaDetails?.id) { _, _ in pickedSeason = nil }
         .onDisappear {
             ThemeStore.shared.releaseAccentOverride(owner: model.selectedMediaDetails?.coverURL?.absoluteString ?? "")
         }
@@ -79,8 +88,8 @@ struct TVDetailView: View {
 
     // MARK: Actions
 
-    /// Play (or Resume), the list status, and the favourite, in the row a
-    /// viewer arriving from a poster lands on first.
+    /// Play (or Resume), and for anime the list status and the favourite,
+    /// in the row a viewer arriving from a poster lands on first.
     @ViewBuilder
     private func actions(_ details: HeroBanner.Details) -> some View {
         HStack(spacing: 24) {
@@ -88,7 +97,7 @@ struct TVDetailView: View {
                 Button {
                     play(resume)
                 } label: {
-                    Label("Resume episode \(resume)", anicat: "play.fill")
+                    Label("Resume\(episodeLabel(resume))", anicat: "play.fill")
                         .fontWeight(.semibold)
                 }
                 .sumiPrimaryButton()
@@ -98,14 +107,16 @@ struct TVDetailView: View {
                 Button {
                     play(first.number)
                 } label: {
-                    Label("Play episode \(first.number)", anicat: "play.fill")
+                    Label("Play\(episodeLabel(first.number))", anicat: "play.fill")
                         .fontWeight(.semibold)
                 }
                 .sumiPrimaryButton()
                 .prefersDefaultFocus(in: pageFocus)
             }
 
-            if model.isSignedIn, details.listEntryId != nil || details.listStatus == nil {
+            // AniList's list and favourite. A film or series is not on
+            // AniList, and these wrote to whatever anime shares its id.
+            if catalog == .anilist, model.isSignedIn, details.listEntryId != nil || details.listStatus == nil {
                 Menu {
                     Picker("Status", selection: Binding(
                         get: { details.listStatus ?? "" },
@@ -129,14 +140,42 @@ struct TVDetailView: View {
                     Image(anicat: details.isFavourite ? "heart.fill" : "heart")
                 }
             }
-            Spacer()
         }
-        .padding(.horizontal, TVMetrics.gutter)
         .focusScope(pageFocus)
         .focusSection()
     }
 
+    /// " episode 4" for anime, " S2 E3" for a series, nothing for a film,
+    /// which has one "episode" that is the film.
+    private func episodeLabel(_ number: Int) -> String {
+        if isFilm { return "" }
+        if isSeries, let place = seasonPlace(number) { return " S\(place.season) E\(place.episode)" }
+        return " episode \(number)"
+    }
+
+    private func seasonPlace(_ absolute: Int) -> (season: Int, episode: Int)? {
+        AppModel.presenceSeasonPlace(absoluteEpisode: absolute, seasons: model.cinemaExtras?.seasons ?? [])
+    }
+
     // MARK: Episodes
+
+    /// The seasons that have episodes, in TMDB's order.
+    private var seasons: [Int] {
+        guard isSeries else { return [] }
+        return (model.cinemaExtras?.seasons ?? []).filter { $0.episodeCount > 0 }.map { Int($0.number) }
+    }
+
+    private var shownSeason: Int? {
+        if let pickedSeason { return pickedSeason }
+        let anchor = model.selectedMediaDetails?.resumeEpisode
+            ?? model.selectedEpisodes.first(where: { !$0.isWatched && $0.isAired })?.number
+        return anchor.flatMap { seasonPlace($0)?.season } ?? seasons.first
+    }
+
+    private var shownEpisodes: [MediaDetailView.EpisodeItem] {
+        guard let season = shownSeason, seasons.count > 1 else { return model.selectedEpisodes }
+        return model.selectedEpisodes.filter { seasonPlace($0.number)?.season == season }
+    }
 
     @ViewBuilder
     private var episodeList: some View {
@@ -147,11 +186,32 @@ struct TVDetailView: View {
                 .padding(.horizontal, TVMetrics.gutter)
         } else {
             VStack(alignment: .leading, spacing: 18) {
-                TVSectionHeader("Episodes")
+                HStack(spacing: 30) {
+                    TVSectionHeader("Episodes")
+                    if seasons.count > 1, let season = shownSeason {
+                        Menu {
+                            Picker("Season", selection: Binding(
+                                get: { season },
+                                set: { pickedSeason = $0 }
+                            )) {
+                                ForEach(seasons, id: \.self) { number in
+                                    Text(number == 0 ? "Specials" : "Season \(number)").tag(number)
+                                }
+                            }
+                        } label: {
+                            Text(season == 0 ? "Specials" : "Season \(season)")
+                                .font(.system(size: 22, weight: .semibold))
+                        }
+                    }
+                }
+                .padding(.trailing, TVMetrics.gutter)
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: TVMetrics.shelfSpacing) {
-                        ForEach(model.selectedEpisodes) { episode in
-                            EpisodeCard(episode: episode) {
+                        ForEach(shownEpisodes) { episode in
+                            EpisodeCard(
+                                episode: episode,
+                                displayNumber: isSeries ? (seasonPlace(episode.number)?.episode ?? episode.number) : episode.number
+                            ) {
                                 play(episode.number)
                             } onToggleWatched: {
                                 Task { await model.setEpisodeWatched(episode.number, watched: !episode.isWatched) }
@@ -192,8 +252,10 @@ struct TVDetailView: View {
 
     // MARK: Cast
 
-    /// Characters with their voice actors under them. Each opens the
-    /// character's page, which leads on to the actor and their other roles.
+    /// Anime: characters with their voice actors, each opening the
+    /// character's page. Films and series: actors with the part they play,
+    /// each opening the actor's page. TMDB person ids sent to the character
+    /// page opened whatever AniList character shared the number.
     @ViewBuilder
     private var cast: some View {
         if !model.selectedCharacters.isEmpty {
@@ -205,9 +267,15 @@ struct TVDetailView: View {
                             TVPersonCard(
                                 imageURL: character.imageURL?.absoluteString,
                                 title: character.name,
-                                subtitle: character.voiceActorName ?? MediaCard.displayRelation(character.role)
+                                subtitle: catalog == .anilist
+                                    ? (character.voiceActorName ?? MediaCard.displayRelation(character.role))
+                                    : character.role
                             ) {
-                                model.openCharacter(id: character.id)
+                                if catalog == .anilist {
+                                    model.openCharacter(id: character.id)
+                                } else {
+                                    model.openCinemaPerson(id: character.id, name: character.name)
+                                }
                             }
                         }
                     }
@@ -233,6 +301,8 @@ struct TVDetailView: View {
 
             if let synopsis = details.synopsis, !synopsis.isEmpty {
                 VStack(alignment: .leading, spacing: 14) {
+                    TVSectionHeader("About")
+                        .padding(.leading, -TVMetrics.gutter)
                     Text(synopsis)
                         .font(.system(size: 26))
                         .lineSpacing(6)
@@ -257,7 +327,16 @@ struct TVDetailView: View {
                 }
             }
 
-            if let studios = details.studios?.filter(\.isMain), !studios.isEmpty {
+            if catalog != .anilist {
+                if let companies = model.cinemaExtras?.companies, !companies.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        metaLabel(isSeries ? "Network" : "Studio")
+                        Text(companies.prefix(4).joined(separator: " · "))
+                            .font(.system(size: 24))
+                            .foregroundStyle(SumiTheme.foreground)
+                    }
+                }
+            } else if let studios = details.studios?.filter(\.isMain), !studios.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     metaLabel("Studio")
                     // Each opens the studio's other work.
@@ -283,11 +362,12 @@ struct TVDetailView: View {
             TVPosterShelf(
                 title: "More Like This",
                 items: model.selectedRecommendations.map {
-                    MediaCard.Item(id: $0.id, title: $0.title, coverImageURL: $0.coverURL, score: $0.averageScore)
+                    MediaCard.Item(
+                        id: $0.id, title: $0.title, coverImageURL: $0.coverURL, score: $0.averageScore,
+                        catalog: catalog == .anilist ? nil : ($0.format == "TV" ? .tmdbTv : .tmdbMovie)
+                    )
                 },
-                onOpen: { item in
-                    Task { await model.openDetail(id: item.id, title: item.title, coverURL: item.coverImageURL) }
-                }
+                onOpen: open
             )
         }
 
@@ -299,24 +379,55 @@ struct TVDetailView: View {
                 items: model.selectedRelations.filter { !AppModel.isMangaFormat($0.format) }.map {
                     MediaCard.Item(id: $0.id, title: $0.title, coverImageURL: $0.coverURL)
                 },
-                onOpen: { item in
-                    Task { await model.openDetail(id: item.id, title: item.title, coverURL: item.coverImageURL) }
-                }
+                onOpen: open
             )
         }
     }
 
+    /// A poster on this page, through its own catalog: a film's "More
+    /// Like This" sent to `openDetail` opened the anime with that id.
+    private func open(_ item: MediaCard.Item) {
+        Task {
+            if let catalog = item.catalog, catalog != .anilist {
+                await model.openCinemaDetail(item)
+            } else {
+                await model.openDetail(id: item.id, title: item.title, coverURL: item.coverImageURL)
+            }
+        }
+    }
+
+    private func facts(_ details: HeroBanner.Details) -> [(String, String)] {
+        let extras = model.cinemaExtras
+        let facts: [(String, String)]
+        if catalog == .anilist {
+            facts = [
+                ("Status", details.status.map(Self.mediaStatus)),
+                ("Format", details.format.map(MediaCard.displayFormat)),
+                ("Episodes", details.episodeCount.map(String.init)),
+                ("Score", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
+                ("Your score", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
+                ("On your list", details.listStatus.map(Self.listStatus))
+            ].compactMap { name, value in value.map { (name, $0) } }
+        } else {
+            facts = [
+                (isSeries ? "First aired" : "Released", extras?.releaseDate.flatMap(Self.longDate)),
+                (isSeries ? "Last aired" : nil, extras?.lastAirDate.flatMap(Self.longDate)),
+                ("Runtime", isFilm ? extras?.runtimeMinutes.map { Self.runtime(Int($0)) } : nil),
+                ("Seasons", isSeries ? extras?.seasonCount.map(String.init) : nil),
+                ("Episodes", isSeries ? extras?.episodeCount.map(String.init) : nil),
+                ("Language", extras?.originalLanguage.flatMap { Locale.current.localizedString(forLanguageCode: $0) }),
+                ("Score", details.averageScore.map { String(format: "%.1f", Double($0) / 10) })
+            ].compactMap { name, value in
+                guard let name, let value else { return nil }
+                return (name, value)
+            }
+        }
+        return facts
+    }
+
     @ViewBuilder
     private func factRow(_ details: HeroBanner.Details) -> some View {
-        let facts: [(String, String)] = [
-            ("Status", details.status.map(Self.mediaStatus)),
-            ("Format", details.format.map(MediaCard.displayFormat)),
-            ("Episodes", details.episodeCount.map(String.init)),
-            ("Score", details.averageScore.map { String(format: "%.1f", Double($0) / 10) }),
-            ("Your score", details.userScore.flatMap { $0 > 0 ? String(format: "%.1f", $0) : nil }),
-            ("On your list", details.listStatus.map(Self.listStatus))
-        ].compactMap { name, value in value.map { (name, $0) } }
-
+        let facts = facts(details)
         if !facts.isEmpty {
             HStack(alignment: .top, spacing: 60) {
                 ForEach(facts, id: \.0) { fact in
@@ -336,6 +447,20 @@ struct TVDetailView: View {
         Text(text)
             .font(.system(size: 18, weight: .semibold)).monospacedDigit()
             .foregroundStyle(SumiTheme.muted)
+    }
+
+    /// "2 h 9 min", "48 min".
+    static func runtime(_ minutes: Int) -> String {
+        minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
+    }
+
+    /// TMDB's "2024-03-01" as "1 March 2024" in the viewer's locale.
+    static func longDate(_ raw: String) -> String? {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: raw) else { return nil }
+        return date.formatted(date: .long, time: .omitted)
     }
 
     /// The show's own airing status. Kept apart from `listStatus` because
@@ -365,77 +490,145 @@ struct TVDetailView: View {
 
     // MARK: Hero
 
-    private struct Hero: View {
+    /// The first screen: the artwork across all of it, fading into the page
+    /// by transparency rather than into a colour. The old banner stopped at
+    /// 620pt with a gradient to the plain background over a page with a
+    /// coloured glow, and the owner saw "the hard cut in the middle".
+    private struct Hero<Actions: View>: View {
         let details: HeroBanner.Details
+        let catalog: MediaCard.CardCatalog
+        let extras: CinemaExtras?
+        @ViewBuilder let actions: () -> Actions
+
+        /// Short of the full 1080 so the next row's title shows under it and
+        /// says there is more below.
+        private let height: CGFloat = 900
 
         var body: some View {
             ZStack(alignment: .bottomLeading) {
                 // `Color.clear` sets the box and the artwork is an overlay
-                // on it: an image with `.fill` and only its height pinned
-                // reports the width that covers that height, and a
-                // `maxWidth` frame centres an oversized child instead of
-                // shrinking it. See `PhoneDetailView.Hero`.
+                // on it. Framed directly, a 4.75:1 AniList banner filled to
+                // 900pt reported ~4300pt of width, the page grew to match,
+                // and the title and every header slid off the left edge.
                 Color.clear
-                    .frame(height: 620)
-                    .overlay {
-                        CachedAsyncImage(url: details.bannerURL ?? details.coverURL, maxPixelSize: 1920) { image in
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            SumiTheme.card
-                        }
-                    }
+                    .frame(height: height)
+                    .frame(maxWidth: .infinity)
+                    .overlay { artwork }
                     .clipped()
+                    // Darker under the words on the left; part of the
+                    // artwork, so the fade below takes it away too.
+                    .overlay {
+                        LinearGradient(
+                            colors: [.black.opacity(0.7), .black.opacity(0.25), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    }
+                    .mask {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .black, location: 0),
+                                .init(color: .black, location: 0.45),
+                                .init(color: .clear, location: 1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
                     // Out past tvOS's side safe area, which is 80pt on a
-                    // 1920pt screen: inside it the banner stopped short of
+                    // 1920pt screen: inside it the artwork stopped short of
                     // both edges. `ignoresSafeArea` does nothing inside the
-                    // scroll view, which does not clip
-                    // (`scrollClipDisabled`), so a box 160pt wider than its
-                    // slot draws to both edges. After `.clipped()`, or only
-                    // the empty box widens.
+                    // scroll view, which does not clip.
                     .padding(.horizontal, -80)
 
-                LinearGradient(
-                    colors: [.clear, SumiTheme.background.opacity(0.85), SumiTheme.background],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 400)
-                // As wide as the banner, or its edges show undarkened.
-                .padding(.horizontal, -80)
-
-                HStack(alignment: .bottom, spacing: 40) {
-                    CachedAsyncImage(url: details.coverURL, maxPixelSize: 600) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        TVMetrics.placeholder
-                    }
-                    .frame(width: 200, height: 300)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .shadow(color: .black.opacity(0.5), radius: 30, y: 12)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(details.title)
-                            .font(.sumiHeading(size: 52, weight: .bold))
-                            .foregroundStyle(SumiTheme.foreground)
-                            .lineLimit(2)
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(details.title)
+                        .font(.sumiHeading(size: 64, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .shadow(color: .black.opacity(0.4), radius: 12)
+                    if !metaLine.isEmpty {
                         Text(metaLine)
-                            .font(.system(size: 22)).monospacedDigit()
-                            .foregroundStyle(SumiTheme.muted)
+                            .font(.system(size: 24, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.8))
                     }
-                    .padding(.bottom, 12)
+                    if let line = leadLine {
+                        Text(line)
+                            .font(.system(size: 24))
+                            .lineSpacing(4)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(3)
+                            .frame(maxWidth: 900, alignment: .leading)
+                    }
+                    actions()
+                        .padding(.top, 14)
                 }
                 .padding(.horizontal, TVMetrics.gutter)
+                .padding(.bottom, 40)
             }
-            .frame(height: 620)
+            .frame(height: height)
+        }
+
+        /// A TMDB backdrop is 16:9 and fills the screen. An AniList banner
+        /// is about 1900x400: filled, it was blown up four times and soft.
+        /// So it sits sharp at the top over a blurred copy of itself.
+        @ViewBuilder
+        private var artwork: some View {
+            if catalog != .anilist {
+                CachedAsyncImage(url: details.bannerURL ?? details.coverURL, maxPixelSize: 1920) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    SumiTheme.card
+                }
+            } else {
+                ZStack(alignment: .top) {
+                    CachedAsyncImage(url: details.bannerURL ?? details.coverURL, maxPixelSize: 600) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        SumiTheme.card
+                    }
+                    .blur(radius: 60)
+                    .opacity(0.7)
+                    if let banner = details.bannerURL {
+                        CachedAsyncImage(url: banner, maxPixelSize: 1920) { image in
+                            image.resizable().aspectRatio(contentMode: .fit)
+                        } placeholder: {
+                            Color.clear
+                        }
+                        .mask {
+                            LinearGradient(
+                                stops: [.init(color: .black, location: 0.6), .init(color: .clear, location: 1)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         private var metaLine: String {
             var parts: [String] = []
-            if let score = details.averageScore { parts.append(String(format: "%.1f", Double(score) / 10)) }
             if let year = details.year { parts.append("\(year)") }
-            if let count = details.episodeCount { parts.append("\(count) eps") }
-            if let format = details.format { parts.append(MediaCard.displayFormat(format)) }
+            switch catalog {
+            case .tmdbMovie:
+                if let minutes = extras?.runtimeMinutes { parts.append(TVDetailView.runtime(Int(minutes))) }
+            case .tmdbTv:
+                if let seasons = extras?.seasonCount { parts.append(seasons == 1 ? "1 season" : "\(seasons) seasons") }
+            default:
+                if let count = details.episodeCount { parts.append("\(count) eps") }
+                if let format = details.format { parts.append(MediaCard.displayFormat(format)) }
+            }
+            parts.append(contentsOf: details.genres.prefix(2))
+            if let score = details.averageScore { parts.append(String(format: "%.1f", Double(score) / 10)) }
             return parts.joined(separator: " · ")
+        }
+
+        /// A film's tagline when it has one; otherwise nothing here, the
+        /// synopsis is further down.
+        private var leadLine: String? {
+            guard let tagline = extras?.tagline, !tagline.isEmpty, catalog != .anilist else { return nil }
+            return tagline
         }
     }
 
@@ -447,6 +640,9 @@ struct TVDetailView: View {
     /// take a watch back on the TV.
     private struct EpisodeCard: View {
         let episode: MediaDetailView.EpisodeItem
+        /// The number on the still: the absolute number for anime, the
+        /// number within its season for a series.
+        let displayNumber: Int
         let onPlay: () -> Void
         let onToggleWatched: () -> Void
 
@@ -479,7 +675,7 @@ struct TVDetailView: View {
                             }
                         }
 
-                        Text("\(episode.number)")
+                        Text("\(displayNumber)")
                             .font(.system(size: 20, weight: .bold)).monospacedDigit()
                             .foregroundStyle(.white)
                             .padding(.horizontal, 10)
@@ -495,7 +691,7 @@ struct TVDetailView: View {
                     Button(episode.isWatched ? "Mark as Unwatched" : "Mark as Watched", action: onToggleWatched)
                 }
 
-                Text(episode.title.isEmpty ? "Episode \(episode.number)" : episode.title)
+                Text(episode.title.isEmpty ? "Episode \(displayNumber)" : episode.title)
                     .font(.system(size: 22))
                     .foregroundStyle(episode.isWatched ? SumiTheme.muted : SumiTheme.foreground)
                     .lineLimit(2, reservesSpace: true)

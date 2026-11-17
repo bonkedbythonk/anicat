@@ -30,6 +30,7 @@ struct PhoneRemoteView: View {
     @State private var scrubValue: Double?
     @State private var volumeValue: Double?
     @State private var lastVolumeSend = Date.distantPast
+    @State private var sentSignIn = false
 
     var body: some View {
         NavigationStack {
@@ -44,6 +45,16 @@ struct PhoneRemoteView: View {
                             detail: "Pick something with the list button, or start it on \(node.name).",
                             symbol: "play.slash"
                         )
+                        if client.hostSupports(RemoteFeature.signIn), model.isSignedIn {
+                            Button(sentSignIn ? "Sent. Check \(node.name)." : "Sign \(node.name) in to AniList") {
+                                if let token = iCloudSyncService.shared.getAniListToken() {
+                                    sentSignIn = client.sendSignIn(token: token)
+                                }
+                            }
+                            .font(.system(size: 15, weight: .medium))
+                            .disabled(sentSignIn)
+                            .padding(.top, 16)
+                        }
                     }
                 case .connecting:
                     message("Connecting", detail: node.name, symbol: "wifi")

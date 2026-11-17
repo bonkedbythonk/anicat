@@ -141,6 +141,7 @@ public enum RemoteFeature {
     public static let browse = "browse"
     public static let fling = "fling"
     public static let upscale = "upscale"
+    public static let signIn = "signIn"
 }
 
 /// What the phone can ask the Mac to do.
@@ -187,6 +188,10 @@ public enum RemoteCommand: Codable, Sendable {
     /// own registry remembers, which is where *it* last stopped watching and
     /// not where the person carrying the phone is now.
     case openAt(link: String, seconds: Double)
+    /// The phone's AniList token, sealed with the pairing secret
+    /// (`RemoteAuth.seal`). Typing it on the TV does not work: a pasted
+    /// token reached a real Apple TV as 491 of its ~1,000 characters.
+    case signIn(sealed: String)
 }
 
 /// What the Mac tells the phone it is doing.

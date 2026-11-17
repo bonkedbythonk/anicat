@@ -176,13 +176,17 @@ struct TVSettingsView: View {
         guard !raw.isEmpty, !isConnecting else { return }
         isConnecting = true
         authFailure = nil
+        let token = Self.extractToken(from: raw)
         Task {
-            await model.signIn(token: Self.extractToken(from: raw))
+            await model.signIn(token: token)
             isConnecting = false
             if model.isSignedIn {
                 tokenInput = ""
             } else {
-                authFailure = model.errorMessage ?? "AniList did not accept that token."
+                // The length says whether the paste arrived whole: on a real
+                // Apple TV a token copied straight from AniList's page was
+                // rejected and the box is too narrow to see a cut-off end.
+                authFailure = "AniList did not accept that token (\(token.count) characters arrived; a whole one is about 1,000)."
             }
         }
     }
@@ -191,6 +195,9 @@ struct TVSettingsView: View {
     /// fragment (`#access_token=...&token_type=Bearer`), a query form of the
     /// same, or the token on its own.
     static func extractToken(from raw: String) -> String {
+        // A token has no whitespace; a paste of AniList's wrapped text box
+        // can carry line breaks, which `trimmingCharacters` leaves inside.
+        let raw = raw.filter { !$0.isWhitespace }
         for separator in ["#", "?"] {
             if let range = raw.range(of: separator) {
                 let fragment = raw[range.upperBound...]

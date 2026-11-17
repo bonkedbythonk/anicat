@@ -243,6 +243,16 @@ public final class RemoteClient {
         connection.sendFrame(.command(command))
     }
 
+    /// Hands this phone's AniList token to the attached host, sealed with
+    /// the pairing secret. False when there is nothing to seal it with.
+    @discardableResult
+    public func sendSignIn(token: String) -> Bool {
+        guard let hostNodeId, let secret = Self.secret(for: hostNodeId),
+              let sealed = RemoteAuth.seal(token, secret: secret) else { return false }
+        send(.signIn(sealed: sealed))
+        return true
+    }
+
     /// Sends a command to the Mac, dialling it up first if this is the first
     /// thing the phone has asked of it.
     public func send(_ command: RemoteCommand, to node: BonjourDiscovery.DiscoveredNode) {

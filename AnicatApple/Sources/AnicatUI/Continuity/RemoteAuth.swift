@@ -69,6 +69,30 @@ enum RemoteAuth {
         return HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: message(role, parts), using: key)
     }
 
+    /// Encrypts one value for the paired peer. The link itself is plain TCP
+    /// (see above), and an AniList token read off the Wi-Fi is the account.
+    /// The key is derived from the pairing secret under its own label, so
+    /// the HMAC key and the sealing key are never the same bytes.
+    static func seal(_ text: String, secret: String) -> String? {
+        guard let key = sealingKey(secret),
+              let box = try? ChaChaPoly.seal(Data(text.utf8), using: key) else { return nil }
+        return box.combined.base64EncodedString()
+    }
+
+    static func open(_ sealed: String, secret: String) -> String? {
+        guard let key = sealingKey(secret),
+              let data = Data(base64Encoded: sealed),
+              let box = try? ChaChaPoly.SealedBox(combined: data),
+              let plain = try? ChaChaPoly.open(box, using: key) else { return nil }
+        return String(data: plain, encoding: .utf8)
+    }
+
+    private static func sealingKey(_ secret: String) -> SymmetricKey? {
+        symmetricKey(secret).map {
+            HKDF<SHA256>.deriveKey(inputKeyMaterial: $0, info: Data("anicat-remote-seal-v1".utf8), outputByteCount: 32)
+        }
+    }
+
     private static func symmetricKey(_ secret: String) -> SymmetricKey? {
         Data(base64Encoded: secret).map { SymmetricKey(data: $0) }
     }

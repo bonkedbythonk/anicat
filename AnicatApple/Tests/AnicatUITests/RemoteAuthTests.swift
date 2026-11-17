@@ -21,6 +21,24 @@ struct RemoteAuthTests {
         #expect(RemoteAuth.secret(mine: phone, theirs: "not a key") == nil)
     }
 
+    @Test("A sealed token opens only with its own pairing secret")
+    func sealedTokenOpensOnlyForItsPair() throws {
+        let secret = try #require(RemoteAuth.secret(
+            mine: Curve25519.KeyAgreement.PrivateKey(),
+            theirs: RemoteAuth.publicKey(of: Curve25519.KeyAgreement.PrivateKey())
+        ))
+        let other = try #require(RemoteAuth.secret(
+            mine: Curve25519.KeyAgreement.PrivateKey(),
+            theirs: RemoteAuth.publicKey(of: Curve25519.KeyAgreement.PrivateKey())
+        ))
+        let token = String(repeating: "eyJ0eXAiOiJKV1Qi", count: 70)
+        let sealed = try #require(RemoteAuth.seal(token, secret: secret))
+        #expect(!sealed.contains("eyJ0eXAi"))
+        #expect(RemoteAuth.open(sealed, secret: secret) == token)
+        #expect(RemoteAuth.open(sealed, secret: other) == nil)
+        #expect(RemoteAuth.open("not sealed", secret: secret) == nil)
+    }
+
     @Test("A proof holds only for its secret, role and every part")
     func proofsAreBound() throws {
         let secret = try #require(RemoteAuth.secret(

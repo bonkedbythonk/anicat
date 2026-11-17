@@ -72,6 +72,10 @@ public final class RemoteHost {
         #if os(macOS)
         features.insert(RemoteFeature.upscale)
         #endif
+        // Only the TV: a Mac has a keyboard and a browser for AniList's page.
+        #if os(tvOS)
+        features.insert(RemoteFeature.signIn)
+        #endif
         return features
     }()
 
@@ -201,6 +205,14 @@ public final class RemoteHost {
             case .selectSubtitleTrack(let id):
                 AppModel.shared?.playerController.onSelectSubtitleTrack?(id)
                 sendTracks(to: session)
+            case .signIn(let sealed):
+                // Here, not in `apply`: only this session knows which phone's
+                // secret the token was sealed with.
+                guard Self.features.contains(RemoteFeature.signIn),
+                      let deviceId = session.deviceId,
+                      let secret = Self.pairings()[deviceId],
+                      let token = RemoteAuth.open(sealed, secret: secret) else { return }
+                Task { await AppModel.shared?.signIn(token: token) }
             default:
                 apply(command)
             }
@@ -333,7 +345,7 @@ public final class RemoteHost {
             // running file. Setting the property alone changes a Bool and
             // leaves the picture exactly as it was.
             controller.toggleAnime4K()
-        case .requestTracks, .selectAudioTrack, .selectSubtitleTrack:
+        case .requestTracks, .selectAudioTrack, .selectSubtitleTrack, .signIn:
             // Answered in `handle`, which is the only place that knows which
             // controller asked and therefore where the `tracks` frame goes.
             return

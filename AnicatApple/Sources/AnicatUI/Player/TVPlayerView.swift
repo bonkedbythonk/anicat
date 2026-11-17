@@ -37,7 +37,7 @@ struct TVPlayerView: View {
     @AppStorage("anicat_playback_speed") private var storedSpeed: Double = 1.0
 
     fileprivate enum Focus: Hashable {
-        case surface, back, playPause, forward, timeline, tracks, next, playNextNow, cancelNext
+        case surface, back, playPause, forward, timeline, tracks, previous, next, playNextNow, cancelNext
     }
     @FocusState private var focus: Focus?
     /// A thin timeline shown for a moment after a seek from the hidden
@@ -308,12 +308,21 @@ struct TVPlayerView: View {
 
             Spacer()
 
-            if controller.hasNextEpisode {
-                Button {
-                    controller.nextEpisode()
-                } label: {
-                    Label("Next episode", anicat: "forward.end.fill")
+            // Icons, the size of the seek buttons: the labelled "Next
+            // episode" was the biggest thing in the row. Previous moved here
+            // from the options panel so the pair sits together.
+            if controller.hasPreviousEpisode {
+                Button { controller.previousEpisode() } label: {
+                    Image(anicat: "backward.end.fill")
                 }
+                .accessibilityLabel("Previous episode")
+                .focused($focus, equals: .previous)
+            }
+            if controller.hasNextEpisode {
+                Button { controller.nextEpisode() } label: {
+                    Image(anicat: "forward.end.fill")
+                }
+                .accessibilityLabel("Next episode")
                 .focused($focus, equals: .next)
             }
 
@@ -561,9 +570,6 @@ private struct TVPlayerOptions: View {
                     }
                 }
                 Button("Release", action: onReleases)
-                if controller.hasPreviousEpisode {
-                    Button("Previous episode") { controller.previousEpisode() }
-                }
                 Button("Close player", role: .destructive, action: onClose)
             }
             .navigationTitle("Options")

@@ -416,7 +416,11 @@ struct TVPlayerView: View {
     /// it: the surface keeps the ring, and the pill is one move up.
     @ViewBuilder
     private var skipPill: some View {
-        if let window = controller.activeSkipWindow, !controller.autoSkipEnabled {
+        // The first 8 s of the window, and again while the controls are up.
+        // Shown for the whole ending, it sat over the credits and took the
+        // remote's presses for anyone who meant to watch them.
+        if let window = controller.activeSkipWindow, !controller.autoSkipEnabled,
+           controller.areControlsVisible || controller.currentTime - window.start < 8 {
             VStack {
                 Spacer()
                 HStack {

@@ -603,6 +603,7 @@ public struct MpvSurface {
         /// The window whose display mode was asked to match the file, kept
         /// so `stop` can hand the mode back after the view is gone.
         private weak var displayMatchedWindow: UIWindow?
+        private var lastDisplayRequest: String?
         #endif
         private var sidewaysSavedHwdec: String?
         /// The `sid` the viewer picked from the subtitle list, so a later
@@ -1613,6 +1614,13 @@ public struct MpvSurface {
             default: transfer = kCMFormatDescriptionTransferFunction_ITU_R_709_2; range = "SDR"
             }
             let hdr = range != "SDR"
+            // Only a real change is sent. Every video reconfig (a mid-file one
+            // and each episode change) asked again for the mode already set,
+            // and on a real Apple TV the repeat came with a burst of dropped
+            // frames (15, at 14 fps) and, at the next episode, a freeze.
+            let key = String(format: "%.3f %@", fps, range)
+            guard key != lastDisplayRequest || displayMatchedWindow !== window else { return }
+            lastDisplayRequest = key
             let extensions: [CFString: Any] = [
                 kCMFormatDescriptionExtension_TransferFunction: transfer,
                 kCMFormatDescriptionExtension_ColorPrimaries: hdr ? kCMFormatDescriptionColorPrimaries_ITU_R_2020 : kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
@@ -2151,6 +2159,7 @@ public struct MpvSurface {
                 guard let self else { return }
                 self.withHandle { _ in
                     let value = { (name: String) in self.stringProperty(name) ?? "-" }
+                    self.crossThreadLock.withLock { self._lastFrameStats = CACurrentMediaTime() }
                     PlayerLog.write("[frames] at \(value("time-pos")) pause \(value("pause")) cache-wait \(value("paused-for-cache")) idle \(value("core-idle")) dropped \(value("frame-drop-count")) decoder-dropped \(value("decoder-frame-drop-count")) late \(value("vo-delayed-frame-count")) fps \(value("estimated-vf-fps")) display \(value("display-fps")) avsync \(value("avsync"))")
                 }
             }
@@ -2165,9 +2174,20 @@ public struct MpvSurface {
             watchdog.schedule(deadline: .now() + 5, repeating: 5)
             var lastTime = -1.0
             var stillFor = 0
+            var reportedSilence = false
+            crossThreadLock.withLock { _lastFrameStats = CACurrentMediaTime() }
             watchdog.setEventHandler { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    // The frame line reads mpv every 10 s, paused or not. When
+                    // those reads stop coming back mpv itself is stuck: the
+                    // freeze on the box after an episode change paused first,
+                    // so the playing-only check below never saw it.
+                    let silent = CACurrentMediaTime() - self.crossThreadLock.withLock { self._lastFrameStats }
+                    if silent > 25, !reportedSilence {
+                        reportedSilence = true
+                        PlayerLog.write(String(format: "[stall] mpv has not answered for %.0f s (paused %@, at %.1fs)", silent, self.controller.isPlaying ? "no" : "yes", self.controller.currentTime))
+                    }
                     let c = self.controller
                     let moving = c.currentTime != lastTime
                     lastTime = c.currentTime
@@ -2186,6 +2206,9 @@ public struct MpvSurface {
         }
 
         private var stallWatchdog: DispatchSourceTimer?
+        /// When the frame line last got its answers from mpv; under
+        /// `crossThreadLock`.
+        private var _lastFrameStats: CFTimeInterval = 0
 
         private func startEventLoop() {
             guard let mpv = mpv else { return }

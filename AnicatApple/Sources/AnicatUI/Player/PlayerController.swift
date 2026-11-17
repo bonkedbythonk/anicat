@@ -744,6 +744,10 @@ public final class PlayerController {
     /// The playing torrent's swarm, set by `AppModel` (this module's
     /// controller does not see the engine's types).
     public var onFetchTorrentDetails: (@Sendable (_ completion: @escaping @Sendable @MainActor ([StreamDetailRow]) -> Void) -> Void)?
+    /// Moves the playing URL to the range server's current port (the
+    /// engine binds a new one when the old listener stopped answering) and
+    /// hands back the URL to load. Set by `AppModel`, called on wake.
+    public var onRefreshStreamURL: (@Sendable (_ completion: @escaping @Sendable @MainActor (String?) -> Void) -> Void)?
     public var onSelectAudioTrack: (@Sendable (_ id: String) -> Void)?
     /// `nil` is the Off row.
     public var onSelectSubtitleTrack: (@Sendable (_ id: String?) -> Void)?

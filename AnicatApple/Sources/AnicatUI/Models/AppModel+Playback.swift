@@ -142,6 +142,22 @@ extension AppModel {
                 }
             }
         }
+        playerController.onRefreshStreamURL = { [weak self] completion in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // `activeStreamURL` itself, not only what mpv loads: the
+                // surface is handed this URL on every SwiftUI update and
+                // would load the dead port again on the next one.
+                if let port = try? await self.engine?.streamPort(),
+                   let url = self.activeStreamURL,
+                   var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   parts.host == "127.0.0.1", parts.port != Int(port) {
+                    parts.port = Int(port)
+                    if let moved = parts.url { self.activeStreamURL = moved }
+                }
+                completion(self.activeStreamURL?.absoluteString)
+            }
+        }
         playerController.onFetchSwarmSummary = { [weak self] completion in
             Task { @MainActor [weak self] in
                 guard let self, let engine = self.engine else { return completion(nil) }

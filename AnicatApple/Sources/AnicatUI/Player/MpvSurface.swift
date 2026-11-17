@@ -1671,6 +1671,38 @@ public struct MpvSurface {
             reconfigAttemptsForSize = 0
             PlayerLog.write("[display] resumed, asking again")
             nudgeVideoReconfig(reason: "resumed")
+            reopenStreamAfterResume()
+        }
+
+        /// Sleep also closes the loopback connection mpv reads the episode
+        /// through. On the box the first Play after waking read nothing, mpv
+        /// took that for the end of the file at 1421 of 1421 s, and the app
+        /// marked the episode watched on AniList and started the next one,
+        /// from 0:32. The same file is opened again at the same second, still
+        /// paused, so Play reads through a fresh connection.
+        ///
+        /// The listener dies in the same sleep: the first reopen on the box
+        /// got "Connection refused" on 127.0.0.1:62681 and failed with
+        /// "loading failed". The engine checks the listener and binds a new
+        /// port when it is gone; the load waits for that URL.
+        @MainActor
+        private func reopenStreamAfterResume() {
+            guard let mpv, let url = lastLoadedURL, controller.currentTime > 0 else { return }
+            var paused: Int32 = 1
+            mpv_set_property(mpv, "pause", MPV_FORMAT_FLAG, &paused)
+            // Ticks from the dying read must not count: they are what said
+            // "1421 s". Cleared again by MPV_EVENT_FILE_LOADED.
+            controller.awaitingNewFile = true
+            // `lastLoadedURL` stays set while the port is fetched, so a
+            // SwiftUI update in between does not load the dead URL.
+            let reopen: @MainActor (String?) -> Void = { [weak self] fresh in
+                guard let self, self.lastLoadedURL == url else { return }
+                let target = fresh ?? url
+                self.lastLoadedURL = nil
+                PlayerLog.write(String(format: "[stream] resumed: reopening at %.1fs", self.controller.currentTime) + " via \(target)")
+                self.loadFile(url: target)
+            }
+            if let refresh = controller.onRefreshStreamURL { refresh(reopen) } else { reopen(nil) }
         }
         #endif
 
@@ -2205,10 +2237,21 @@ public struct MpvSurface {
             var lastTime = -1.0
             var stillFor = 0
             var reportedSilence = false
+            var lastTick = CACurrentMediaTime()
             crossThreadLock.withLock { _lastFrameStats = CACurrentMediaTime() }
             watchdog.setEventHandler { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    // This timer itself came late: the app was suspended (the
+                    // box slept), so mpv's silence is the sleep, not a hang. It
+                    // logged "not answered for 714 s" on waking from 12 minutes.
+                    let now = CACurrentMediaTime()
+                    defer { lastTick = now }
+                    if now - lastTick > 15 {
+                        self.crossThreadLock.withLock { self._lastFrameStats = now }
+                        reportedSilence = false
+                        return
+                    }
                     // The frame line reads mpv every 10 s, paused or not. When
                     // those reads stop coming back mpv itself is stuck: the
                     // freeze on the box after an episode change paused first,

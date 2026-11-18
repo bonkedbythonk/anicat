@@ -161,4 +161,27 @@ cat > "$TMP/d.svg" <<EOF
 EOF
 rsvg-convert -w 1024 -h 1024 "$TMP/d.svg" -o "$BRAND/discord_rich_presence.png"
 
+# Apple TV Top Shelf, the banner above the app when it sits in the top row
+# (owner's pick of six drafts): sumi ground with an indigo glow, a large
+# faint paw off the right, a small sharp one in front, the name on the left.
+# Wide is 2320pt; the standard 1920pt is the same art with 200pt cut from
+# each side. Both at 1x and 2x.
+SHELF="$ROOT/AnicatApple/Sources/AnicatUI/Resources/AppIconTV.xcassets/App Icon & Top Shelf Image.brandassets"
+shelf() { # out viewBox-x width scale text-x
+  cat > "$TMP/shelf.svg" <<EOF
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="$2 0 $3 720">
+<defs><radialGradient id="g" cx="0.72" cy="0.45" r="0.7"><stop offset="0" stop-color="#1f2a33"/><stop offset="1" stop-color="$SUMI"/></radialGradient></defs>
+<rect width="2320" height="720" fill="url(#g)"/>
+<g fill="$INDIGO_DARK" opacity="0.10" transform="translate(1720 380) rotate(-14) scale(1.25) translate(-512 -510)">$PAW</g>
+<g fill="$INDIGO_DARK" transform="translate(1560 360) scale(0.30) translate(-512 -510)">$PAW</g>
+</svg>
+EOF
+  rsvg-convert -w "$(($3 * $4))" -h "$((720 * $4))" "$TMP/shelf.svg" -o "$TMP/shelf.png"
+  swift "$ROOT/scripts/top-shelf-title.swift" "$TMP/shelf.png" "$1" "$5" "$4"
+}
+shelf "$SHELF/Top Shelf Image Wide.imageset/shelf-2320x720@1x.png" 0 2320 1 560
+shelf "$SHELF/Top Shelf Image Wide.imageset/shelf-2320x720@2x.png" 0 2320 2 560
+shelf "$SHELF/Top Shelf Image.imageset/shelf-1920x720@1x.png" 200 1920 1 360
+shelf "$SHELF/Top Shelf Image.imageset/shelf-1920x720@2x.png" 200 1920 2 360
+
 echo "==> brand assets written from $BRAND/paw.svg"

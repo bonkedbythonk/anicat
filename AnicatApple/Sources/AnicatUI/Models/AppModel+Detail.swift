@@ -588,6 +588,14 @@ extension AppModel {
         // 10 s). A failure below puts the old status back.
         let previousStatus = details.listStatus
         if let status { selectedMediaDetails?.listStatus = status }
+        // Rewatching picked from the menu on a finished title starts the
+        // round at 0. Left at the total, the Up Next row's next episode is
+        // total + 1: "Ep 13 / 12" on Spy x Family.
+        var progress = progress
+        if status == "REPEATING", previousStatus != "REPEATING", progress == nil,
+           let total = details.episodeCount, total > 0, (details.listProgress ?? 0) >= total {
+            progress = 0
+        }
         // Before the save, not after it: the buffering does not depend on
         // AniList accepting the write, and a held save should not hold it.
         // Only on the move into Watching: re-picking the status a title
@@ -726,8 +734,10 @@ extension AppModel {
     ) async {
         if let details = selectedMediaDetails, details.id == catalogId {
             let progress = Int(details.listProgress ?? 0)
-            guard progress < episode else { return }
-            guard !contiguousOnly || episode <= progress + 1 else { return }
+            let rewatch = Self.beginsRewatch(episode: episode, episodeCount: details.episodeCount,
+                                             listStatus: details.listStatus, listProgress: progress)
+            guard progress < episode || rewatch else { return }
+            guard !contiguousOnly || rewatch || episode <= progress + 1 else { return }
             await setEpisodeWatched(episode, watched: true)
             return
         }
@@ -739,13 +749,17 @@ extension AppModel {
             // progress the list already passed would drag it backwards on a
             // rewatch.
             let listed = Int(detail.listProgress ?? 0)
-            guard listed < episode else { return }
-            guard !contiguousOnly || episode <= listed + 1 else { return }
+            let total = (detail.episodeCount ?? detail.chapterCount).map(Int.init)
+            let rewatch = Self.beginsRewatch(episode: episode, episodeCount: total,
+                                             listStatus: detail.listStatus, listProgress: listed)
+            guard listed < episode || rewatch else { return }
+            guard !contiguousOnly || rewatch || episode <= listed + 1 else { return }
             let (progress, status) = Self.listEntryUpdate(
                 episode: episode,
                 watched: true,
-                episodeCount: (detail.episodeCount ?? detail.chapterCount).map(Int.init),
-                listStatus: detail.listStatus
+                episodeCount: total,
+                listStatus: detail.listStatus,
+                listProgress: listed
             )
             try await engine.updateListEntry(
                 catalogId: catalogId,
@@ -798,7 +812,8 @@ extension AppModel {
             episode: episode,
             watched: watched,
             episodeCount: details.episodeCount,
-            listStatus: details.listStatus
+            listStatus: details.listStatus,
+            listProgress: details.listProgress
         )
         // Optimistic: `updateListEntry` below is a real AniList mutation
         // followed by a full re-fetch to reconcile — two sequential network
@@ -921,16 +936,44 @@ extension AppModel {
         episode: Int,
         watched: Bool,
         episodeCount: Int?,
-        listStatus: String?
+        listStatus: String?,
+        listProgress: Int? = nil
     ) -> (progress: Int, status: String?) {
         var progress = watched ? episode : episode - 1
         var status: String?
         if let total = episodeCount, total > 0, progress >= total {
             progress = total
             status = "COMPLETED"
+        } else if watched, beginsRewatch(episode: episode, episodeCount: episodeCount,
+                                         listStatus: listStatus, listProgress: listProgress) {
+            status = "REPEATING"
+        } else if watched, progress > 0, listStatus == "PAUSED" || listStatus == "DROPPED" {
+            // Watching a shelved title picks it back up. Left Paused or
+            // Dropped, it never reached Up Next or Watching, which load only
+            // CURRENT and REPEATING, however many episodes were watched.
+            status = "CURRENT"
         } else if progress > 0, listStatus == nil || listStatus == "PLANNING" {
             status = "CURRENT"
         }
         return (progress, status)
+    }
+
+    /// Watching an episode of a title whose list entry is a finished round
+    /// starts the next round. Without it a rewatch wrote nothing at all:
+    /// every progress write is skipped while the list is already ahead of
+    /// the episode, and a Completed entry sits at the total, so Spy x Family
+    /// stayed Completed at 12/12 through episodes 1-3 of a rewatch and never
+    /// reached Up Next on the Mac or the TV. Any episode short of the finale,
+    /// not only episode 1: the round can begin on another device, or the
+    /// first episode can be skipped. Replaying the finale alone is not a new
+    /// round. A Rewatching entry still at the total (picked by hand from the
+    /// status menu) counts as finished too, or its rewatch was skipped the
+    /// same way.
+    static func beginsRewatch(episode: Int, episodeCount: Int?, listStatus: String?, listProgress: Int?) -> Bool {
+        guard let total = episodeCount, total > 0, episode < total,
+              listStatus == "COMPLETED" || listStatus == "REPEATING",
+              let listed = listProgress, listed >= total
+        else { return false }
+        return true
     }
 }

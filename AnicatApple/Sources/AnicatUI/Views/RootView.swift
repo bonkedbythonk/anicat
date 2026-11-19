@@ -1544,10 +1544,9 @@ private func playEpisode(
         return
     }
     // Starting a finished title over from its first episode begins a
-    // rewatch: Rewatching, with progress back at 0 so the round is recorded
-    // as it is watched. Only episode 1 and only from Completed: replaying
-    // episode 5 is not a new round, and resetting progress there would throw
-    // away AniList's count.
+    // rewatch at once: Rewatching at 0, so it is in Up Next before the 85%
+    // line. Any other episode of a finished round waits for that line
+    // (`AppModel.beginsRewatch`), which sets Rewatching on every device.
     if let details = model.selectedMediaDetails, details.id == catalogId,
        details.listStatus == "COMPLETED",
        episode == model.selectedEpisodes.first?.number,

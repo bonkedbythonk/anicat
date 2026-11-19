@@ -57,11 +57,36 @@ bash dev-run.sh                     # copies the binary into dist/Anicat.app and
 ```
 
 `scripts/package-anicat-macos-app.sh release` builds a standalone `.app` in
-`AnicatApple/dist/`. The iPhone and Apple TV apps build from Xcode after
-`cd AnicatApple && xcodegen generate` (needs a full Xcode and
-[xcodegen](https://github.com/yonaskolb/XcodeGen)); releases carry an
-unsigned iPhone `.ipa`, and no Apple TV build. The Windows build is the
-`server/` crate (`cd server && cargo test`).
+`AnicatApple/dist/`. The Windows build is the `server/` crate
+(`cd server && cargo test`).
+
+### iPhone and Apple TV
+
+There is no `.xcodeproj` in the repo: it is generated from
+`AnicatApple/project.yml` by [xcodegen](https://github.com/yonaskolb/XcodeGen)
+(`brew install xcodegen`). You need a full Xcode with the iOS or tvOS
+platform, and `scripts/build-xcframework.sh` run first (above).
+
+1. Give the apps bundle IDs of your own. `com.anicat.ios` and `com.anicat.tv`
+   in `project.yml` belong to another developer account, and Xcode cannot
+   sign an ID that is registered elsewhere. Change `PRODUCT_BUNDLE_IDENTIFIER`
+   under `AnicatiOS` and `AnicatTV` to something like `com.yourname.anicat.tv`.
+2. Export your Team ID (Xcode > Settings > Accounts) and the TMDB proxy, then
+   generate. Both are read at generation time; without the proxy Films and TV
+   is missing from the app.
+
+   ```bash
+   cd AnicatApple
+   export ANICAT_DEVELOPMENT_TEAM=YOURTEAMID ANICAT_TMDB_PROXY=https://anicat-tmdb.anicat.workers.dev
+   xcodegen generate
+   ```
+3. Open `Anicat.xcodeproj`, pick the `AnicatiOS` or `AnicatTV` scheme and your
+   device, and run.
+
+Regenerate after any change to `project.yml`, and never edit the generated
+project. With a free Apple account the installed app stops opening after
+seven days; build and run it again. Releases carry an unsigned iPhone `.ipa`
+and no Apple TV build.
 
 Stale bindings link fine and then call the wrong symbols at runtime, so rerun
 `build-xcframework.sh` whenever `core/src/ffi.rs` or a type it exports changes.

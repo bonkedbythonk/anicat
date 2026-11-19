@@ -1,5 +1,6 @@
 #if os(tvOS)
 import SwiftUI
+import UIKit
 
 /// The player chrome on Apple TV, driven by the Siri Remote.
 ///
@@ -9,11 +10,19 @@ import SwiftUI
 /// what the TV app player would have -- transport at the bottom, a timeline,
 /// and the remote's own vocabulary:
 ///
-/// - Play/Pause toggles playback, whether or not the chrome is up.
-/// - Left and right on the ring or touch surface seek ten seconds while the
-///   chrome is down; once it is up they move focus between the controls.
-/// - Select (a press) brings the chrome up when it is down.
-/// - Menu (Back) puts the chrome away; a second press closes the player.
+/// Laid out the way the TV app's own player answers the remote, since that
+/// is what a viewer's hands expect:
+///
+/// - Play/Pause, or a press on the clickpad, pauses and plays. Pausing brings
+///   the chrome up with the timeline focused.
+/// - On the timeline a swipe scrubs a marker through the episode and a press
+///   jumps there; a click on either edge jumps ten seconds.
+/// - With the chrome down, a click on either edge jumps without bringing it
+///   up (a swipe does not seek), down
+///   opens the audio and subtitle panel, up brings the chrome.
+/// - A click held on either edge rewinds or fast-forwards until let go.
+/// - Menu (Back) drops a scrub, then puts the chrome away; then it closes
+///   the player.
 ///
 /// `PhonePlayerView` stays the iPhone chrome and `PlayerView` the Mac's.
 /// Split rather than gated: almost nothing crosses over. No tap layer, no
@@ -48,6 +57,12 @@ struct TVPlayerView: View {
     @State private var lastSeekPress = Date.distantPast
     @State private var seekDirection: Double = 0
     @State private var seekStreak = 0
+    /// Where a swipe on the timeline has put the marker, until a press jumps
+    /// there or Back drops it.
+    @State private var scrubber = TVScrub()
+    /// A held edge click, seeking further every quarter second.
+    @State private var holdTask: Task<Void, Never>?
+    @State private var holdEndedAt = Date.distantPast
 
     var body: some View {
         ZStack {
@@ -66,7 +81,10 @@ struct TVPlayerView: View {
             // buttons instead.
             if !controller.areControlsVisible {
                 Button {
-                    showControls()
+                    // A press pauses, as in the TV app; the chrome comes up
+                    // with it (`pause` shows it) and stays while paused.
+                    PlayerLog.write("[remote] press on the picture: \(controller.isPlaying ? "pause" : "play")")
+                    withAnimation(.easeOut(duration: 0.2)) { controller.togglePlayPause() }
                 } label: {
                     Color.clear
                 }
@@ -83,14 +101,43 @@ struct TVPlayerView: View {
                 // moved focus onto the play button, so on a real Apple TV a
                 // second press or swipe moved focus instead of seeking.
                 .onMoveCommand { direction in
+                    // Left and right are not seeks here: one swipe arrives
+                    // as several move commands, each a further accelerated
+                    // step, and a quick swipe jumped minutes, "sometimes it
+                    // just skips straight to the next ep". Edge clicks seek
+                    // through `TVRemoteGestures` instead.
                     switch direction {
-                    case .left: seekQuietly(by: acceleratedStep(-1))
-                    case .right: seekQuietly(by: acceleratedStep(1))
+                    case .left, .right: break
+                    case .down: showOptions = true
                     default: showControls()
                     }
                 }
                 .ignoresSafeArea()
             }
+
+            TVRemoteGestures(
+                holdEnabled: (focus == .surface || focus == .timeline) && !showOptions && !showReleases,
+                clicksEnabled: (focus == .surface || focus == .timeline) && !showOptions && !showReleases,
+                // The picture is a Button: its own action already toggles.
+                selectEnabled: focus == .timeline && !showOptions && !showReleases,
+                panEnabled: focus == .timeline && !showOptions && !showReleases,
+                onHold: hold,
+                onEdgeClick: { direction in
+                    // A hold's release also ends as a click.
+                    guard Date().timeIntervalSince(holdEndedAt) > 0.3 else { return }
+                    scrubber.drop()
+                    PlayerLog.write("[remote] edge click \(direction < 0 ? "left" : "right") at \(Int(controller.currentTime))s")
+                    if focus == .surface {
+                        seekQuietly(by: acceleratedStep(direction))
+                    } else {
+                        seek(by: acceleratedStep(direction))
+                    }
+                },
+                onSelect: commitScrubOrToggle,
+                onPan: scrub
+            )
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
 
             if controller.isBuffering {
                 bufferingIndicator
@@ -99,7 +146,7 @@ struct TVPlayerView: View {
             skipPill
 
             if seekBarVisible && !controller.areControlsVisible {
-                TVTimeline(controller: controller, focus: $focus, onSeek: seek(by:))
+                TVTimeline(controller: controller, focus: $focus, scrub: nil)
                     .disabled(true)
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .padding(.horizontal, TVMetrics.gutter)
@@ -118,15 +165,14 @@ struct TVPlayerView: View {
             }
         }
         .accessibilityIdentifier("tv.player")
-        .onPlayPauseCommand {
-            controller.togglePlayPause()
-            controller.showControlsBriefly()
-        }
+        .onPlayPauseCommand { commitScrubOrToggle() }
         // Menu: chrome up, put it away; chrome down, leave the player. Not
         // wired to `onClose` directly, which would drop a viewer out of the
         // episode when all they wanted was the timeline gone.
         .onExitCommand {
-            if controller.nextEpisodeCountdown.isVisible {
+            if scrubber.time != nil {
+                withAnimation(.easeOut(duration: 0.15)) { scrubber.drop() }
+            } else if controller.nextEpisodeCountdown.isVisible {
                 withAnimation(.smooth) { controller.cancelNextEpisodeCountdown() }
             } else if controller.areControlsVisible {
                 hideControls()
@@ -167,7 +213,8 @@ struct TVPlayerView: View {
         // Focus follows the chrome: onto the play button as it comes up, back
         // onto the surface as it goes, since the button it sat on is gone.
         .onChange(of: controller.areControlsVisible) { _, visible in
-            focus = visible ? .playPause : .surface
+            focus = visible ? (controller.isPlaying ? .playPause : .timeline) : .surface
+            if !visible { scrubber.drop() }
             // The bottom fifth is the transport and timeline; the dialogue
             // goes above it while they are up.
             controller.liftSubtitles(by: visible ? 0.2 : 0)
@@ -186,7 +233,13 @@ struct TVPlayerView: View {
         .onChange(of: controller.nextEpisodeCountdown.isVisible) { _, visible in
             focus = visible ? .playNextNow : (controller.areControlsVisible ? .playPause : .surface)
         }
+        // Paused from the play button: the timeline takes focus, so the next
+        // press plays and a swipe scrubs, as in the TV app.
+        .onChange(of: controller.isPlaying) { _, playing in
+            if !playing, controller.areControlsVisible, focus == .playPause { focus = .timeline }
+        }
         .onDisappear {
+            holdTask?.cancel()
             controller.cancelAutohide()
             controller.liftSubtitles(by: 0)
         }
@@ -263,7 +316,7 @@ struct TVPlayerView: View {
                 VStack(spacing: 28) {
                     // Its own view: the clock changes four times a second,
                     // and read here it redrew the whole chrome each time.
-                    TVTimeline(controller: controller, focus: $focus, onSeek: { seek(by: acceleratedStep($0 < 0 ? -1 : 1)) })
+                    TVTimeline(controller: controller, focus: $focus, scrub: scrubber)
                     transport
                 }
             }
@@ -306,8 +359,7 @@ struct TVPlayerView: View {
             .focused($focus, equals: .back)
 
             Button {
-                controller.togglePlayPause()
-                controller.showControlsBriefly()
+                commitScrubOrToggle()
             } label: {
                 Image(anicat: controller.isPlaying ? "pause.fill" : "play.fill")
             }
@@ -420,13 +472,16 @@ struct TVPlayerView: View {
         controller.showControlsBriefly()
     }
 
-    /// Presses in one direction less than 1.2 s apart jump further each
-    /// time, so a long way into an episode is a run of presses rather than
-    /// a hundred: with every press 10 s, "i can only skip 10 secs".
+    /// Clicks at an ordinary pace jump 10 s each; only quick clicks in one
+    /// direction jump further, so a long way into an episode is a burst of
+    /// clicks rather than a hundred ("i can only skip 10 secs"). The window
+    /// was 1.2 s, and clicking 10 s at a time at a normal pace escalated
+    /// anyway: "its hard to skip 10 secs at a time if it skips a lot
+    /// eventually".
     private func acceleratedStep(_ direction: Double) -> Double {
         let steps: [Double] = [10, 10, 20, 30, 60, 120]
         let now = Date()
-        if direction == seekDirection, now.timeIntervalSince(lastSeekPress) < 1.2 {
+        if direction == seekDirection, now.timeIntervalSince(lastSeekPress) < 0.35 {
             seekStreak = min(seekStreak + 1, steps.count - 1)
         } else {
             seekStreak = 0
@@ -444,6 +499,82 @@ struct TVPlayerView: View {
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) { seekBarVisible = false }
+        }
+    }
+
+    // MARK: Remote
+
+    /// Play/Pause, a press on the timeline, the play button: with a scrub
+    /// pending they jump to it and play from there, otherwise they toggle.
+    private func commitScrubOrToggle() {
+        // A press is a touch too: the thumb lands and slides before the
+        // click, and that slide moved the marker. Logged on the TV with the
+        // marker shown at 355.6 s: committed at 397.6 s, the press's own
+        // touch having carried it 42 s. A press mid-touch takes the marker
+        // from before the touch.
+        // While the next episode loads there is nothing to jump in: presses
+        // then were logged as "scrub committed at 0.0s", nine in a row.
+        if controller.awaitingNewFile { scrubber.drop() }
+        if let before = scrubber.markerBeforeTouch {
+            scrubber.time = before
+        }
+        if let target = scrubber.time {
+            PlayerLog.write(String(format: "[remote] scrub committed at %.1fs", target))
+            scrubber.time = nil
+            scrubber.consumed = true
+            controller.seek(to: target)
+            controller.play()
+        } else {
+            controller.togglePlayPause()
+        }
+        controller.showControlsBriefly()
+    }
+
+    /// A swipe across the touch surface moves the marker, further per point
+    /// the faster it goes. At one flat rate, set so a swipe crossed a fifth
+    /// of the episode, 47 swipes logged on the TV averaged 386 pt and 110 s
+    /// and most were corrections of the one before: "the scrubbing feels very
+    /// yanky".
+    private func scrub(_ translation: CGFloat, _ velocity: CGFloat, _ state: UIGestureRecognizer.State) {
+        let loaded = controller.duration > 0 && !controller.awaitingNewFile
+        switch state {
+        case .began where loaded:
+            scrubber.begin(at: controller.currentTime)
+            controller.cancelAutohide()
+        case .changed where loaded:
+            scrubber.move(to: translation, speed: abs(velocity), duration: controller.duration)
+        case .ended, .cancelled:
+            PlayerLog.write(scrubber.end(translation))
+            controller.showControlsBriefly()
+        default: break
+        }
+    }
+
+    /// Rewind or fast-forward while an edge click is held: a jump every
+    /// quarter second, each further than the last, up to a minute.
+    private func hold(_ direction: Double, _ began: Bool) {
+        holdTask?.cancel()
+        holdTask = nil
+        guard began else {
+            holdEndedAt = Date()
+            PlayerLog.write(String(format: "[remote] hold ended at %.1fs", controller.currentTime))
+            return
+        }
+        PlayerLog.write("[remote] hold \(direction < 0 ? "rewind" : "fast-forward") from \(Int(controller.currentTime))s")
+        scrubber.drop()
+        holdTask = Task { @MainActor in
+            let steps: [Double] = [5, 5, 10, 10, 20, 20, 30, 45, 60]
+            var tick = 0
+            while !Task.isCancelled {
+                let step = direction * steps[min(tick / 2, steps.count - 1)]
+                if controller.areControlsVisible {
+                    controller.seekRelative(by: step)
+                } else {
+                    seekQuietly(by: step)
+                }
+                tick += 1
+                try? await Task.sleep(for: .milliseconds(250))
+            }
         }
     }
 
@@ -660,33 +791,113 @@ private struct TVChoiceList<T: Hashable>: View {
     }
 }
 
+/// The marker a swipe moves. An object rather than the player's own state:
+/// it changes with every touch event, and as `@State` of `TVPlayerView` each
+/// one redrew the whole player. Only `TVTimeline` reads it while drawing.
+@MainActor
+@Observable
+private final class TVScrub {
+    /// Where the marker is, nil when there is none. Press jumps there.
+    var time: Double?
+    /// The marker as it stood before the touch now on the surface, nil when
+    /// no touch is under way. See `commitScrubOrToggle`.
+    @ObservationIgnored var markerBeforeTouch: Double??
+    /// A press lands mid-swipe: the finger was still moving, and the marker
+    /// went on after the jump. Logged on the TV: committed at 417.5 s with
+    /// the marker shown at 444.2 s, then the rest of the swipe left a new
+    /// marker behind. The swipe ends at the press.
+    @ObservationIgnored var consumed = false
+    @ObservationIgnored private var base = 0.0
+    @ObservationIgnored private var last: CGFloat?
+    @ObservationIgnored private var fastest: CGFloat = 0
+    @ObservationIgnored private var moves = 0
+    @ObservationIgnored private var longestGap = 0.0
+    @ObservationIgnored private var lastMove = Date()
+
+    func begin(at current: Double) {
+        markerBeforeTouch = .some(time)
+        base = time ?? current
+        consumed = false
+        last = nil
+        fastest = 0
+        moves = 0
+        longestGap = 0
+        lastMove = Date()
+    }
+
+    /// Puts the marker away, and ends the touch that was moving it. Without
+    /// the second half a marker outlived the controls it was shown on: a
+    /// press on the TV jumped from 562 s to 690.4 s, a marker put away 7 s
+    /// before.
+    func drop() {
+        time = nil
+        markerBeforeTouch = nil
+        consumed = true
+    }
+
+    func move(to translation: CGFloat, speed: CGFloat, duration: Double) {
+        let now = Date()
+        longestGap = max(longestGap, now.timeIntervalSince(lastMove))
+        lastMove = now
+        moves += 1
+        fastest = max(fastest, speed)
+        guard !consumed, markerBeforeTouch != nil else { return }
+        guard let last else {
+            // A click rolls the finger a few points, and a thumb left on the
+            // surface after pausing drifts: 24 to 84 pt within 2 s of four
+            // of five pauses logged, each leaving a marker that the press to
+            // play then jumped to. So the first marker takes a real swipe.
+            if abs(translation) > (time == nil ? 100 : 20) { self.last = translation }
+            return
+        }
+        self.last = translation
+        // Logged on the TV: careful swipes peak near 1,500 pt/s, ordinary
+        // ones at 4,000 to 5,000, flicks at 9,000. Slow crosses the episode
+        // in 20,000 pt, a flick in 6,000. Kept to about three to one: at
+        // five to one a swipe that came back ended 71 s off, 80 pt from
+        // where it began.
+        let quick = min(max((speed - 1000) / 7000, 0), 1)
+        let perPoint = 1 / 20000 + Double(quick) * (1 / 6000 - 1 / 20000)
+        time = min(max((time ?? base) + Double(translation - last) * perPoint * duration, 0), duration)
+    }
+
+    /// Ends the touch; the log line the gain is tuned from.
+    func end(_ translation: CGFloat) -> String {
+        markerBeforeTouch = nil
+        return String(format: "[remote] swipe %.0f pt from %.1fs, marker at %.1fs, peak %.0f pt/s, %d moves, longest gap %.0f ms%@",
+                      translation, base, time ?? -1, fastest, moves, longestGap * 1000, consumed ? " (after a press)" : "")
+    }
+}
+
 /// The scrubbed position as a bar with the times at each end. Focusable
 /// so the ring can seek from it: a `Slider` does not exist on tvOS, and
 /// there is nothing to drag with anyway.
 private struct TVTimeline: View {
     let controller: PlayerController
     var focus: FocusState<TVPlayerView.Focus?>.Binding
-    let onSeek: (Double) -> Void
+    /// Where a swipe has put the marker, nil when there is no scrub.
+    let scrub: TVScrub?
 
     var body: some View {
+        let scrubTime = scrub?.time
         HStack(spacing: 24) {
             Text(PlayerController.formatTimestamp(controller.currentTime))
                 .font(.system(size: 22)).monospacedDigit()
                 .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 130, alignment: .leading)
 
-            TimelineBar(fraction: controller.progressFraction, isFocused: focus.wrappedValue == .timeline)
+            // Edges and swipes on it come through `TVRemoteGestures`: its own
+            // move command could not tell a swipe from a click.
+            TimelineBar(
+                fraction: controller.progressFraction,
+                scrubFraction: scrubTime.map { controller.duration > 0 ? $0 / controller.duration : 0 },
+                scrubLabel: scrubTime.map { PlayerController.formatTimestamp($0) },
+                isFocused: focus.wrappedValue == .timeline
+            )
                 .frame(height: 12)
                 .frame(maxWidth: .infinity)
                 .focusable()
                 .focused(focus, equals: .timeline)
-                .onMoveCommand { direction in
-                    switch direction {
-                    case .left: onSeek(-10)
-                    case .right: onSeek(10)
-                    default: break
-                    }
-                }
 
             Text("-" + PlayerController.formatTimestamp(max(0, controller.duration - controller.currentTime)))
                 .font(.system(size: 22)).monospacedDigit()
@@ -700,6 +911,8 @@ private struct TVTimeline: View {
 /// the ring is now seeking rather than moving between buttons.
 private struct TimelineBar: View {
     let fraction: Double
+    var scrubFraction: Double?
+    var scrubLabel: String?
     let isFocused: Bool
 
     var body: some View {
@@ -710,6 +923,31 @@ private struct TimelineBar: View {
                 Capsule()
                     .fill(.white)
                     .frame(width: geo.size.width * min(max(fraction, 0), 1))
+            }
+            .overlay(alignment: .leading) {
+                // The marker a swipe moves, with the time it would jump to.
+                if let scrubFraction, let scrubLabel {
+                    let x = geo.size.width * min(max(scrubFraction, 0), 1)
+                    // Its own leading stack: `overlay` centres several views
+                    // on each other first, which drew the marker half the
+                    // label's width to the right of where a press jumped
+                    // (40 px rendered, 97 with the wider label).
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(.white)
+                            .frame(width: 6, height: 36)
+                            .offset(x: x - 3)
+                        Text(scrubLabel)
+                            .font(.system(size: 26, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            // A fixed box keeps the time centred on the
+                            // marker whatever its width.
+                            .frame(width: 200)
+                            .offset(x: x - 100, y: -52)
+                    }
+                }
             }
             .frame(height: isFocused ? 12 : 6)
             .frame(maxHeight: .infinity)

@@ -94,4 +94,4 @@ Personal project, no support promised. Building from source is in
 [CONTRIBUTING.md](CONTRIBUTING.md). If you like it:
 [ko-fi.com/bonkedbythonk](https://ko-fi.com/bonkedbythonk).
 
-Licensed under [GPLv3](LICENSE).
+Copyright (C) 2026 Thomas. Licensed under [GPLv3](LICENSE).

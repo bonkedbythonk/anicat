@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// Anicat's own icons ("index cut"). Every SF Symbol name the app draws has a
+/// Anicat's own icons. Every SF Symbol name the app draws has a
 /// custom symbol of the same name in `Resources/Symbols.xcassets`, generated
 /// from `scripts/symbols/icons.swift` by `scripts/build-symbols.sh`. A name
 /// missing from the catalog renders nothing and logs nothing, so a new icon
-/// starts with a drawing there, not with a name here.
+/// starts with a drawing there, not with a name here. The one exception is
+/// `pawprint.fill`, which stays the system symbol: the redraw squared off
+/// the toes, and the owner wanted the original round paw back.
 ///
 /// The bundle is resolved once: `Bundle.anicatResources` builds a path and
 /// stats it on every call, and these initialisers run on every view update.

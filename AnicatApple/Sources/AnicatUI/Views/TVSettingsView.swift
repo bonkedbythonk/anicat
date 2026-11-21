@@ -71,7 +71,7 @@ struct TVSettingsView: View {
 
     private var identity: some View {
         VStack(spacing: 20) {
-            Image(anicat: "pawprint.fill")
+            Image(systemName: "pawprint.fill")
                 .font(.system(size: 160))
                 .foregroundStyle(SumiTheme.foreground.opacity(0.12))
                 .padding(.bottom, 20)

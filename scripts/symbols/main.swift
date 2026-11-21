@@ -1,4 +1,4 @@
-// Generates Anicat's "index cut" symbol set: one custom-symbol template per
+// Generates Anicat's symbol set: one custom-symbol template per
 // icon in icons.swift, written as .symbolset folders into an asset catalog.
 // Run through scripts/build-symbols.sh, never by hand.
 //

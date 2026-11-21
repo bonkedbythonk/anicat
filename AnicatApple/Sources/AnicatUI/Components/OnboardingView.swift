@@ -827,7 +827,7 @@ private struct MockPresence: View {
                 .fill(SumiTheme.indigo.opacity(0.35))
                 .frame(width: 34, height: 34)
                 .overlay(alignment: .bottomTrailing) {
-                    Image(anicat: "pawprint.fill")
+                    Image(systemName: "pawprint.fill")
                         .font(.system(size: 7, weight: .bold))
                         .foregroundColor(SumiTheme.indigo)
                         .padding(3)

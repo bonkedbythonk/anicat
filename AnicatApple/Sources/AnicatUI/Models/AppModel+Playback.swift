@@ -908,11 +908,15 @@ extension AppModel {
         // and hands the route back to whatever was playing before.
         // Before the player's session, which it would otherwise share.
         syncDownloadKeepAlive()
+        #endif
+        #if os(iOS) || os(tvOS)
         if activeStreamURL != nil {
             AudioSessionCoordinator.shared.begin(controller: playerController)
         } else {
             AudioSessionCoordinator.shared.end()
         }
+        #endif
+        #if os(iOS)
         // A minimised player is a bar over the tabs, which are portrait.
         OrientationLock.apply(playerOpen: activeStreamURL != nil && !isPlayerMinimized)
         #endif

@@ -165,7 +165,11 @@ struct TVPlayerView: View {
             }
         }
         .accessibilityIdentifier("tv.player")
-        .onPlayPauseCommand { commitScrubOrToggle() }
+        .onPlayPauseCommand {
+            let new = controller.claimPlayPause(fromSystem: false)
+            PlayerLog.write("[remote] Play/Pause\(new ? "" : ", already handled")")
+            if new || scrubber.time != nil { commitScrubOrToggle() }
+        }
         // Menu: chrome up, put it away; chrome down, leave the player. Not
         // wired to `onClose` directly, which would drop a viewer out of the
         // episode when all they wanted was the timeline gone.

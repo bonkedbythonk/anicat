@@ -218,15 +218,15 @@ public final class NowPlayingBridge: @unchecked Sendable {
         center.skipBackwardCommand.preferredIntervals = [NSNumber(value: Self.skipInterval)]
 
         register(center.playCommand) { controller, _ in
-            controller.play()
+            if Self.isNew("play", controller) { controller.play() }
             return .success
         }
         register(center.pauseCommand) { controller, _ in
-            controller.pause()
+            if Self.isNew("pause", controller) { controller.pause() }
             return .success
         }
         register(center.togglePlayPauseCommand) { controller, _ in
-            controller.togglePlayPause()
+            if Self.isNew("toggle", controller) { controller.togglePlayPause() }
             return .success
         }
         register(center.nextTrackCommand) { controller, _ in
@@ -255,6 +255,19 @@ public final class NowPlayingBridge: @unchecked Sendable {
             return .success
         }
         setNavigation(hasNext: controller.hasNextEpisode, hasPrevious: controller.hasPreviousEpisode)
+    }
+
+    /// Headphone buttons, Control Center and the rest. Logged: without the
+    /// line a command that never came and one that did nothing look alike.
+    @MainActor
+    private static func isNew(_ command: String, _ controller: PlayerController) -> Bool {
+        #if os(tvOS)
+        let new = controller.claimPlayPause(fromSystem: true)
+        #else
+        let new = true
+        #endif
+        PlayerLog.write("[nowplaying] \(command)\(new ? "" : ", ignored: the remote's own press")")
+        return new
     }
 
     private func register(

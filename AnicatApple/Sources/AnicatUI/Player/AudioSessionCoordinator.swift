@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import AVFoundation
 import UIKit
 
@@ -17,6 +17,11 @@ import UIKit
 /// `CAMetalLayer` from its own thread with no idea the app was suspended,
 /// and a Metal submission from a backgrounded process is a termination, not
 /// an error.
+///
+/// The Apple TV shares the session, the interruptions and the headphones,
+/// not the background half: it pauses on the way out (`TVRootView`). It had
+/// none of this until headphones were tried on it: "if i take my airpod out
+/// it doesnt pause".
 @MainActor
 final class AudioSessionCoordinator {
     static let shared = AudioSessionCoordinator()
@@ -79,23 +84,21 @@ final class AudioSessionCoordinator {
             },
             center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
                 let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
-                MainActor.assumeIsolated { self?.handleRouteChange(reasonRaw: reason) }
+                let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
+                let ports = previous?.outputs.map(\.portType) ?? []
+                MainActor.assumeIsolated { self?.handleRouteChange(reasonRaw: reason, from: ports) }
             },
+        ]
+        #if os(iOS)
+        observers += [
             center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.controller?.onSetVideoEnabled?(false)
-                    #if os(tvOS)
-                    // The box going to sleep is also an interruption, and
-                    // its end on wake carries shouldResume: the owner turned
-                    // the TV off mid-episode and came back to it playing.
-                    self?.resumeAfterInterruption = false
-                    #endif
-                }
+                MainActor.assumeIsolated { self?.controller?.onSetVideoEnabled?(false) }
             },
             center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.controller?.onSetVideoEnabled?(true) }
             },
         ]
+        #endif
     }
 
     private func removeObservers() {
@@ -113,7 +116,12 @@ final class AudioSessionCoordinator {
               let controller else { return }
         switch type {
         case .began:
+            AppLog.write("[audio] interrupted, \(controller.isPlaying ? "pausing" : "already paused")")
+            #if os(iOS)
+            // Never on the TV: the box going to sleep is an interruption
+            // too, and one that ends on wake would start the episode there.
             resumeAfterInterruption = controller.isPlaying
+            #endif
             if controller.isPlaying { controller.pause() }
         case .ended:
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
@@ -128,10 +136,16 @@ final class AudioSessionCoordinator {
 
     /// Headphones pulled out. The system's convention is to pause rather
     /// than switch to the speaker at whatever volume the headphones were at.
-    private func handleRouteChange(reasonRaw: UInt?) {
+    private func handleRouteChange(reasonRaw: UInt?, from previous: [AVAudioSession.Port]) {
         guard let reasonRaw,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw),
-              reason == .oldDeviceUnavailable else { return }
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw) else { return }
+        AppLog.write("[audio] route change \(reasonRaw) from \(previous.map(\.rawValue)) to \(AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType.rawValue))")
+        guard reason == .oldDeviceUnavailable else { return }
+        #if os(tvOS)
+        // HDMI goes too when the TV changes display mode, which every
+        // episode start does.
+        guard previous.contains(where: { $0 != .HDMI }) else { return }
+        #endif
         controller?.pause()
     }
 }

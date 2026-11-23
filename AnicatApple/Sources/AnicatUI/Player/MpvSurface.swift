@@ -837,6 +837,13 @@ public struct MpvSurface {
                 mpv_set_option_string(handle, "audio-channels", "stereo")
             }
             #endif
+            #if os(tvOS)
+            // mpv's audiounit output sets the session up to mix with other
+            // apps unless told it is exclusive, and an app that mixes is not
+            // the Now Playing one: AirPods' buttons and taking one out reach
+            // nothing ("i cant pause it or play it with my airpods").
+            mpv_set_option_string(handle, "audio-exclusive", "yes")
+            #endif
 
             let initStatus = mpv_initialize(handle)
             if initStatus < 0 {

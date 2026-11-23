@@ -978,6 +978,19 @@ public final class PlayerController {
         }
     }
 
+    #if os(tvOS)
+    private var lastPlayPause: (fromSystem: Bool, at: Date)?
+
+    /// Whether this play or pause is new. The Siri Remote's Play/Pause can
+    /// arrive twice, as a press in the player and as the system's command,
+    /// and two toggles leave the episode as it was.
+    func claimPlayPause(fromSystem: Bool) -> Bool {
+        if let last = lastPlayPause, last.fromSystem != fromSystem, Date().timeIntervalSince(last.at) < 0.5 { return false }
+        lastPlayPause = (fromSystem, Date())
+        return true
+    }
+    #endif
+
     public func togglePlayPause() {
         isPlaying.toggle()
         showControlsBriefly()

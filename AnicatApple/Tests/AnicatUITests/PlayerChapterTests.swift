@@ -220,6 +220,30 @@ struct SkipSourceTests {
         #expect(controller.currentTime == 150)
     }
 
+    @Test("A seek into an opening plays it; playing into one still skips")
+    func chosenSeekIsNotSkipped() {
+        let controller = PlayerController()
+        controller.autoSkipEnabled = true
+        controller.setChapters([
+            PlayerChapter(title: "Opening", time: 60),
+            PlayerChapter(title: "Part B", time: 150),
+        ], duration: 1420)
+        controller.seek(to: 100)
+        #expect(controller.currentTime == 100)
+        controller.currentTime = 101
+        controller.checkIntroStatus()
+        #expect(controller.currentTime == 101)
+        // Its very start is "Start over" landing there: skipped as before.
+        let other = PlayerController()
+        other.autoSkipEnabled = true
+        other.setChapters([
+            PlayerChapter(title: "Opening", time: 60),
+            PlayerChapter(title: "Part B", time: 150),
+        ], duration: 1420)
+        other.seek(to: 60)
+        #expect(other.currentTime == 150)
+    }
+
     @Test("A new file with no chapters drops the previous episode's windows")
     func chaptersClearedPerFile() {
         let controller = PlayerController()

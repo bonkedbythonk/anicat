@@ -1,4 +1,5 @@
 #if os(tvOS)
+import AnicatCoreKit
 import SwiftUI
 import UIKit
 
@@ -146,7 +147,7 @@ struct TVPlayerView: View {
             skipPill
 
             if seekBarVisible && !controller.areControlsVisible {
-                TVTimeline(controller: controller, focus: $focus, scrub: nil)
+                TVTimeline(controller: controller, focus: $focus, scrub: nil, streamURL: streamURL)
                     .disabled(true)
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .padding(.horizontal, TVMetrics.gutter)
@@ -242,7 +243,15 @@ struct TVPlayerView: View {
         .onChange(of: controller.isPlaying) { _, playing in
             if !playing, controller.areControlsVisible, focus == .playPause { focus = .timeline }
         }
+        .onAppear {
+            controller.commitPendingScrub = {
+                guard scrubber.time != nil else { return false }
+                commitScrubOrToggle()
+                return true
+            }
+        }
         .onDisappear {
+            controller.commitPendingScrub = nil
             holdTask?.cancel()
             controller.cancelAutohide()
             controller.liftSubtitles(by: 0)
@@ -320,7 +329,7 @@ struct TVPlayerView: View {
                 VStack(spacing: 28) {
                     // Its own view: the clock changes four times a second,
                     // and read here it redrew the whole chrome each time.
-                    TVTimeline(controller: controller, focus: $focus, scrub: scrubber)
+                    TVTimeline(controller: controller, focus: $focus, scrub: scrubber, streamURL: streamURL)
                     transport
                 }
             }
@@ -522,13 +531,14 @@ struct TVPlayerView: View {
         if let before = scrubber.markerBeforeTouch {
             scrubber.time = before
         }
-        if let target = scrubber.time {
-            PlayerLog.write(String(format: "[remote] scrub committed at %.1fs", target))
+        if let target = scrubber.target {
+            PlayerLog.write(String(format: "[remote] scrub committed at %.1fs (marker %.1fs)", target, scrubber.time ?? target))
             scrubber.time = nil
             scrubber.consumed = true
             controller.seek(to: target)
             controller.play()
         } else {
+            PlayerLog.write("[remote] press: \(controller.isPlaying ? "pause" : "play")")
             controller.togglePlayPause()
         }
         controller.showControlsBriefly()
@@ -831,6 +841,20 @@ private final class TVScrub {
     /// the marker shown at 444.2 s, then the rest of the swipe left a new
     /// marker behind. The swipe ends at the press.
     @ObservationIgnored var consumed = false
+    /// The picture's own time for the marker it was made for. It is the
+    /// keyframe at or before the marker, and on an x265 release keyframes
+    /// were measured up to 43.2 s apart (83 gaps over 10 s in one episode):
+    /// the viewer aimed by the picture and landed up to 43 s after it,
+    /// "always random". The marker snaps to the picture and a press lands
+    /// on what it shows.
+    var snapped: (marker: Double, picture: Double)?
+
+    /// Where a press lands: the shown picture's time, else the marker.
+    var target: Double? {
+        guard let time else { return nil }
+        if let snapped, snapped.marker == time { return snapped.picture }
+        return time
+    }
     @ObservationIgnored private var base = 0.0
     @ObservationIgnored private var last: CGFloat?
     @ObservationIgnored private var fastest: CGFloat = 0
@@ -893,6 +917,68 @@ private final class TVScrub {
     }
 }
 
+/// The picture over the scrub marker. One is made at a time and always for
+/// the newest position, so a fast swipe skips the ones in between.
+@MainActor
+@Observable
+private final class TVScrubPictures {
+    private(set) var image: CGImage?
+    @ObservationIgnored private let frames = ScrubFrames()
+    @ObservationIgnored private var wanted: Double?
+    @ObservationIgnored private var work: Task<Void, Never>?
+    @ObservationIgnored private var made = 0
+    @ObservationIgnored private var slowest = 0.0
+
+    func show(at time: Double, of duration: Double, from url: URL, for scrub: TVScrub) {
+        wanted = time
+        guard work == nil else { return }
+        work = Task { [frames] in
+            while let time = wanted, !Task.isCancelled {
+                wanted = nil
+                let began = Date()
+                let engine = AppModel.shared?.engine
+                // Asked of the engine, not read off the controller: its map
+                // moves with playback, and a scrub is mostly on a pause.
+                let here = await Task.detached { Self.isDownloaded(time / duration, url: url, engine: engine) }.value
+                let picture = here ? await frames.picture(url: url.isFileURL ? url.path : url.absoluteString, at: time) : nil
+                guard !Task.isCancelled else { return }
+                image = picture?.image
+                scrub.snapped = picture.map { (time, $0.time) }
+                if picture != nil {
+                    made += 1
+                    slowest = max(slowest, Date().timeIntervalSince(began))
+                }
+                // Twelve a second at most: the episode is being decoded and
+                // upscaled on the same box.
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+            // Cancelled, `work` is already the next scrub's.
+            if !Task.isCancelled { work = nil }
+        }
+    }
+
+    func clear() {
+        work?.cancel()
+        work = nil
+        wanted = nil
+        image = nil
+        frames.close()
+        if made > 0 { PlayerLog.write("[scrub] \(made) pictures, slowest \(Int(slowest * 1000)) ms") }
+        made = 0
+        slowest = 0
+    }
+
+    /// Only what the torrent already has: a picture of anything else would
+    /// pull pieces ahead of the ones the episode needs next.
+    private nonisolated static func isDownloaded(_ fraction: Double, url: URL, engine: AnicatEngine?) -> Bool {
+        guard url.path == "/torrent-stream", let engine else { return true }
+        // A share of the file's bytes, not of its time, hence the slack.
+        return engine.playingFileBuffered().contains {
+            $0.start <= fraction && (fraction + 0.01 <= $0.end || $0.end > 0.999)
+        }
+    }
+}
+
 /// The scrubbed position as a bar with the times at each end. Focusable
 /// so the ring can seek from it: a `Slider` does not exist on tvOS, and
 /// there is nothing to drag with anyway.
@@ -901,9 +987,11 @@ private struct TVTimeline: View {
     var focus: FocusState<TVPlayerView.Focus?>.Binding
     /// Where a swipe has put the marker, nil when there is no scrub.
     let scrub: TVScrub?
+    let streamURL: URL
+    @State private var pictures = TVScrubPictures()
 
     var body: some View {
-        let scrubTime = scrub?.time
+        let scrubTime = scrub?.target
         HStack(spacing: 24) {
             Text(PlayerController.formatTimestamp(controller.currentTime))
                 .font(.system(size: 22)).monospacedDigit()
@@ -916,8 +1004,16 @@ private struct TVTimeline: View {
                 fraction: controller.progressFraction,
                 scrubFraction: scrubTime.map { controller.duration > 0 ? $0 / controller.duration : 0 },
                 scrubLabel: scrubTime.map { PlayerController.formatTimestamp($0) },
+                picture: pictures.image,
                 isFocused: focus.wrappedValue == .timeline
             )
+                .onChange(of: scrub?.time) { _, time in
+                    if let time, let scrub {
+                        pictures.show(at: time, of: controller.duration, from: streamURL, for: scrub)
+                    } else {
+                        pictures.clear()
+                    }
+                }
                 .frame(height: 12)
                 .frame(maxWidth: .infinity)
                 .focusable()
@@ -937,7 +1033,10 @@ private struct TimelineBar: View {
     let fraction: Double
     var scrubFraction: Double?
     var scrubLabel: String?
+    var picture: CGImage?
     let isFocused: Bool
+
+    private static let pictureWidth: CGFloat = 384
 
     var body: some View {
         GeometryReader { geo in
@@ -970,6 +1069,18 @@ private struct TimelineBar: View {
                             // marker whatever its width.
                             .frame(width: 200)
                             .offset(x: x - 100, y: -52)
+                        if let picture {
+                            // Kept on the bar at either end, where the
+                            // marker itself goes on to the edge.
+                            let half = Self.pictureWidth / 2
+                            let height = Self.pictureWidth * CGFloat(picture.height) / CGFloat(picture.width)
+                            Image(decorative: picture, scale: 1)
+                                .resizable()
+                                .frame(width: Self.pictureWidth, height: height)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.3), lineWidth: 2))
+                                .offset(x: min(max(x, half), max(geo.size.width - half, half)) - half, y: -86 - height / 2)
+                        }
                     }
                 }
             }

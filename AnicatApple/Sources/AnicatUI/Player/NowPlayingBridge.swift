@@ -263,6 +263,10 @@ public final class NowPlayingBridge: @unchecked Sendable {
     private static func isNew(_ command: String, _ controller: PlayerController) -> Bool {
         #if os(tvOS)
         let new = controller.claimPlayPause(fromSystem: true)
+        if new, controller.commitPendingScrub?() == true {
+            PlayerLog.write("[nowplaying] \(command): committed the scrub")
+            return false
+        }
         #else
         let new = true
         #endif

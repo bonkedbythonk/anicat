@@ -2523,7 +2523,7 @@ public struct MpvSurface {
                         if name == "time-pos", let data = prop.data {
                             let pos = data.assumingMemoryBound(to: Double.self).pointee
                             await MainActor.run {
-                                guard !self.controller.awaitingNewFile else { return }
+                                guard !self.controller.awaitingNewFile, self.controller.acceptsPosition(pos) else { return }
                                 self.controller.notePlayedPosition(pos)
                                 if !self.controller.isScrubbing {
                                     // mpv reports time-pos on every video

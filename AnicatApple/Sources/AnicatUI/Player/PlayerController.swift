@@ -671,7 +671,10 @@ public final class PlayerController {
     /// episode watched on AniList and the 75% line preloaded N+2, both
     /// within a second of N+1 starting. Position, duration and pause
     /// updates are dropped while this is set.
-    public var awaitingNewFile: Bool = false
+    public var awaitingNewFile: Bool = false {
+        // A seek into the outgoing file is not one the next will reach.
+        didSet { if awaitingNewFile { seekLanding = nil } }
+    }
     public var onPlaybackStopped: (@MainActor () -> Void)?
     /// mpv gave up on the file: a load error, or an end-of-file far short
     /// of the duration, which is what a stream whose source died mid-episode
@@ -981,6 +984,14 @@ public final class PlayerController {
     #if os(tvOS)
     private var lastPlayPause: (fromSystem: Bool, at: Date)?
 
+    /// Set by the TV player: jumps to a pending scrub marker and says whether
+    /// there was one. Since `audio-exclusive` the Siri Remote's Play/Pause
+    /// arrives only as the system's pause command, never as the player's
+    /// press; logged on the TV, a marker at 210.8 s ended as "[nowplaying]
+    /// pause" with the episode left at 244 s: "it just places it like a
+    /// minute infront of the marker".
+    @ObservationIgnored var commitPendingScrub: (() -> Bool)?
+
     /// Whether this play or pause is new. The Siri Remote's Play/Pause can
     /// arrive twice, as a press in the player and as the system's command,
     /// and two toggles leave the episode as it was.
@@ -1026,10 +1037,37 @@ public final class PlayerController {
     /// `showControls: false` is the Apple TV's left/right on the hidden
     /// player: brought up, the controls took focus onto the play button
     /// and only the first of several presses seeked.
+    /// A seek mpv has been asked for and not reached yet. It seeks in the
+    /// background and goes on reporting the old position meanwhile; taken
+    /// as the playhead, those put the timeline back where it was until the
+    /// seek landed, and the next swipe started from there. The Apple TV,
+    /// after a jump to 81.3 s: "swipe 297 pt from 90.5s", a second later.
+    @ObservationIgnored private var seekLanding: (target: Double, at: Date)?
+
+    /// Whether a position mpv reports is the playhead, and not the one
+    /// before a seek still in flight. A seek that never lands (a piece that
+    /// never comes) stops holding positions back after 10 s.
+    func acceptsPosition(_ position: Double) -> Bool {
+        guard let landing = seekLanding else { return true }
+        guard abs(position - landing.target) < 1.5 || Date().timeIntervalSince(landing.at) > 10 else { return false }
+        seekLanding = nil
+        return true
+    }
+
     public func seek(to seconds: Double, showControls: Bool = true) {
         currentTime = max(seconds, 0)
         if duration > 0 {
             currentTime = min(currentTime, duration)
+        }
+        seekLanding = (currentTime, Date())
+        // Into the middle of an opening or ending is the viewer choosing to
+        // see it. Auto-skip took them on to its end instead, and only the
+        // first time per file: on the TV, "i put a marker, and it just
+        // places it like a minute infront of the marker ... but this is
+        // only sometimes". Its very start is still skipped, which is where
+        // "Start over" seeks to.
+        if let chosen = skipWindows.first(where: { $0.contains(currentTime) && currentTime > $0.start + 1 }) {
+            skippedWindowKeys.insert(Self.windowKey(chosen))
         }
         checkIntroStatus()
         if showControls { showControlsBriefly() }
@@ -1134,6 +1172,7 @@ public final class PlayerController {
         // which would find `currentTime` still inside the window on a seek
         // mpv has not applied yet and skip it a second time.
         skippedWindowKeys.insert(Self.windowKey(window))
+        PlayerLog.write(String(format: "[skip] auto-skipped %.0f-%.0fs from %.1fs", window.start, window.end, currentTime))
         if flash {
             flashSkip(window.flashLabel)
         }

@@ -1724,6 +1724,13 @@ public struct MpvSurface {
         @MainActor
         func redisplayAfterResume(view: MpvHostView?) {
             lastDisplayRequest = nil
+            // Asking again for the same criteria is not a change to tvOS: on
+            // the box every wake logged "asked for 23.976 Hz SDR" and no
+            // mode switch, so the episode played in the menu mode, SDR
+            // converted to HDR. The owner: "the quality looks reduced", fixed
+            // only by restarting the episode, whose close clears the request.
+            // Clearing it here makes the next ask a real one.
+            displayMatchedWindow?.avDisplayManager.preferredDisplayCriteria = nil
             view?.metalView?.syncDrawableSize()
             reconfigAttemptsForSize = 0
             PlayerLog.write("[display] resumed, asking again")

@@ -175,6 +175,12 @@ public final class PlayerController {
         didSet {
             guard oldValue != isPlaying else { return }
             onPlayingStateChange?(isPlaying)
+            // The auto-hide gives up when it fires on a paused player, and
+            // nothing re-armed it when playback went on without a press: the
+            // hold during the TV's mode switch, a wake, a stall. On the box
+            // the controls then stayed until a button was pressed (owner:
+            // "the ui sometimes just stays up").
+            if isPlaying, areControlsVisible { showControlsBriefly() }
             #if os(macOS)
             cast.playingChanged(isPlaying)
             #endif

@@ -15,6 +15,8 @@ pub struct AniListClient {
     token: Mutex<Option<String>>,
     username: Mutex<Option<String>>,
     rate_limited_until: Mutex<Option<Instant>>,
+    /// `x-ratelimit-remaining` from the last answer AniList gave.
+    budget_remaining: Mutex<Option<u64>>,
     request_lock: Arc<tokio::sync::Semaphore>,
 }
 
@@ -25,6 +27,7 @@ impl Clone for AniListClient {
             token: Mutex::new(self.token.lock().unwrap().clone()),
             username: Mutex::new(self.username.lock().unwrap().clone()),
             rate_limited_until: Mutex::new(*self.rate_limited_until.lock().unwrap()),
+            budget_remaining: Mutex::new(*self.budget_remaining.lock().unwrap()),
             request_lock: self.request_lock.clone(),
         }
     }
@@ -37,6 +40,7 @@ impl AniListClient {
             token: Mutex::new(token),
             username: Mutex::new(None),
             rate_limited_until: Mutex::new(None),
+            budget_remaining: Mutex::new(None),
             request_lock: Arc::new(tokio::sync::Semaphore::new(3)),
         }
     }
@@ -77,6 +81,12 @@ impl AniListClient {
         let until = (*self.rate_limited_until.lock().unwrap())?;
         let now = Instant::now();
         (now < until).then(|| until - now)
+    }
+
+    /// Requests left in AniList's current window, as its last answer said;
+    /// `None` before the first answer.
+    pub fn budget_remaining(&self) -> Option<u64> {
+        *self.budget_remaining.lock().unwrap()
     }
 
     #[cfg(test)]
@@ -155,6 +165,18 @@ impl AniListClient {
         // (Retry-After, X-RateLimit-Remaining) live here and reqwest moves
         // `resp` into `.text()`.
         let headers = resp.headers().clone();
+        // One line per request at info: the phone hit a 429 45s after launch
+        // with no "budget low" warning first, and nothing in the log said
+        // which calls had spent the 30-per-minute degraded budget.
+        let field = query.lines().map(str::trim).filter(|s| !s.is_empty()).nth(1).unwrap_or("").split('(').next().unwrap_or("");
+        let vars_short: String = vars_str.chars().take(120).collect();
+        log::info!(
+            "[anilist] {} {} -> HTTP {} ({} left)",
+            field,
+            vars_short,
+            status.as_u16(),
+            headers.get("x-ratelimit-remaining").and_then(|v| v.to_str().ok()).unwrap_or("?")
+        );
         let text = resp
             .text()
             .await
@@ -204,6 +226,7 @@ impl AniListClient {
         // of sprinting into a 429. Cheap insurance on top of the client-side
         // query cache — most requests report plenty of headroom and skip this.
         if let Some(remaining) = header_secs("x-ratelimit-remaining") {
+            *self.budget_remaining.lock().unwrap() = Some(remaining);
             if remaining <= 3 {
                 let mut rl = self.rate_limited_until.lock().unwrap();
                 let backoff = Instant::now() + std::time::Duration::from_secs(2);

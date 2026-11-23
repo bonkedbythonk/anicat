@@ -1316,6 +1316,10 @@ impl AnicatEngine {
         // page is asked again in rewritten forms (see `catalog::fuzzy`). Later
         // pages are not: the first page is where a wrong query shows.
         let typed = query.as_deref().map(str::trim).filter(|q| !q.is_empty());
+        // A thin page that already holds the title is not a typo: "akuma no
+        // riddle" has one AniList hit, and walking the index and rewrites for
+        // it spent 11 of the degraded 30-per-minute budget on the phone.
+        let typed = typed.filter(|t| !fuzzy::has_close_match(t, &items));
         if let (1, true, Some(typed)) = (page_num, items.len() < FUZZY_BELOW, typed) {
             // One at a time, stopping at the first close title: AniList's
             // rate limit made six at once cost a minute's wait. Cheapest
@@ -4952,6 +4956,10 @@ const MAX_REWRITE_REQUESTS: usize = 6;
 /// The names of the most popular titles of one media type, for correcting a
 /// misspelling against (`fuzzy::closest`). Cached for a week; one that could not
 /// be finished is cached for ten minutes.
+/// Requests that must be left in AniList's window before the title index is
+/// built: its pages plus room for what the user does next.
+const INDEX_PAGES_RESERVE: u64 = fuzzy::INDEX_PAGES as u64 + 10;
+
 async fn title_index(catalogs: &Catalogs, media_type: &str) -> Vec<Vec<String>> {
     let args = [("type", media_type)];
     let (key, partial_key) = (AniListCache::key("title_index", &args), AniListCache::key("title_index_partial", &args));
@@ -4966,6 +4974,16 @@ async fn title_index(catalogs: &Catalogs, media_type: &str) -> Vec<Vec<String>> 
     let _building = fuzzy::INDEX_BUILD.lock().await;
     if let Some(index) = cached() {
         return index;
+    }
+    // The walk costs INDEX_PAGES requests. In AniList's degraded mode (30 a
+    // minute, a fixed window) a phone's launch had left too few: the walk hit
+    // a 429 at page 4 and every search and detail page after it slept out a
+    // 49-60 s cooldown, which read as a search spinning forever. Without the
+    // budget for the whole walk, the search goes on without an index.
+    let affordable = catalogs.anilist.budget_remaining().is_none_or(|left| left >= INDEX_PAGES_RESERVE);
+    if catalogs.anilist.cooling_down() || !affordable {
+        log::info!("[search] title index skipped: {:?} AniList requests left", catalogs.anilist.budget_remaining());
+        return Vec::new();
     }
     let mut index: Vec<Vec<String>> = Vec::new();
     let mut complete = true;
@@ -5011,7 +5029,10 @@ async fn ask_rewrites(
     budget: &mut usize,
 ) {
     for rewrite in rewrites {
-        if *budget == 0 || fuzzy::has_close_match(typed, found) {
+        // During a 429 cooldown each rewrite would sleep it out first (up to a
+        // minute) and then probably draw another: the second 429 on the phone
+        // came from here, a minute after the first.
+        if *budget == 0 || fuzzy::has_close_match(typed, found) || catalogs.anilist.cooling_down() {
             return;
         }
         *budget -= 1;

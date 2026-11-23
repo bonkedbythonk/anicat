@@ -410,7 +410,10 @@ struct PhoneDetailView: View {
     @ViewBuilder
     private var episodeList: some View {
         if model.selectedEpisodes.isEmpty {
-            Text("No episodes listed.")
+            // `isDetailLoading`, not `isLoading`: loadDetail never sets the
+            // latter. A fetch sleeping out AniList's 429 cooldown read as
+            // "No episodes listed." on a title in the viewer's own list.
+            Text(model.isDetailLoading ? "Loading episodes..." : "No episodes listed.")
                 .font(.system(size: 13))
                 .foregroundStyle(SumiTheme.muted)
                 .padding(.horizontal, 16)

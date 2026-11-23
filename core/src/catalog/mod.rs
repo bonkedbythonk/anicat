@@ -73,6 +73,10 @@ pub struct Catalogs {
     pub anilist: Arc<AniListClient>,
     pub tmdb: Arc<TmdbClient>,
     pub cache: Arc<AniListCache>,
+    /// The launch's list loads all start before any knows the name: five
+    /// identical Viewer requests went out in 170ms on the phone, a sixth of
+    /// AniList's degraded 30-per-minute budget spent before the home painted.
+    viewer_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Catalogs {
@@ -98,6 +102,7 @@ impl Catalogs {
             anilist: Arc::new(AniListClient::new(http.clone(), anilist_token)),
             tmdb: Arc::new(TmdbClient::new(http, tmdb_key, tmdb_proxy)),
             cache: Arc::new(cache),
+            viewer_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -109,6 +114,10 @@ impl Catalogs {
     /// rather than like a missing parameter. Nothing else in the crate calls
     /// `set_username`, so this is the only thing that populates it.
     pub async fn viewer_name(&self) -> Result<String, String> {
+        if let Some(name) = self.anilist.get_username() {
+            return Ok(name);
+        }
+        let _one_at_a_time = self.viewer_lock.lock().await;
         if let Some(name) = self.anilist.get_username() {
             return Ok(name);
         }

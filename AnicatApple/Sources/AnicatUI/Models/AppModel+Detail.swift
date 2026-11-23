@@ -302,9 +302,14 @@ extension AppModel {
         do {
             if Task.isCancelled { return }
             let d: MediaDetail
-            if let primary = try? await engine.mediaDetail(catalogId: id, isManga: isManga) {
-                d = primary
-            } else {
+            do {
+                d = try await engine.mediaDetail(catalogId: id, isManga: isManga)
+            } catch AnicatError.Network(let msg) where msg.contains("429") {
+                // Rate limited, not the wrong type: asking again as the other
+                // type slept out the same AniList cooldown a second time,
+                // up to a minute more of a page with no episodes.
+                throw AnicatError.Network(msg: msg)
+            } catch {
                 if Task.isCancelled { return }
                 d = try await engine.mediaDetail(catalogId: id, isManga: !isManga)
             }
@@ -496,6 +501,9 @@ extension AppModel {
             }
         } catch {
             guard !Task.isCancelled else { return }
+            // AppLog, not print: block-buffered print left the phone's log
+            // with no trace of an empty detail page the owner reported.
+            AppLog.write("[detail] \(id) failed (snapshot \(cached == nil ? "none" : "shown")): \(error.localizedDescription)")
             self.isDetailLoading = false
             recordAniListFailure(error)
             // A cached snapshot is already on screen (from the top of this

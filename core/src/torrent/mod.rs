@@ -1359,6 +1359,7 @@ impl TorrentManager {
             match attempt {
                 Ok(Ok(r)) => {
                     self.commit_resolution(media, episode, r, &cand).await;
+                    warm_matroska_head(&session, &r, resume_fraction).await;
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
                     let protected = self.cleanup_protected(Some(r.torrent_id));
@@ -1636,6 +1637,7 @@ impl TorrentManager {
                 }
 
                 self.commit_resolution(media, episode, r, cand).await;
+                warm_matroska_head(&session, &r, resume_fraction).await;
                 let dir = self.cache_dir.clone();
                 let session_for_cleanup = session.clone();
                 let protected = self.cleanup_protected(Some(r.torrent_id));
@@ -1673,6 +1675,7 @@ impl TorrentManager {
             {
                 Ok(r) => {
                     self.commit_resolution(media, episode, r, cand).await;
+                    warm_matroska_head(&session, &r, resume_fraction).await;
                     let dir = self.cache_dir.clone();
                     let session_for_cleanup = session.clone();
                     let protected = self.cleanup_protected(Some(r.torrent_id));
@@ -3108,6 +3111,116 @@ pub async fn gather_media_info(
     MediaInfo { titles, episode_count, aired_episodes, hint, siblings: sibling_titles }
 }
 
+/// Downloads a Matroska file's front matter -- everything before its first
+/// cluster -- before a resumed play hands the stream to mpv.
+///
+/// mpv reads that region in full, front to back, before it looks at the
+/// index or seeks to the resume point. Usually under 1 MB, but not always
+/// (attachments go there): switching Spy x Family ep 5 to a LostYears
+/// release on the Apple TV, mpv read 0 to 63.8 MB for 6.5 s of black screen
+/// before asking for anything else. Done here, the episode being replaced
+/// keeps playing through that wait; an 11 MB one then took 0.9 s and the
+/// picture came back 0.6 s after the handover. Only for a resumed play (a
+/// Sub/Dub or release switch, an Up Next resume): a play from the start
+/// would only move the same wait from the player to the loading screen.
+/// Best effort and bounded; a failure leaves mpv to fetch it as before.
+async fn warm_matroska_head(session: &Arc<Session>, r: &Resolved, resume_fraction: Option<f64>) {
+    use tokio::io::AsyncReadExt;
+    const PROBE: usize = 256 * 1024;
+    const MAX_HEAD: u64 = 256 * 1024 * 1024;
+    const BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+    if !resume_fraction.is_some_and(|f| f > 0.0) {
+        return;
+    }
+    let Some(handle) = session.get(r.torrent_id.into()) else { return };
+    let Ok(mut stream) = handle.stream(r.file_id) else { return };
+    let file_len = stream.len();
+    let started = std::time::Instant::now();
+    let mut probe = vec![0u8; PROBE.min(file_len as usize)];
+    if !matches!(tokio::time::timeout(BUDGET, stream.read_exact(&mut probe)).await, Ok(Ok(_))) {
+        return;
+    }
+    let Some(end) = matroska_head_end(&probe) else { return };
+    if end <= probe.len() as u64 || end > MAX_HEAD.min(file_len) {
+        return;
+    }
+    let mut pos = probe.len() as u64;
+    let mut buf = vec![0u8; 1024 * 1024];
+    let remaining = BUDGET.saturating_sub(started.elapsed());
+    let _ = tokio::time::timeout(remaining, async {
+        while pos < end {
+            let want = buf.len().min((end - pos) as usize);
+            match stream.read(&mut buf[..want]).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => pos += n as u64,
+            }
+        }
+    })
+    .await;
+    log::info!(
+        "torrent: warmed {} of {} KB of Matroska front matter in {:?} before handing off",
+        pos / 1024,
+        end / 1024,
+        started.elapsed()
+    );
+}
+
+/// Where a Matroska file's first cluster starts, read from its first bytes:
+/// the end of the first top-level element that runs past `buf` (in practice
+/// the attachments), or the first cluster's offset when it is inside `buf`.
+/// `None` for anything that is not Matroska or cannot be walked.
+fn matroska_head_end(buf: &[u8]) -> Option<u64> {
+    const EBML: u64 = 0x1A45_DFA3;
+    const SEGMENT: u64 = 0x1853_8067;
+    const CLUSTER: u64 = 0x1F43_B675;
+    // An EBML variable-length integer: the leading zeros of the first byte
+    // give its length. Ids keep the length marker, sizes drop it.
+    fn vint(buf: &[u8], pos: usize, keep_marker: bool) -> Option<(u64, usize, bool)> {
+        let first = *buf.get(pos)?;
+        if first == 0 {
+            return None;
+        }
+        let len = first.leading_zeros() as usize + 1;
+        let bytes = buf.get(pos..pos + len)?;
+        let mask = if keep_marker { 0xFF } else { (1u16 << (8 - len)) as u8 - 1 };
+        let mut v = (first & mask) as u64;
+        let mut all_ones = (first & mask) == mask;
+        for b in &bytes[1..] {
+            v = (v << 8) | *b as u64;
+            all_ones &= *b == 0xFF;
+        }
+        Some((v, len, all_ones))
+    }
+    let (id, n, _) = vint(buf, 0, true)?;
+    if id != EBML {
+        return None;
+    }
+    let (size, m, _) = vint(buf, n, false)?;
+    let mut pos = n + m + usize::try_from(size).ok()?;
+    let (id, n, _) = vint(buf, pos, true)?;
+    if id != SEGMENT {
+        return None;
+    }
+    // The segment's own size may be "unknown"; only its children matter.
+    let (_, m, _) = vint(buf, pos + n, false)?;
+    pos += n + m;
+    loop {
+        let (id, n, _) = vint(buf, pos, true)?;
+        if id == CLUSTER {
+            return Some(pos as u64);
+        }
+        let (size, m, unknown) = vint(buf, pos + n, false)?;
+        if unknown {
+            return None;
+        }
+        let end = pos as u64 + (n + m) as u64 + size;
+        if end > buf.len() as u64 {
+            return Some(end);
+        }
+        pos = end as usize;
+    }
+}
+
 fn stream_url(proxy_port: u16, torrent_id: usize, file_id: usize) -> String {
     format!(
         "http://127.0.0.1:{}/torrent-stream?t={}&f={}",
@@ -3473,6 +3586,38 @@ fn piece_ranges_in_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// EBML header, then a segment of unknown size holding `children`.
+    fn matroska(children: &[u8]) -> Vec<u8> {
+        let mut v = vec![0x1A, 0x45, 0xDF, 0xA3, 0x84, 0x42, 0x86, 0x81, 0x01];
+        v.extend([0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        v.extend(children);
+        v
+    }
+
+    #[test]
+    fn matroska_head_ends_where_large_attachments_end() {
+        // Info (3 bytes of payload), then Attachments sized 60 MB, cut off.
+        let mut children = vec![0x15, 0x49, 0xA9, 0x66, 0x83, 0, 0, 0];
+        children.extend([0x19, 0x41, 0xA4, 0x69, 0x08, 0x03, 0xC0, 0x00, 0x00]);
+        children.extend([0u8; 64]);
+        let buf = matroska(&children);
+        let attachments_at = 9 + 12 + 8;
+        assert_eq!(matroska_head_end(&buf), Some(attachments_at as u64 + 9 + 60 * 1024 * 1024));
+    }
+
+    #[test]
+    fn matroska_head_ends_at_a_cluster_inside_the_probe() {
+        let mut children = vec![0x15, 0x49, 0xA9, 0x66, 0x83, 0, 0, 0];
+        children.extend([0x1F, 0x43, 0xB6, 0x75, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(matroska_head_end(&matroska(&children)), Some(9 + 12 + 8));
+    }
+
+    #[test]
+    fn matroska_head_is_none_for_other_containers() {
+        assert_eq!(matroska_head_end(b"\x00\x00\x00\x18ftypmp42"), None);
+        assert_eq!(matroska_head_end(&[]), None);
+    }
 
     /// Torrent 6 of the 2026-10-20 log, sampled every 5s from its own
     /// stall-check lines: (progress MiB, live, dead). Bytes stopped at 20:56:14

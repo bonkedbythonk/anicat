@@ -661,6 +661,7 @@ private struct TVPlayerOptions: View {
     // Same keys as the phone's and the Mac's menus, so a speed, size or look
     // picked on one device's player is the one the others start at.
     @AppStorage("anicat_playback_speed") private var storedSpeed: Double = 1.0
+    @AppStorage("anicat_sub_dub") private var storedSubDub: String = "Subtitled"
     @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
     @AppStorage(SubtitleStyle.key) private var subtitleStyleRaw: String = SubtitleStyle.release.rawValue
 
@@ -670,7 +671,26 @@ private struct TVPlayerOptions: View {
     var body: some View {
         NavigationStack {
             List {
-                if !audioTracks.isEmpty {
+                // The phone's Language row. Without it the only way to the
+                // dub mid-episode was picking a DUB release by hand: "i cant
+                // seem to switch to dub mid episode smoothly". Films and TV
+                // have no sub/dub split.
+                if AppModel.shared?.currentPlaybackCatalog == .anilist {
+                    choice("Language", [("Subtitled", "Sub"), ("Dubbed", "Dub")], selected: storedSubDub) { option in
+                        storedSubDub = option
+                        let wantsDub = option == "Dubbed"
+                        controller.onSelectAudioLanguage?(wantsDub) { switched in
+                            fetchTracks()
+                            // No such track in this file: find a release that
+                            // has one, from where the viewer is.
+                            if !switched { controller.onReloadForAudioLanguage?(wantsDub) }
+                        }
+                    }
+                }
+                // For anime, Language above is the audio control unless the
+                // file has a choice it cannot name (see `needsAudioPicker`).
+                if !audioTracks.isEmpty,
+                   AppModel.shared?.currentPlaybackCatalog != .anilist || PlayerTrack.needsAudioPicker(audioTracks) {
                     choice("Audio", audioTracks.map { ($0.id, $0.label) },
                            selected: audioTracks.first(where: \.isSelected)?.id ?? "") { id in
                         controller.onSelectAudioTrack?(id)

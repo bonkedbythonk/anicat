@@ -1784,11 +1784,12 @@ extension AppModel {
         if let progress {
             initialTime = Double(progress.stopTime)
             initialDuration = Double(progress.duration)
-            // An episode already watched through (past the 85% mark that
-            // records it as watched) replays from the start: resuming at
-            // 23:40 of 24:00 put the viewer into the credits of a rewatch
-            // and then straight into auto-next.
-            if initialDuration > 0, initialTime / initialDuration >= 0.85 {
+            // Resumes past the 85% mark too. Replaying from the start there
+            // lost the place of anyone who left before the end: the owner,
+            // "if i by accident leave the ep, it doesnt know where i am
+            // anymore". Only a file played to its end starts over, since
+            // resuming there ends it at once and auto-next takes over.
+            if initialDuration > 0, initialDuration - initialTime < 10 {
                 initialTime = 0
             }
             if initialTime > 0, initialDuration > 0 {

@@ -695,10 +695,20 @@ pub(crate) fn names_a_sibling(name_norm: &str, titles: &[String], siblings: &[St
         .filter(|words| words.len() >= 2)
         .flatten()
         .collect();
+    let combined = multi_season_batch(name_norm);
     for sibling in siblings {
         let sib = content(sibling);
         let sibling_only: Vec<&String> = sib.iter().filter(|w| !own.contains(w)).collect();
         if sibling_only.is_empty() || !sibling_only.iter().all(|w| has(w)) {
+            continue;
+        }
+        // A combined-seasons pack names the next season's number beside this
+        // one's. "[DB] Kono Oto Tomare! | Kono Oto Tomare!: Sounds of Life
+        // (Season 1-2)" spelled out season 2's only extra word, "2", and was
+        // dropped as season 2's release, leaving a 1.5 GB-per-episode pack on
+        // four peers to stream season 1. `layout` finds this entry's files in
+        // such a pack, or refuses and the next release is tried.
+        if combined && sibling_only.iter().all(|w| w.chars().all(|c| c.is_ascii_digit())) {
             continue;
         }
         let ours_only: Vec<&String> = vouching.iter().filter(|w| !sib.contains(w)).collect();
@@ -3458,6 +3468,17 @@ mod extras_tests {
             "The Testament of Sister New Devil DEPARTURES".into(),
         ];
         assert!(!names_a_sibling(&departures, &departures_own, &related));
+    }
+
+    #[test]
+    fn a_combined_seasons_pack_is_not_the_next_seasons_release() {
+        let own: Vec<String> = ["Kono Oto Tomare!", "Kono Oto Tomare!: Sounds of Life", "Stop at this Sound!"].iter().map(|t| t.to_string()).collect();
+        let related: Vec<String> = ["Kono Oto Tomare! 2", "Kono Oto Tomare!: Sounds of Life Season 2", "Stop at this Sound! 2"].iter().map(|t| t.to_string()).collect();
+        let pack = normalize("[DB] Kono Oto Tomare! | Kono Oto Tomare!: Sounds of Life (Season 1-2) [Dual Audio 10bit BD1080p][HEVC-x265]");
+        assert!(!names_a_sibling(&pack, &own, &related));
+        // Season 2's own release is still season 2's.
+        let s2 = normalize("[DB] Kono Oto Tomare! 2nd Season | Kono Oto Tomare!: Sounds of Life Season 2 [Dual Audio 10bit BD1080p][HEVC-x265]");
+        assert!(names_a_sibling(&s2, &own, &related));
     }
 
     #[test]

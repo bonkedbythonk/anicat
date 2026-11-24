@@ -155,7 +155,8 @@ icons["arrow.triangle.2.circlepath"] = [.s(P("M4.5 11.5V7.5Q4.5 5.5 6.5 5.5H17")
 icons["clock.arrow.circlepath"] = icons["gobackward"]! + [.s(P("M12 9.5V13H14.5"))]
 icons["shuffle"] = [.s(P("M3.5 7H7.5L15.5 17H20M3.5 17H7.5L9.8 14.1M13.2 9.9L15.5 7H20")), .s(P("M17.5 4.5L20 7L17.5 9.5M17.5 14.5L20 17L17.5 19.5"))]
 icons["link"] = [.s(P("M10 7.5H6.5Q3 7.5 3 12Q3 16.5 6.5 16.5H10")), .s(P("M14 7.5H17.5Q21 7.5 21 12Q21 16.5 17.5 16.5H14")), .s(P("M8 12H16"))]
-icons["magnifyingglass"] = [.s(tabP(3.5, 3.5, 12.5, 12.5)), .s(P("M15.5 15.5L20.5 20.5"))]
+// The one round enclosure in the set: as a box the lens read as a square, not a magnifier.
+icons["magnifyingglass"] = [.s(CGPath(ellipseIn: CGRect(x: 3.5, y: 3.5, width: 13, height: 13), transform: nil)), .s(P("M14.6 14.6L20.5 20.5"))]
 icons["trash"] = [.s(P("M3.5 6.5H20.5")), .s(P("M9 6.5V4H15V6.5")), .s(P("M5.5 6.5L6.5 20.5H17.5L18.5 6.5")), .s(P("M10 10.5V16.5M14 10.5V16.5"))]
 icons["doc.on.doc"] = [.s(tabP(8.5, 7.5, 12, 13.5)), .s(P("M5.5 16.5V3.5H14.5V7.5"))]
 icons["doc.text"] = [.s(tabP(5, 3, 14, 18)), .s(P("M8.5 11H15.5M8.5 14H15.5M8.5 17H12.5"))]

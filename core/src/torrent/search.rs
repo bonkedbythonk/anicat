@@ -1051,8 +1051,18 @@ fn parse_episode(name: &str) -> (Option<f64>, Option<(f64, f64)>) {
         .map(|m| (m.start(), m.end(), m.as_str().parse().unwrap_or(0.0)))
         .collect();
     for pair in nums.windows(2) {
-        let (_, end_a, a) = pair[0];
+        let (start_a, end_a, a) = pair[0];
         let (start_b, _, b) = pair[1];
+        // "(Season 1-2)" names seasons, not episodes 1 and 2: read as a range,
+        // the [DB] Kono Oto Tomare pack covering both seasons was offered for
+        // episodes 1 and 2 only and dropped for 3 to 13.
+        let before = name[..start_a].trim_end().to_ascii_lowercase();
+        if before.ends_with("season")
+            || before.ends_with("seasons")
+            || (before.ends_with('s') && !before[..before.len() - 1].ends_with(|c: char| c.is_ascii_alphabetic()))
+        {
+            continue;
+        }
         let between = &name[end_a..start_b];
         // Only separator characters may sit between the two numbers; the
         // optional letters cover the "E039-E058" / "EP01-EP12" form.
@@ -3479,6 +3489,10 @@ mod extras_tests {
         // Season 2's own release is still season 2's.
         let s2 = normalize("[DB] Kono Oto Tomare! 2nd Season | Kono Oto Tomare!: Sounds of Life Season 2 [Dual Audio 10bit BD1080p][HEVC-x265]");
         assert!(names_a_sibling(&s2, &own, &related));
+        // Nor is its season range an episode range.
+        assert_eq!(parse_episode(&strip_noise("[DB] Kono Oto Tomare! | Kono Oto Tomare!: Sounds of Life (Season 1-2) [Dual Audio 10bit BD1080p][HEVC-x265]")).1, None);
+        assert_eq!(parse_episode(&strip_noise("Show S1-2 [1080p]")).1, None);
+        assert_eq!(parse_episode(&strip_noise("[Grp] Toradora! (01-25) [1080p]")).1, Some((1.0, 25.0)));
     }
 
     #[test]

@@ -2640,17 +2640,25 @@ impl TorrentManager {
             // connect timeout, so a host that answered and then trickled the
             // body held its candidate until the 120s resolve ceiling, one
             // candidate of the race at a time on a weak link.
-            let b = client
-                .get(url)
-                .timeout(search::INDEX_TIMEOUT)
-                .send()
-                .await
-                .and_then(|r| r.error_for_status())
-                .map_err(|e| format!("torrent file fetch failed: {}", e))?
-                .bytes()
-                .await
-                .map_err(|e| e.to_string())?;
-            Some(b)
+            let fetched = match client.get(url).timeout(search::INDEX_TIMEOUT).send().await {
+                Ok(r) => match r.error_for_status() {
+                    Ok(r) => r.bytes().await.map_err(|e| e.to_string()),
+                    Err(e) => Err(e.to_string()),
+                },
+                Err(e) => Err(e.to_string()),
+            };
+            match fetched {
+                Ok(b) => Some(b),
+                // The magnet reaches the same swarm through DHT and the
+                // trackers. Without it, one nyaa.si blip failed the four
+                // best Kono Oto Tomare releases in a row (12:40 UTC, "error
+                // sending request for url"), and a 1-minute fallback won.
+                Err(e) if cand.magnet.is_some() => {
+                    log::warn!("torrent: '{}' .torrent fetch failed ({}), trying its magnet", cand.name, e);
+                    None
+                }
+                Err(e) => return Err(format!("torrent file fetch failed: {}", e)),
+            }
         } else {
             None
         };

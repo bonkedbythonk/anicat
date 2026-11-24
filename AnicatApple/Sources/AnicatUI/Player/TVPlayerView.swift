@@ -22,8 +22,8 @@ import UIKit
 ///   up (a swipe does not seek), down
 ///   opens the audio and subtitle panel, up brings the chrome.
 /// - A click held on either edge rewinds or fast-forwards until let go.
-/// - Menu (Back) drops a scrub, then puts the chrome away; then it closes
-///   the player.
+/// - Menu (Back) drops a scrub, then puts the chrome or the seek bar away;
+///   then it closes the player.
 ///
 /// `PhonePlayerView` stays the iPhone chrome and `PlayerView` the Mac's.
 /// Split rather than gated: almost nothing crosses over. No tap layer, no
@@ -55,6 +55,8 @@ struct TVPlayerView: View {
     /// player, which takes no focus and leaves the controls down.
     @State private var seekBarVisible = false
     @State private var seekBarHide: Task<Void, Never>?
+    /// When the chrome or the seek bar last went away on its own timer.
+    @State private var barGoneAt = Date.distantPast
     @State private var lastSeekPress = Date.distantPast
     @State private var seekDirection: Double = 0
     @State private var seekStreak = 0
@@ -181,6 +183,16 @@ struct TVPlayerView: View {
                 withAnimation(.smooth) { controller.cancelNextEpisodeCountdown() }
             } else if controller.areControlsVisible {
                 hideControls()
+            } else if seekBarVisible {
+                // The thin bar after an edge-click jump is not the chrome, so
+                // Back fell through to `onClose`: "when i click back to get
+                // rid of the seek bar, i exit the episode".
+                seekBarHide?.cancel()
+                withAnimation(.easeOut(duration: 0.15)) { seekBarVisible = false }
+            } else if Date().timeIntervalSince(barGoneAt) < 1 {
+                // A press aimed at a bar that timed out while the thumb was
+                // on its way left the episode instead.
+                PlayerLog.write("[remote] Back just after the bar hid, ignored")
             } else {
                 onClose()
             }
@@ -219,7 +231,7 @@ struct TVPlayerView: View {
         // onto the surface as it goes, since the button it sat on is gone.
         .onChange(of: controller.areControlsVisible) { _, visible in
             focus = visible ? (controller.isPlaying ? .playPause : .timeline) : .surface
-            if !visible { scrubber.drop() }
+            if !visible { scrubber.drop(); barGoneAt = Date() }
             // The bottom fifth is the transport and timeline; the dialogue
             // goes above it while they are up.
             controller.liftSubtitles(by: visible ? 0.2 : 0)
@@ -512,6 +524,7 @@ struct TVPlayerView: View {
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) { seekBarVisible = false }
+            barGoneAt = Date()
         }
     }
 

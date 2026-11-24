@@ -1724,6 +1724,7 @@ extension AppModel {
             releaseName: self.playerController.currentReleaseName,
             wasPlaying: self.activeStreamURL != nil
         )
+        self.resolveChangesEpisode = previous.catalogId != catalogId || previous.episode != episode
         self.currentPlaybackCatalog = catalog
         self.currentPlaybackCatalogId = catalogId
         self.currentPlaybackEpisode = episode

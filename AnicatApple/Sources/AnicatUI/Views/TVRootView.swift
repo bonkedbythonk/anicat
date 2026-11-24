@@ -67,8 +67,11 @@ public struct TVRootView: View {
             // tab bar sits at the top of the screen and a stray swipe up
             // would land on it, behind the picture, and start switching
             // tabs under a playing episode.
-            .disabled(model.activeStreamURL != nil || model.isPersonPageOpen || model.openCinemaPersonId != nil)
-            .opacity(model.activeStreamURL != nil ? 0 : 1)
+            .disabled(model.activeStreamURL != nil || model.resolveStartedAt != nil
+                      || model.isPersonPageOpen || model.openCinemaPersonId != nil)
+            // Gone under the loading screen as well: mid-crossfade into the
+            // player the detail page showed through both.
+            .opacity(model.activeStreamURL != nil || model.resolveStartedAt != nil ? 0 : 1)
 
             // A character, voice actor or studio, over whatever page opened
             // it and under the player. Outside the TabView for the same
@@ -102,10 +105,26 @@ public struct TVRootView: View {
                 .zIndex(30)
             }
 
-            // "Finding a stream", with a Cancel that can take focus. Above
-            // the player's zIndex, and only mounted while it has something
-            // to say, like the desktop's own card.
-            if let startedAt = model.resolveStartedAt {
+            // A fresh play, or the next episode, loads on the player's own
+            // black screen, laid out like its buffering view so the hand-off
+            // to it does not show.
+            // The card that slid up over the detail page here looked "so out
+            // of place" to the owner.
+            if model.resolveStartedAt != nil, model.activeStreamURL == nil || model.resolveChangesEpisode {
+                TVResolvingScreen(
+                    controller: model.playerController,
+                    episodeTitle: model.playbackEpisodes
+                        .first { $0.number == model.playerController.episodeNumber }?.title ?? "",
+                    onCancel: { model.cancelResolve() }
+                )
+                .transition(.opacity)
+                .zIndex(40)
+            }
+
+            // A release or Sub/Dub switch of the playing episode keeps the
+            // card, with a Cancel that can take focus: Back on the player
+            // would close the episode, not the switch.
+            if let startedAt = model.resolveStartedAt, model.activeStreamURL != nil, !model.resolveChangesEpisode {
                 VStack {
                     Spacer()
                     TVResolvingCard(startedAt: startedAt, status: model.playerController.resolveStatus) {
@@ -1037,6 +1056,52 @@ private struct SearchTab: View {
                 coverURL: item.coverImageURL, isManga: item.isManga
             )
         }
+    }
+}
+
+// MARK: - Resolving screen
+
+/// The wait before an episode's first frame: title, episode, spinner and
+/// what the engine is doing, in the places `TVPlayerView`'s buffering view
+/// puts them. Back cancels.
+struct TVResolvingScreen: View {
+    let controller: PlayerController
+    let episodeTitle: String
+    let onCancel: () -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text(controller.title)
+                .font(.sumiHeading(size: 44, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 1200)
+            if controller.episodeNumber > 0, !controller.isLiveAction || !episodeTitle.isEmpty {
+                Text(episodeTitle.isEmpty ? "Episode \(controller.episodeNumber)" : "Episode \(controller.episodeNumber) · \(episodeTitle)")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+                    .padding(.bottom, 12)
+            }
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+            Text(PlayerController.withElapsed(controller.resolveStatus ?? "Finding a stream", controller.resolveElapsedSeconds))
+                .font(.system(size: 22)).monospacedDigit()
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.ignoresSafeArea())
+        // Holds focus so Back reaches `onExitCommand`; nothing here is
+        // pressable, and the pages under it are disabled.
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onExitCommand(perform: onCancel)
+        .onAppear { focused = true }
     }
 }
 

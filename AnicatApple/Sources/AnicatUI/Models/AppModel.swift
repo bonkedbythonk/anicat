@@ -426,6 +426,10 @@ public final class AppModel {
     /// "Finding a stream… Ns" (and a Cancel button) instead of a bare
     /// spinner with no indication of what's happening or how long it's been.
     public var resolveStartedAt: Date?
+    /// Whether the running resolve is for another episode than the one on
+    /// screen, not a release or Sub/Dub switch of it. The TV loads a next
+    /// episode on its black screen and keeps a switch on the small card.
+    public internal(set) var resolveChangesEpisode = false
     /// Cancelling this aborts whichever `resolveAndPlay` call is currently
     /// in flight — the Cancel button's target. `resolveStream` itself may
     /// keep running on the Rust side after this (the FFI call isn't

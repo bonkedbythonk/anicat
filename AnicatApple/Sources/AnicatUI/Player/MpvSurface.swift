@@ -942,6 +942,13 @@ public struct MpvSurface {
                 self?.setSubtitleLift(share)
             }
 
+            // `alang` matches the language tag only, so a track named
+            // "Japanese FLAC 2.0" with no tag lost to the tagged English one
+            // and Sub played the dub (AM11's Kono Oto Tomare). Picked here,
+            // before mpv selects tracks: the same `aid` written after
+            // FILE_LOADED made mpv seek back to the start behind a read-ahead
+            // stuck on an undownloaded piece, and the picture sat black 45 s.
+            mpv_hook_add(handle, 0, "on_preloaded", 0)
             mpv_observe_property(handle, 1, "time-pos", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 2, "duration", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 3, "pause", MPV_FORMAT_FLAG)
@@ -2478,6 +2485,28 @@ public struct MpvSurface {
                                 self.controller.handleEndOfFile()
                             }
                         }
+                        continue
+                    }
+
+                    if ev.event_id == MPV_EVENT_HOOK {
+                        let hook = ev.data.assumingMemoryBound(to: mpv_event_hook.self).pointee
+                        let remembered = await MainActor.run { self.controller.titleTrackMemory?.audioLang }
+                        let preferDub = Self.preferDubSetting()
+                        let wanted = { (track: PlayerTrack) in preferDub ? track.isEnglishAudio : track.isJapaneseAudio }
+                        let audio = self.trackList().audio
+                        let tagged = { (track: PlayerTrack) in
+                            (preferDub ? ["en", "eng"] : ["ja", "jpn"]).contains((track.lang ?? "").lowercased())
+                        }
+                        // Only when `alang` will miss: a remembered pick is put
+                        // back at FILE_LOADED, and a tagged track mpv finds itself.
+                        if remembered == nil, !audio.contains(where: tagged),
+                           let match = audio.first(where: wanted) {
+                            PlayerLog.write("[audio] untagged \(match.label) for \(preferDub ? "dub" : "sub"), picked before load")
+                            // File-local: before playback `aid` writes the
+                            // option, which would pin track N on every later file.
+                            mpv_set_property_string(mpv, "file-local-options/aid", match.id)
+                        }
+                        mpv_hook_continue(mpv, hook.id)
                         continue
                     }
 

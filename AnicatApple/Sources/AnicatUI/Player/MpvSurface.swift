@@ -953,6 +953,10 @@ public struct MpvSurface {
             mpv_observe_property(handle, 2, "duration", MPV_FORMAT_DOUBLE)
             mpv_observe_property(handle, 3, "pause", MPV_FORMAT_FLAG)
             mpv_observe_property(handle, 4, "paused-for-cache", MPV_FORMAT_FLAG)
+            // A seek into bytes not downloaded yet waits in `seeking`, never
+            // in `paused-for-cache`: Kono Oto Tomare sat frozen at 17:15 for
+            // 30 s with no spinner while a 16 MB piece came in.
+            mpv_observe_property(handle, 14, "seeking", MPV_FORMAT_FLAG)
             mpv_observe_property(handle, 5, "cache-buffering-state", MPV_FORMAT_INT64)
             // NONE: a notification only. The ranges are read back as
             // sub-properties, the way the track list is, rather than by
@@ -2022,6 +2026,7 @@ public struct MpvSurface {
         var lastCacheStateRead: CFTimeInterval = 0
         /// When `paused-for-cache` last went true, nil while playing.
         var cacheStallBegan: CFTimeInterval?
+        var isSeeking = false
         /// The last `[decoder]` line written; see the `hwdec-current` event.
         var lastDecoderLine: String?
         /// The current ASS track's script height (PlayResY), which a
@@ -2591,6 +2596,17 @@ public struct MpvSurface {
                             await MainActor.run {
                                 guard !self.controller.awaitingNewFile else { return }
                                 self.controller.handleEndOfFile()
+                            }
+                        } else if name == "seeking", let data = prop.data {
+                            let seeking = data.assumingMemoryBound(to: Int32.self).pointee != 0
+                            self.isSeeking = seeking
+                            guard seeking else { continue }
+                            // Late, so a seek into buffered data shows no
+                            // spinner; the next time-pos tick clears it.
+                            Task { @MainActor [weak self] in
+                                try? await Task.sleep(for: .milliseconds(400))
+                                guard let self, self.isSeeking else { return }
+                                self.controller.isBuffering = true
                             }
                         } else if name == "paused-for-cache", let data = prop.data {
                             let buffering = data.assumingMemoryBound(to: Int32.self).pointee != 0

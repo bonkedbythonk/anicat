@@ -1,4 +1,4 @@
-//! SeaDex (releases.moe) lookup: a community-curated "best release" per
+//! SeaDex (seadex.moe) lookup: a community-curated "best release" per
 //! AniList entry, backed by real torrent metadata (infohash, release group,
 //! file list) rather than the release-name heuristics the rest of this module
 //! relies on.
@@ -39,7 +39,7 @@ pub(crate) struct SeadexRelease {
     is_best: bool,
 }
 
-/// One `releases.moe` fetch + parse, filtered to the trackable (Nyaa) subset.
+/// One `seadex.moe` fetch + parse, filtered to the trackable (Nyaa) subset.
 /// `None` means the fetch or parse itself failed — as opposed to a
 /// successful fetch that just has nothing for this `media_id` — so the
 /// caller knows not to cache it: a transient outage should be retried by the
@@ -47,19 +47,23 @@ pub(crate) struct SeadexRelease {
 /// session.
 async fn fetch_releases(client: &reqwest::Client, media_id: i64) -> Option<Vec<SeadexRelease>> {
     let url = format!(
-        "https://releases.moe/api/collections/entries/records?filter=alID%3D{}&expand=trs",
+        "https://{}/api/collections/entries/records?filter=alID%3D{}&expand=trs",
+        HOST,
         media_id
     );
     // Per-request deadline: the shared client has none, and this lookup runs
-    // inside the same wave as the indexers, so a releases.moe that accepts
+    // inside the same wave as the indexers, so a SeaDex that accepts
     // the connection and never answers would hold every resolve open.
-    let resp = match client
-        .get(&url)
-        .timeout(super::search::INDEX_TIMEOUT)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-    {
+    let get = |client: &reqwest::Client| {
+        client.get(&url).timeout(super::search::INDEX_TIMEOUT).send()
+    };
+    let mut sent = get(client).await;
+    if matches!(&sent, Err(e) if e.is_connect()) {
+        if let Some(direct) = direct_client().await {
+            sent = get(direct).await;
+        }
+    }
+    let resp = match sent.and_then(|r| r.error_for_status()) {
         Ok(r) => r,
         Err(e) => {
             log::warn!("torrent: seadex lookup failed for alID {}: {}", media_id, e);
@@ -77,7 +81,53 @@ async fn fetch_releases(client: &reqwest::Client, media_id: i64) -> Option<Vec<S
     Some(parse_releases(&json))
 }
 
-/// The Nyaa-tracked torrents in one `releases.moe` records response.
+/// SeaDex moved from releases.moe, which now answers every request with a
+/// 301 to here.
+const HOST: &str = "seadex.moe";
+
+/// A client that reaches SeaDex at an address from Cloudflare's
+/// DNS-over-HTTPS, for when the system resolver cannot find it. The owner's
+/// home DNS fails both releases.moe and seadex.moe (SERVFAIL) while 1.1.1.1
+/// answers, and every
+/// lookup failed with "error sending request" on the Mac and the TV alike,
+/// so the SeaDex pick never reached a single resolve. Asked by IP, so the
+/// resolver that failed is not in the way. Built once; a failed attempt is
+/// not kept, so the next lookup tries again.
+async fn direct_client() -> Option<&'static reqwest::Client> {
+    static DIRECT: tokio::sync::OnceCell<reqwest::Client> = tokio::sync::OnceCell::const_new();
+    DIRECT
+        .get_or_try_init(|| async {
+            let ip = doh_lookup(HOST).await.ok_or(())?;
+            log::info!("torrent: seadex reached through DNS-over-HTTPS at {}", ip);
+            reqwest::Client::builder()
+                .resolve(HOST, std::net::SocketAddr::new(ip, 443))
+                .build()
+                .map_err(|_| ())
+        })
+        .await
+        .ok()
+}
+
+async fn doh_lookup(host: &str) -> Option<std::net::IpAddr> {
+    let json: Value = reqwest::Client::new()
+        .get(format!("https://1.1.1.1/dns-query?name={}&type=A", host))
+        .header("accept", "application/dns-json")
+        .timeout(super::search::INDEX_TIMEOUT)
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    // Type 1 is an A record; a CNAME in the chain comes first and is skipped.
+    json["Answer"]
+        .as_array()?
+        .iter()
+        .filter(|a| a["type"] == 1)
+        .find_map(|a| a["data"].as_str()?.parse().ok())
+}
+
+/// The Nyaa-tracked torrents in one `seadex.moe` records response.
 fn parse_releases(json: &Value) -> Vec<SeadexRelease> {
     let mut releases = vec![];
     for item in json["items"].as_array().into_iter().flatten() {
@@ -142,7 +192,7 @@ pub(crate) async fn find_candidates(
     // curated release is a long-lived community decision, not something that
     // gets re-judged per episode — so binge-watching a show used to mean
     // every episode after the first re-fetched byte-identical JSON from
-    // releases.moe for no reason. Cache the parsed releases per `media_id`
+    // SeaDex for no reason. Cache the parsed releases per `media_id`
     // and only re-run the (cheap, local) episode-matching below on repeat
     // calls.
     let releases = {
@@ -234,7 +284,7 @@ pub(crate) async fn find_candidates(
 mod tests {
     use super::*;
 
-    /// The shape `releases.moe/api/collections/entries/records?expand=trs`
+    /// The shape `seadex.moe/api/collections/entries/records?expand=trs`
     /// answers with, cut to the fields `parse_releases` reads.
     const FIXTURE: &str = r#"{
         "items": [{

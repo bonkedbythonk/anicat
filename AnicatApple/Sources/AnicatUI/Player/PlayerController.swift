@@ -368,6 +368,10 @@ public final class PlayerController {
     public var onSetVolume: (@Sendable (_ volume: Double) -> Void)?
     public var onSetMuted: (@Sendable (_ muted: Bool) -> Void)?
     public var onSetSpeed: (@Sendable (_ rate: Double) -> Void)?
+    /// Re-reads normalize and dialogue boost into mpv's `af` mid-file; at
+    /// load it is read anyway.
+    public var onAudioFilterChanged: (@Sendable () -> Void)?
+    public nonisolated static let dialogueBoostKey = "anicat_dialogue_boost"
     /// Drops or restores the video track while audio keeps going. iOS
     /// terminates a process that submits Metal work from the background,
     /// and mpv's vo renders on its own thread with no idea the app was

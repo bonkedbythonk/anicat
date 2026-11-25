@@ -917,6 +917,12 @@ public struct MpvSurface {
             controller.onSetSpeed = { [weak self] rate in
                 self?.setSpeed(rate)
             }
+            controller.onAudioFilterChanged = { [weak self] in
+                guard let mpv = self?.mpv else { return }
+                let filter = Coordinator.audioFilter()
+                let status = mpv_set_property_string(mpv, "af", filter)
+                PlayerLog.write("[audio] af set to \(filter.isEmpty ? "none" : filter): \(status)")
+            }
             controller.onSetVideoEnabled = { [weak self] enabled in
                 self?.setVideoEnabled(enabled)
             }
@@ -1379,7 +1385,9 @@ public struct MpvSurface {
             // through `loadfile ... replace`, and `alang` is consumed at
             // load time.
             mpv_set_property_string(mpv, "alang", Coordinator.audioLanguages(preferDub: Coordinator.preferDubSetting()))
-            mpv_set_property_string(mpv, "af", Coordinator.normalizeFilter())
+            let audioFilter = Coordinator.audioFilter()
+            mpv_set_property_string(mpv, "af", audioFilter)
+            PlayerLog.write("[audio] af \(audioFilter.isEmpty ? "none" : audioFilter)")
             // A torrent stream is a loopback URL, so mpv has no directory to
             // find an ordered-chapters release's OP/ED files in and played
             // episodes without them. The engine lists the torrent's other
@@ -1933,10 +1941,31 @@ public struct MpvSurface {
         /// plain gain would clip. Single-pass `loudnorm` lifted the same
         /// episode to -16.9 LUFS at a -1.5 dBFS true peak; `dynaudnorm`
         /// overshot to -13.3 with peaks at -0.5. Absent key means on.
-        static func normalizeFilter() -> String {
+        ///
+        /// Dialogue boost goes first: a compressor lifts quiet speech against
+        /// loud effects and score, then less rumble and more of the speech
+        /// band. Every filter in it takes any channel layout, so a 5.1 film
+        /// keeps its surround; a downmix that raises the centre channel would
+        /// have to know the layout before the file opens, and a `pan` naming
+        /// a channel the file lacks fails the chain and plays silence. The
+        /// compressor's makeup and the speech band add gain, so without
+        /// normalize a limiter keeps the boost from clipping.
+        static func audioFilter() -> String {
             let d = UserDefaults.standard
-            let on = d.object(forKey: "anicat_normalize_audio") == nil || d.bool(forKey: "anicat_normalize_audio")
-            return on ? "lavfi=[loudnorm=I=-16:TP=-1.5:LRA=11]" : ""
+            let normalize = d.object(forKey: "anicat_normalize_audio") == nil || d.bool(forKey: "anicat_normalize_audio")
+            let boost = d.bool(forKey: PlayerController.dialogueBoostKey)
+            var chain: [String] = []
+            if boost {
+                chain += ["acompressor=threshold=0.125:ratio=3:attack=20:release=250:makeup=2",
+                          "equalizer=f=150:t=o:w=2:g=-4",
+                          "equalizer=f=2500:t=o:w=2:g=5"]
+            }
+            if normalize {
+                chain.append("loudnorm=I=-16:TP=-1.5:LRA=11")
+            } else if boost {
+                chain.append("alimiter=limit=0.89")
+            }
+            return chain.isEmpty ? "" : "lavfi=[\(chain.joined(separator: ","))]"
         }
 
         static func audioLanguages(preferDub: Bool) -> String {
@@ -2412,7 +2441,7 @@ public struct MpvSurface {
                         if let prefix = msg.prefix.map({ String(cString: $0) }),
                            let text = msg.text.map({ String(cString: $0) }),
                            prefix.hasPrefix("ao") || text.contains("smooth_vt")
-                            || (prefix == "vf" && msg.log_level.rawValue <= MPV_LOG_LEVEL_WARN.rawValue) {
+                            || ((prefix == "vf" || prefix == "af") && msg.log_level.rawValue <= MPV_LOG_LEVEL_WARN.rawValue) {
                             PlayerLog.write("[mpv/\(prefix)] \(text.trimmingCharacters(in: .newlines))")
                         }
                         continue
@@ -2754,6 +2783,7 @@ public struct MpvSurface {
             controller.onSetVolume = nil
             controller.onSetMuted = nil
             controller.onSetSpeed = nil
+            controller.onAudioFilterChanged = nil
             controller.onSetVideoEnabled = nil
             controller.onReadProperty = nil
             controller.onSetSubtitleScale = nil

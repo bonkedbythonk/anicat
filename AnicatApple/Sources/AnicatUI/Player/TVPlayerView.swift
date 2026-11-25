@@ -692,6 +692,7 @@ private struct TVPlayerOptions: View {
     @AppStorage("anicat_sub_dub") private var storedSubDub: String = "Subtitled"
     @AppStorage(PlayerController.subtitleScaleKey) private var subtitleScale: Double = 1.0
     @AppStorage(SubtitleStyle.key) private var subtitleStyleRaw: String = SubtitleStyle.release.rawValue
+    @AppStorage(PlayerController.dialogueBoostKey) private var dialogueBoost = false
 
     private static let sizes: [(Double, String)] = [(0.8, "Small"), (1.0, "Normal"), (1.25, "Large"), (1.5, "Huge")]
     private static let zooms: [(Double, String)] = [(0, "Fit"), (0.25, "A little"), (0.5, "Halfway"), (0.75, "Most"), (1, "Fill height")]
@@ -725,6 +726,12 @@ private struct TVPlayerOptions: View {
                         if let track = audioTracks.first(where: { $0.id == id }) { controller.rememberAudioTrack(track) }
                         fetchTracks()
                     }
+                }
+                // Apple's Enhance Dialogue is AVKit's and never sees mpv's
+                // audio; this is the same idea in mpv's own filter chain.
+                choice("Dialogue boost", [(false, "Off"), (true, "On")], selected: dialogueBoost) { on in
+                    dialogueBoost = on
+                    controller.onAudioFilterChanged?()
                 }
                 if !subtitleTracks.isEmpty {
                     choice("Subtitles", [(PlayerTrack.off, "Off")] + subtitleTracks.map { ($0.id, $0.label) },

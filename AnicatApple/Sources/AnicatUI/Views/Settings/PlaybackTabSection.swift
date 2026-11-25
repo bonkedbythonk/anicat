@@ -10,7 +10,7 @@ import SwiftUI
 struct PlaybackTabSection: View {
     @AppStorage("anicat_sub_dub") private var subDub: String = "Subtitled"
     @AppStorage("anicat_autoskip") private var autoSkipIntro: Bool = true
-    // `MpvSurface.Coordinator.normalizeFilter` owns the reader and the
+    // `MpvSurface.Coordinator.audioFilter` owns the reader and the
     // default; the literal here and the one there must agree.
     @AppStorage("anicat_normalize_audio") private var normalizeAudio: Bool = true
     @AppStorage("anicat_autoplay_next") private var autoPlayNext: Bool = true

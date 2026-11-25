@@ -585,3 +585,38 @@ fn a_revised_episode_file_still_names_its_show() {
     };
     assert_eq!(select(&files, &req), Ok(1));
 }
+
+/// AniList 108891, "Kono Oto Tomare! 2": DB's first Season 2 pack and
+/// Erai-raws' batch name every file "Kono Oto Tomare! 2nd Season - NN" and
+/// both were refused, "episode 1 not found inside torrent", on the Mac and
+/// the TV alike; only DB's v2, whose files say "Part 2", was accepted.
+/// File lists from the real .torrent files.
+#[test]
+fn a_second_season_pack_named_2nd_season_answers_the_season_2_entry() {
+    let titles: Vec<String> = vec![
+        "Kono Oto Tomare! 2".into(),
+        "Kono Oto Tomare!: Sounds of Life Season 2".into(),
+        "Stop at this Sound! 2".into(),
+    ];
+    let season = crate::torrent::search::stated_season(&titles);
+    let hint = EntryHint { kind: EntryKind::Tv, season, season_at_least: if season.is_none() { Some(2) } else { None } };
+    let db: Vec<String> = (1..=13)
+        .map(|n| format!("Kono Oto Tomare! 2nd Season/[DB]Kono Oto Tomare! 2nd Season_-_{n:02}_(Dual Audio_10bit_BD1080p_x265).mkv"))
+        .chain((1..=5).map(|n| format!("Kono Oto Tomare! 2nd Season/Extras/[DB]Kono Oto Tomare! 2nd Season_-_NCOPv{n:02}_(10bit_BD1080p_x265).mkv")))
+        .collect();
+    let erai: Vec<String> = (1..=13)
+        .map(|n| format!("[Erai-raws] Kono Oto Tomare! 2nd Season - {n:02}{} [1080p].mkv", if n == 13 { " END" } else { "" }))
+        .collect();
+    let packs = [
+        ("[DB] Kono Oto Tomare! 2nd Season | Kono Oto Tomare!: Sounds of Life Season 2 [Dual Audio 10bit BD1080p][HEVC-x265]", db),
+        ("[Erai-raws] Kono Oto Tomare! 2nd Season - 01 ~ 13 [1080p]", erai),
+    ];
+    for (release, names) in &packs {
+        let files: Vec<(&str, u64)> = names.iter().map(|n| (n.as_str(), 1_000_000_000)).collect();
+        for ep in [1i64, 7, 13] {
+            let got = choose(&files, release, (titles.clone(), hint, Some(13)), ep)
+                .unwrap_or_else(|e| panic!("{release} ep {ep}: {e} (hint {hint:?})"));
+            assert!(got.contains(&format!("{ep:02}")) && !got.contains("NCOP"), "{release} ep {ep} -> {got}");
+        }
+    }
+}

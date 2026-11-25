@@ -905,10 +905,14 @@ fn is_pure_season_segment(norm: &str) -> bool {
 /// "2nd season", "r2" (Code Geass-style sequel marker, "R2" = "Rebellion 2").
 /// Absent marker means season 1.
 pub fn season_of(norm: &str) -> u32 {
+    // The ordinal before "season N": in "2nd Season - 01" the number after
+    // "season" is the episode, and read first it made every file of DB's and
+    // Erai-raws' Kono Oto Tomare 2 packs season 1, so the season 2 entry was
+    // refused "episode 1 not found inside torrent".
     for re in [
         r"\bs(\d{1,2})\b",
-        r"\bseason (\d{1,2})\b",
         r"\b(\d{1,2})(?:st|nd|rd|th) season\b",
+        r"\bseason (\d{1,2})\b",
         r"\br(\d{1,2})\b",
     ] {
         if let Some(c) = regex_lite::Regex::new(re).unwrap().captures(norm) {

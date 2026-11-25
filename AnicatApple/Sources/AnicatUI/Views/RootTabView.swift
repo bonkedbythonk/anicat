@@ -257,7 +257,7 @@ public struct RootTabView: View {
             switch section {
             case .upNext, .schedule: tab = .upNext
             case .library, .history, .downloads: tab = .library
-            case .manga, .novels, .study: tab = .read
+            case .manga, .novels: tab = .read
             case .search: tab = .search
             case .stats, .settings: showProfile = true
             }

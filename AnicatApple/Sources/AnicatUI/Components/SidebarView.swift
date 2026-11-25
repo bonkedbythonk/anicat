@@ -12,7 +12,6 @@ public struct SidebarView: View {
         case stats = "stats"
         case downloads = "downloads"
         case settings = "settings"
-        case study = "study"
 
         public var id: String { rawValue }
 
@@ -43,7 +42,6 @@ public struct SidebarView: View {
             case (.stats, _): return "Stats"
             case (.downloads, _): return "Downloads"
             case (.settings, _): return "Settings"
-            case (.study, _): return "Study"
             }
         }
 
@@ -52,11 +50,11 @@ public struct SidebarView: View {
         /// in the middle would silently renumber every shortcut a user has
         /// already learned rather than take the next free digit.
         public static let numberedSections: [NavSection] = [
-            .upNext, .schedule, .library, .manga, .novels, .search, .history, .settings, .downloads, .stats, .study
+            .upNext, .schedule, .library, .manga, .novels, .search, .history, .settings, .downloads, .stats
         ]
 
         public static let browseItems: [NavSection] = [
-            .upNext, .schedule, .library, .manga, .novels, .search, .history, .stats, .study
+            .upNext, .schedule, .library, .manga, .novels, .search, .history, .stats
         ]
 
         /// Manga and light novels are AniList's and have no cinema

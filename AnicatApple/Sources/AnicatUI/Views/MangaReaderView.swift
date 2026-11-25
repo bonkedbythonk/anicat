@@ -84,10 +84,6 @@ public struct MangaReaderView: View {
 
     private var chromeVisible: Bool { showControls || hoverChrome }
 
-    private var failureText: String? {
-        if case .failed(let message) = study.state { return message }
-        return nil
-    }
     @State private var currentZoom: CGFloat = 1.0
     @State private var finalZoom: CGFloat = 1.0
     @State private var wasFullScreenBeforeOpen: Bool = false
@@ -101,10 +97,6 @@ public struct MangaReaderView: View {
     @State private var didFinishChapter = false
     @State private var syncToast = false
     @State private var swipeMonitor = TrackpadSwipeMonitor()
-    @State private var study = StudySession()
-    /// The words just looked up, asked once the reader moves past their
-    /// page: looked up and read on from, they were gone by the next page.
-    @State private var quickCheck: [StudyCard]?
     /// The catalog id the per-title preferences are keyed on, read once at
     /// construction. `nil` for a title with no AniList entry behind it, which
     /// `ReaderPreferences` folds onto the global keys.
@@ -518,10 +510,6 @@ public struct MangaReaderView: View {
                                 }
                         )
                         #endif
-                        // Laid over the page, these zones took every click
-                        // meant for a bubble. In study mode a click selects;
-                        // the arrow keys and the trackpad swipe still turn.
-                        .allowsHitTesting(!study.isOn)
                     }
                 }
                 // `initial: true` warms the window for the page the reader
@@ -536,38 +524,6 @@ public struct MangaReaderView: View {
                         notePageSize(index: index, size: size)
                     }
                 }
-            }
-
-            if study.selected != nil || failureText != nil {
-                HStack {
-                    Spacer()
-                    StudyTextPanel(
-                        bubble: study.selected,
-                        failure: failureText,
-                        context: study.selected.map(study.context(of:)) ?? ([], []),
-                        source: "\(title), \(chapterTitle)"
-                    ) {
-                        if study.selected != nil { study.selected = nil } else { study.stop() }
-                    }
-                }
-                // Clear of the top and bottom bars: at a plain 24pt inset the
-                // panel's first line sat under the reading-mode controls.
-                .padding(.horizontal, SumiTheme.spaceLg)
-                .padding(.top, 80)
-                .padding(.bottom, 64)
-                .transition(.opacity)
-            }
-
-            if let quickCheck {
-                ZStack {
-                    Color.black.opacity(0.35)
-                        .ignoresSafeArea()
-                        .onTapGesture { self.quickCheck = nil }
-                    StudyReviewView(title: "Quick check", cards: quickCheck) { self.quickCheck = nil }
-                        .padding(SumiTheme.spaceLg)
-                }
-                .transition(.opacity)
-                .zIndex(2)
             }
 
             // Top Controls Bar
@@ -616,13 +572,8 @@ public struct MangaReaderView: View {
         // Scrolling puts the chrome away. In webtoon mode every row reports
         // itself as it appears, so this fires on the first page that scrolls
         // past -- which is exactly the moment the bars stop being wanted.
-        .onChange(of: currentPageIndex) { _, page in
+        .onChange(of: currentPageIndex) { _, _ in
             if showControls { withAnimation(.smooth) { showControls = false } }
-            study.selected = nil
-            if study.isOn, quickCheck == nil {
-                let due = StudyDeck.shared.takeQuickCheck(before: page)
-                if !due.isEmpty { withAnimation(.smooth) { quickCheck = due } }
-            }
         }
         .focusable()
         .focused($isFocused)
@@ -658,12 +609,6 @@ public struct MangaReaderView: View {
             didFinishChapter = false
             syncToast = false
             noteReadingPosition(0)
-            // The last pages of a chapter have no page after them to move
-            // past, so their words are asked as the next chapter opens.
-            let rest = StudyDeck.shared.takeQuickCheck(before: .max)
-            StudyDeck.shared.chapterChanged()
-            if study.isOn, !rest.isEmpty { quickCheck = rest }
-            study.chapterChanged(to: pageURLs)
         }
         .onChange(of: readingMode) { _, mode in
             ReaderPreferences.setMode(mode, catalogId: catalogId)
@@ -694,8 +639,6 @@ public struct MangaReaderView: View {
         .onDisappear {
             prefetcher.cancel()
             swipeMonitor.stop()
-            study.stop()
-            StudyDeck.shared.chapterChanged()
             #if os(macOS)
             if let window = NSApp.keyWindow ?? NSApp.mainWindow {
                 if window.styleMask.contains(.fullScreen) && !wasFullScreenBeforeOpen {
@@ -766,7 +709,7 @@ public struct MangaReaderView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 0) {
                 ForEach(Array(pageURLs.enumerated()), id: \.offset) { index, url in
-                    ReaderPageImage(url: url, fit: fit, onDecoded: { notePageSize(index: index, size: $0) }, loadedOverlay: studyOverlay(index)) {
+                    ReaderPageImage(url: url, fit: fit, onDecoded: { notePageSize(index: index, size: $0) }) {
                         Rectangle()
                             .fill(SumiTheme.card)
                             .frame(height: 600)
@@ -850,8 +793,7 @@ public struct MangaReaderView: View {
         ReaderPageImage(
             url: pageURLs[index],
             fit: fit,
-            onDecoded: { notePageSize(index: index, size: $0) },
-            loadedOverlay: studyOverlay(index)
+            onDecoded: { notePageSize(index: index, size: $0) }
         ) {
             ProgressView()
         } failure: {
@@ -859,13 +801,6 @@ public struct MangaReaderView: View {
                 .foregroundColor(SumiTheme.warning)
         }
         .id(pageURLs[index])
-    }
-
-    private func studyOverlay(_ index: Int) -> AnyView? {
-        guard let bubbles = study.bubbles[index], !bubbles.isEmpty else { return nil }
-        return AnyView(StudyBubbleOverlay(bubbles: bubbles, selectedID: study.selected?.id) { bubble in
-            withAnimation(.smooth) { study.selected = bubble }
-        })
     }
 
     // MARK: - Top Bar
@@ -931,20 +866,6 @@ public struct MangaReaderView: View {
                 barGlyph("arrow.up.left.and.arrow.down.right")
             }
             .buttonStyle(.sumiPressable)
-
-            Button(action: { study.toggle(pageURLs: pageURLs) }) {
-                if study.state == .reading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 28, height: 28)
-                } else {
-                    barGlyph("character.book.closed", isOn: study.isOn)
-                }
-            }
-            .buttonStyle(.sumiPressable)
-            .help(study.state == .reading
-                ? "Reading the text on this chapter's pages. The first time takes about a second per page."
-                : "Study mode: click a speech bubble to see its text.")
             #endif
 
             // Only meaningful while pages are being paired, and a toggle that
@@ -1124,9 +1045,6 @@ private struct ReaderPageImage<Placeholder: View, Failure: View>: View {
     /// aspect. A decode is aspect-fitted into the box, so the ratio is the
     /// source's even though the size is not.
     let onDecoded: (CGSize) -> Void
-    /// Drawn over the image only once it is decoded: over the placeholder it
-    /// would take the spinner's size and put every bubble in the wrong place.
-    let loadedOverlay: AnyView?
     @ViewBuilder let placeholder: () -> Placeholder
     @ViewBuilder let failure: () -> Failure
 
@@ -1136,14 +1054,12 @@ private struct ReaderPageImage<Placeholder: View, Failure: View>: View {
         url: URL,
         fit: ImageFit,
         onDecoded: @escaping (CGSize) -> Void = { _ in },
-        loadedOverlay: AnyView? = nil,
         @ViewBuilder placeholder: @escaping () -> Placeholder,
         @ViewBuilder failure: @escaping () -> Failure
     ) {
         self.url = url
         self.fit = fit
         self.onDecoded = onDecoded
-        self.loadedOverlay = loadedOverlay
         self.placeholder = placeholder
         self.failure = failure
         // Synchronous cache check at construction, as `CachedAsyncImage`
@@ -1185,7 +1101,6 @@ private struct ReaderPageImage<Placeholder: View, Failure: View>: View {
                 Image(decorative: cgImage, scale: 1)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .overlay { loadedOverlay }
             case .loading:
                 placeholder()
             case .failed:

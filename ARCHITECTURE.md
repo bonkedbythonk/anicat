@@ -170,7 +170,7 @@ lives here, and nothing here knows there is a UI.
   under, and as the fill for a sparse feed (a licensed title keeps only its
   newest simulpub chapters on MangaDex; the rest of the run is merged in
   from MangaKatana, deduplicated by chapter number). Sen Manga for raw
-  Japanese chapters (study mode). Syosetu for pasted web novels; Lnori for
+  Japanese chapters. Syosetu for pasted web novels; Lnori for
   official light-novel volumes.
 - **`torrent/`** — the anime source. Candidates come from two independent
   indexes fired as one wave (SubsPlease, Nyaa RSS) plus SeaDex's

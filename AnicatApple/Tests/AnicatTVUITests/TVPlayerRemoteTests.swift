@@ -70,11 +70,15 @@ final class TVPlayerRemoteTests: XCTestCase {
         sleep(3)
         shot("05-after-holds")
 
-        // Press on the picture pauses and brings the chrome up on the timeline.
-        press(.select, "select on surface (pause)")
+        // Press on the picture only brings the chrome up; the next press,
+        // with the chrome up, pauses and the one after plays.
+        press(.select, "select on surface (show chrome)")
         sleep(2)
-        shot("06-paused")
-        press(.select, "select on timeline (play)")
+        shot("06-chrome-shown")
+        press(.select, "select with chrome up (pause)")
+        sleep(2)
+        shot("06b-paused")
+        press(.select, "select with chrome up (play)")
         sleep(2)
         press(.left, "edge left on timeline")
         sleep(1)

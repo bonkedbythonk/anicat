@@ -84,10 +84,11 @@ struct TVPlayerView: View {
             // buttons instead.
             if !controller.areControlsVisible {
                 Button {
-                    // A press pauses, as in the TV app; the chrome comes up
-                    // with it (`pause` shows it) and stays while paused.
-                    PlayerLog.write("[remote] press on the picture: \(controller.isPlaying ? "pause" : "play")")
-                    withAnimation(.easeOut(duration: 0.2)) { controller.togglePlayPause() }
+                    // A press only brings the chrome up. It used to pause, as
+                    // in the TV app, and the owner wanted the controls without
+                    // stopping the episode: Play/Pause is the pause key.
+                    PlayerLog.write("[remote] press on the picture: show controls")
+                    showControls()
                 } label: {
                     Color.clear
                 }
@@ -121,7 +122,7 @@ struct TVPlayerView: View {
             TVRemoteGestures(
                 holdEnabled: (focus == .surface || focus == .timeline) && !showOptions && !showReleases,
                 clicksEnabled: (focus == .surface || focus == .timeline) && !showOptions && !showReleases,
-                // The picture is a Button: its own action already toggles.
+                // The picture is a Button: its own action shows the chrome.
                 selectEnabled: focus == .timeline && !showOptions && !showReleases,
                 panEnabled: focus == .timeline && !showOptions && !showReleases,
                 onHold: hold,

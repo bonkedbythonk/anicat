@@ -620,3 +620,35 @@ fn a_second_season_pack_named_2nd_season_answers_the_season_2_entry() {
         }
     }
 }
+
+/// DB's combined "(Season 1-2)" pack: a folder per season, season 2's files
+/// named "Part 2". The season 2 entry takes "Kono Oto Tomare! 2nd Season"'s
+/// files, never season 1's or the extras. File list from the real .torrent.
+#[test]
+fn the_combined_pack_gives_the_season_2_entry_its_own_folder() {
+    let titles: Vec<String> = vec![
+        "Kono Oto Tomare! 2".into(),
+        "Kono Oto Tomare!: Sounds of Life Season 2".into(),
+        "Stop at this Sound! 2".into(),
+    ];
+    let season = crate::torrent::search::stated_season(&titles);
+    let hint = EntryHint { kind: EntryKind::Tv, season, season_at_least: if season.is_none() { Some(2) } else { None } };
+    let mut names: Vec<String> = Vec::new();
+    for n in 1..=13 {
+        names.push(format!("Kono Oto Tomare!/[DB]Kono Oto Tomare!_-_{n:02}_(Dual Audio_10bit_BD1080p_x265).mkv"));
+        names.push(format!("Kono Oto Tomare! 2nd Season/[DB]Kono Oto Tomare! Part 2_-_{n:02}_(Dual Audio_10bit_BD1080p_x265).mkv"));
+    }
+    for n in 1..=5 {
+        names.push(format!("Kono Oto Tomare! 2nd Season/Extras/[DB]Kono Oto Tomare! Part 2_-_NCOP{n:02}_(10bit_BD1080p_x265).mkv"));
+    }
+    for n in 1..=4 {
+        names.push(format!("Kono Oto Tomare!/Extras/[DB]Kono Oto Tomare!_-_NCOP{n:02}_(10bit_BD1080p_x265).mkv"));
+    }
+    let release = "[DB] Kono Oto Tomare! | Kono Oto Tomare!: Sounds of Life (Season 1-2) [Dual Audio 10bit BD1080p][HEVC-x265]";
+    let files: Vec<(&str, u64)> = names.iter().map(|n| (n.as_str(), 1_000_000_000)).collect();
+    for ep in [1i64, 7, 13] {
+        let got = choose(&files, release, (titles.clone(), hint, Some(13)), ep)
+            .unwrap_or_else(|e| panic!("ep {ep}: {e}"));
+        assert!(got.contains(&format!("Part 2_-_{ep:02}_")), "ep {ep} -> {got}");
+    }
+}

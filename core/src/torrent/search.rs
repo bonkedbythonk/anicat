@@ -604,6 +604,17 @@ pub(crate) fn title_matches_with_alts(query_norm: &str, name: &str, alts: &[Stri
         return false;
     };
 
+    // A combined pack answers every season it names. "[DB] Kono Oto Tomare! |
+    // Kono Oto Tomare!: Sounds of Life (Season 1-2)", the best-seeded release
+    // of both seasons, read as season 1 off "season 1 2", so the season 2
+    // entry never saw it and streamed from dead swarms or not at all.
+    // `layout` picks this season's files inside the pack, or refuses.
+    if let Some((first, last)) = batch_season_range(&normalize(name)) {
+        if (first..=last).contains(&query_season) {
+            return true;
+        }
+    }
+
     // Season comes from the matched segment when it states one. When it
     // doesn't, a segment that is *nothing but* a season marker may supply it —
     // "[derp] Mob Psycho 100 - Season 2 (S02) (BD 1080p)" puts the title and
@@ -1187,6 +1198,26 @@ pub fn multi_season_batch(name_norm: &str) -> bool {
         || regex_lite::Regex::new(r"\bs\d{1,2}\s+s\d{1,2}\b")
             .unwrap()
             .is_match(name_norm)
+}
+
+/// The first and last season a combined pack names: "Season 1-2" and
+/// "S1+S2" both normalize to two bare numbers, so a range is read from the
+/// lowest to the highest. `None` for anything `multi_season_batch` does not
+/// recognise.
+fn batch_season_range(name_norm: &str) -> Option<(u32, u32)> {
+    if !multi_season_batch(name_norm) {
+        return None;
+    }
+    let listed = regex_lite::Regex::new(r"\bseasons?\s+(\d{1,2}(?:\s+\d{1,2})+)\b").unwrap();
+    let seasons: Vec<u32> = match listed.captures(name_norm) {
+        Some(c) => c[1].split(' ').filter_map(|t| t.parse().ok()).collect(),
+        None => regex_lite::Regex::new(r"\bs(\d{1,2})\b")
+            .unwrap()
+            .captures_iter(name_norm)
+            .filter_map(|c| c[1].parse().ok())
+            .collect(),
+    };
+    Some((*seasons.iter().min()?, *seasons.iter().max()?))
 }
 
 pub fn absolute_episode(
@@ -3482,6 +3513,17 @@ mod extras_tests {
             "The Testament of Sister New Devil DEPARTURES".into(),
         ];
         assert!(!names_a_sibling(&departures, &departures_own, &related));
+    }
+
+    #[test]
+    fn a_combined_seasons_pack_answers_each_season_it_names() {
+        let pack = "[DB] Kono Oto Tomare! | Kono Oto Tomare!: Sounds of Life (Season 1-2) [Dual Audio 10bit BD1080p][HEVC-x265]";
+        for query in ["Kono Oto Tomare! 2", "Kono Oto Tomare!: Sounds of Life Season 2", "Kono Oto Tomare!"] {
+            assert!(title_matches(&normalize(query), pack), "{query}");
+        }
+        assert!(!title_matches(&normalize("Kono Oto Tomare! 3"), pack));
+        assert!(title_matches(&normalize("Show 2"), "Show S1+S2 Batch [1080p]"));
+        assert!(!title_matches(&normalize("Show 2"), "Show Season 1 [1080p]"));
     }
 
     #[test]

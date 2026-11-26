@@ -4144,6 +4144,21 @@ mod tests {
         }
     }
 
+    /// Live. DB's "(Season 1-2)" pack, the best-seeded release of Kono Oto
+    /// Tomare 2 (26 seeders when this was written), must reach the season 2
+    /// entry's candidates; it read as season 1 and never did.
+    #[tokio::test]
+    #[ignore]
+    async fn live_combined_pack_reaches_the_second_season() {
+        let titles: Vec<String> =
+            ["Kono Oto Tomare! 2", "Kono Oto Tomare!: Sounds of Life Season 2", "Stop at this Sound! 2"].iter().map(|t| t.to_string()).collect();
+        let cands = search::find_candidates(&client(), &titles, &[], search::ReleaseCriteria { episode: 1, allow_episodeless: false, prefer_dub: false, browser_client: false, extras: false, episode_count: Some(13), aired_episodes: None }, search::Breadth::Full).await;
+        for c in &cands {
+            println!("{} (score {}, seeders {})", c.name, c.score, c.seeders);
+        }
+        assert!(cands.iter().any(|c| c.name.contains("(Season 1-2)")), "combined pack missing");
+    }
+
     /// Live. The app's "dub is out" alert (`AppModel+DubAlerts.swift`) asks
     /// the picker's search -- which runs with `prefer_dub: false` -- whether
     /// any release of the next episode is labelled a dub. That only works if

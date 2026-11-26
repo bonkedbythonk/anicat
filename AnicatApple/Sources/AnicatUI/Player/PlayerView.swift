@@ -64,7 +64,6 @@ public struct PlayerView: View {
     @State private var torrentDetails: [StreamDetailRow] = []
     @State private var showEpisodeList = false
     @State private var showCastMenu = false
-    @State private var showOptionsMenu = false
     @State private var audioTracks: [PlayerTrack] = []
     @State private var subtitleTracks: [PlayerTrack] = []
     /// Which of the two track lists is unfolded in the popover, at most one
@@ -1001,7 +1000,7 @@ public struct PlayerView: View {
         // opening the card while the layout is still the old size is the
         // mid-screen hang all over again.
         .onChange(of: stageReady) { _, _ in advanceOpeningIfReady() }
-        .onChange(of: showEpisodeList || showInfoMenu || showCastMenu || showOptionsMenu) { _, isOpen in
+        .onChange(of: showEpisodeList || showInfoMenu || showCastMenu) { _, isOpen in
             controller.isMenuOpen = isOpen
             if isOpen {
                 controller.areControlsVisible = true
@@ -1449,24 +1448,6 @@ public struct PlayerView: View {
                 .chromeName("Minimize player", chromeHover)
                 .accessibilityLabel("Minimize Player")
 
-                // Picture and playback switches, one panel. They were seven
-                // icon toggles across the two bars (upscaling, smooth motion,
-                // glow, sideways; autoplay, auto-skip, Discord), each told
-                // apart only by a tooltip, and the bars read as cluttered.
-                Button(action: { showOptionsMenu = true }) {
-                    Image(anicat: "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 13))
-                        .foregroundColor(PlayerChrome.foreground.opacity(0.85))
-                        .frame(width: 40, height: 40)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-                .chromeName("Picture and playback", chromeHover)
-                .accessibilityLabel("Picture and playback")
-                .sumiPopover(isPresented: $showOptionsMenu, arrowEdge: .bottom) {
-                    optionsMenu
-                }
-
                 // Episode List
                 if !controller.episodeList.isEmpty {
                     Button(action: { showEpisodeList = true }) {
@@ -1501,21 +1482,23 @@ public struct PlayerView: View {
                 }
                 #endif
 
-                // Info / More Options
+                // Subtitles, audio and picture, one panel. The picture and
+                // playback switches had a second button and popover of their
+                // own, and the track choices sat under a bare info icon.
                 Button(action: {
                     refreshTracks()
                     loadReleases()
                     showInfoMenu = true
                 }) {
-                    Image(anicat: "info.circle")
+                    Image(anicat: "captions.bubble")
                         .font(.system(size: 13))
                         .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Info and options", chromeHover)
-                .accessibilityLabel("Info & Options")
+                .chromeName("Subtitles, audio and picture", chromeHover)
+                .accessibilityLabel("Subtitles, audio and picture")
                 .sumiPopover(isPresented: $showInfoMenu, arrowEdge: .bottom) {
                     infoMenu
                 }
@@ -1581,11 +1564,10 @@ public struct PlayerView: View {
     /// The switches that used to be icons in the bars. Rows of words and a
     /// switch, as in Settings, because an icon that only says what it is on
     /// hover cannot be read at a glance.
-    private var optionsMenu: some View {
+    private var pictureColumn: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Picture")
-                    .font(.system(size: 13, weight: .semibold))
+                panelHeading("Picture")
                 optionRow("Upscaling", isOn: controller.isAnime4KEnabled) { controller.toggleAnime4K() }
                 if PlayerController.smoothMotionSupported {
                     optionRow("Smooth motion", isOn: controller.isInterpolationEnabled) { controller.toggleSmoothMotion() }
@@ -1607,15 +1589,18 @@ public struct PlayerView: View {
                 .padding(.vertical, 6)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Playback")
-                    .font(.system(size: 13, weight: .semibold))
+                panelHeading("Playback")
                 optionRow("Play the next episode", isOn: controller.autoPlayNextEnabled) { controller.toggleAutoPlayNext() }
                 optionRow("Skip intros and outros", isOn: controller.autoSkipEnabled, detail: autoSkipDetail) { controller.toggleAutoSkip() }
                 optionRow("Show on Discord", isOn: discordPresence) { discordPresence.toggle() }
             }
         }
-        .padding(16)
-        .frame(width: 300)
+    }
+
+    private func panelHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .semibold))
+            .padding(.bottom, 4)
     }
 
     private var sidewaysLabel: String {
@@ -1652,15 +1637,15 @@ public struct PlayerView: View {
         .padding(.vertical, 6)
     }
 
+    /// Three 228 pt columns, two 24 pt gaps, 16 pt padding each side.
+    private static let panelWidth: CGFloat = 764
+
     private var infoMenu: some View {
         // Fixed size, content scrolling inside it. A popover sizes itself to
         // its content when it is presented and does not grow afterwards, so
         // unfolding the Audio list clipped it to whatever slack the first
         // layout happened to leave -- one row, cut in half, drawn over the
-        // Subtitles row under it. 360 rather than 300 because the values here
-        // are release strings ("English (Full Subtitles [FTW])") in a mono
-        // face, and at 300 every one of them, and half the speed labels,
-        // truncated.
+        // Subtitles row under it.
         ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
@@ -1690,142 +1675,154 @@ public struct PlayerView: View {
 
             Rectangle().fill(SumiTheme.border).frame(height: 1)
 
-            // Remembered against the title, unlike the Sub/Dub row below:
-            // this is a pick aimed at one show ("this group's dub", "the
-            // full subtitles, not the signs track"), and the automatic
-            // result of the global toggle is not, so only the pick made here
-            // by hand is written down.
-            // Only when the file has a choice Sub / Dub below cannot name:
-            // for plain Japanese plus English it was a second control for
-            // the same two answers, and a hand pick here left the Sub / Dub
-            // highlight pointing at the other language.
-            if PlayerTrack.needsAudioPicker(audioTracks) {
-                trackPicker(kind: .audio, label: "Audio", rows: audioTracks) { track in
-                    controller.onSelectAudioTrack?(track.id)
-                    controller.rememberAudioTrack(track)
-                    refreshTracks()
-                }
-            }
-            // An Off row in the list rather than a toggle beside it:
-            // turning subtitles off is one of the values mpv takes for
-            // `sid`, and a separate control would be a second place the
-            // same state has to be read back from.
-            trackPicker(kind: .subtitle, label: "Subtitles", rows: subtitleRows) { track in
-                let isOff = track.id == PlayerTrack.off
-                controller.onSelectSubtitleTrack?(isOff ? nil : track.id)
-                controller.rememberSubtitleTrack(isOff ? nil : track)
-                refreshTracks()
-            }
-
-            subtitleLookSection
-
-            if PlayerController.smoothMotionSupported {
-                Button {
-                    controller.showsSmoothReadout.toggle()
-                } label: {
-                    HStack {
-                        Text("Frame generation readout")
-                        Spacer()
-                        Text(controller.showsSmoothReadout ? "On" : "Off")
-                            .foregroundColor(controller.showsSmoothReadout ? SumiTheme.indigo : SumiTheme.muted)
+            // Three columns, as the mockup: what is read, what is heard, how it
+            // looks. One column of all of it was 460 pt of scrolling in a
+            // 360 pt popover, and the picture switches had a popover of their own.
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 14) {
+                    panelHeading("Subtitles")
+                    // An Off row in the list rather than a toggle beside it:
+                    // turning subtitles off is one of the values mpv takes for
+                    // `sid`, and a separate control would be a second place the
+                    // same state has to be read back from.
+                    trackPicker(kind: .subtitle, label: "Track", rows: subtitleRows) { track in
+                        let isOff = track.id == PlayerTrack.off
+                        controller.onSelectSubtitleTrack?(isOff ? nil : track.id)
+                        controller.rememberSubtitleTrack(isOff ? nil : track)
+                        refreshTracks()
                     }
-                    .font(.system(size: 11))
-                    .foregroundColor(SumiTheme.muted)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-            }
 
-            if controller.titleTrackMemory != nil {
-                Button {
-                    controller.forgetTrackMemory()
-                } label: {
-                    Text("Forget track choices for this title")
-                        .font(.system(size: 11))
-                        .foregroundColor(SumiTheme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-            }
-
-            // Picking a track above names one track in this release. This
-            // row is the standing Sub/Dub choice, shared with Settings and
-            // the detail page through `anicat_sub_dub`, and it is what the
-            // next episode's resolve searches with.
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Sub / Dub")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(SumiTheme.muted)
-                    Spacer()
-                    ForEach(["Subtitled", "Dubbed"], id: \.self) { option in
+                    subtitleLookSection
+                    if controller.titleTrackMemory != nil {
                         Button {
-                            let wantsDub = option == "Dubbed"
-                            storedSubDub = option
-                            guard let select = controller.onSelectAudioLanguage else {
-                                audioSwitchNote = nil
-                                return
-                            }
-                            select(wantsDub) { switched in
-                                audioSwitchNote = switched
-                                    ? nil
-                                    : "No \(wantsDub ? "English" : "Japanese") audio track in this release."
-                                refreshTracks()
-                                // A press is a request for the language, not for
-                                // a setting: the file has no such track, so the
-                                // app goes and finds a release that does.
-                                if !switched { controller.onReloadForAudioLanguage?(wantsDub) }
-                            }
+                            controller.forgetTrackMemory()
                         } label: {
-                            // Slash words like the detail page's Sub / Dub,
-                            // not tinted pill chips.
-                            HStack(spacing: 6) {
-                                if option == "Dubbed" { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
-                                // Sized in the selected weight: at regular weight the
-                                // bold "Dub" did not fit and showed as "D...".
-                                Text("Dub").fontWeight(.semibold).hidden().overlay {
-                                    Text(option == "Dubbed" ? "Dub" : "Sub")
-                                        .fontWeight(storedSubDub == option ? .semibold : .regular)
-                                        .foregroundColor(storedSubDub == option ? SumiTheme.foreground : SumiTheme.muted)
-                                }
-                            }
-                            .font(.system(size: 12))
+                            Text("Forget track choices for this title")
+                                .font(.system(size: 11))
+                                .foregroundColor(SumiTheme.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.sumiPressable)
                     }
                 }
-                if let note = audioSwitchNote {
+                .frame(width: 228, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 14) {
+                    panelHeading("Audio")
+                    // Picking an audio track names one track in this release. This
+                    // row is the standing Sub/Dub choice, shared with Settings and
+                    // the detail page through `anicat_sub_dub`, and it is what the
+                    // next episode's resolve searches with.
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(note)
-                            .font(.system(size: 10.5))
+                        HStack {
+                            Text("Sub / Dub")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(SumiTheme.muted)
+                            Spacer()
+                            ForEach(["Subtitled", "Dubbed"], id: \.self) { option in
+                                Button {
+                                    let wantsDub = option == "Dubbed"
+                                    storedSubDub = option
+                                    guard let select = controller.onSelectAudioLanguage else {
+                                        audioSwitchNote = nil
+                                        return
+                                    }
+                                    select(wantsDub) { switched in
+                                        audioSwitchNote = switched
+                                            ? nil
+                                            : "No \(wantsDub ? "English" : "Japanese") audio track in this release."
+                                        refreshTracks()
+                                        // A press is a request for the language, not for
+                                        // a setting: the file has no such track, so the
+                                        // app goes and finds a release that does.
+                                        if !switched { controller.onReloadForAudioLanguage?(wantsDub) }
+                                    }
+                                } label: {
+                                    // Slash words like the detail page's Sub / Dub,
+                                    // not tinted pill chips.
+                                    HStack(spacing: 6) {
+                                        if option == "Dubbed" { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
+                                        // Sized in the selected weight: at regular weight the
+                                        // bold "Dub" did not fit and showed as "D...".
+                                        Text("Dub").fontWeight(.semibold).hidden().overlay {
+                                            Text(option == "Dubbed" ? "Dub" : "Sub")
+                                                .fontWeight(storedSubDub == option ? .semibold : .regular)
+                                                .foregroundColor(storedSubDub == option ? SumiTheme.foreground : SumiTheme.muted)
+                                        }
+                                    }
+                                    .font(.system(size: 12))
+                                }
+                                .buttonStyle(.sumiPressable)
+                            }
+                        }
+                        if let note = audioSwitchNote {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(note)
+                                    .font(.system(size: 10.5))
+                                    .foregroundColor(SumiTheme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+
+                    // Remembered against the title, unlike the Sub/Dub row above:
+                    // this is a pick aimed at one show ("this group's dub", "the
+                    // full subtitles, not the signs track"), and the automatic
+                    // result of the global toggle is not, so only the pick made here
+                    // by hand is written down.
+                    // Only when the file has a choice Sub / Dub above cannot name:
+                    // for plain Japanese plus English it was a second control for
+                    // the same two answers, and a hand pick here left the Sub / Dub
+                    // highlight pointing at the other language.
+                    if PlayerTrack.needsAudioPicker(audioTracks) {
+                        trackPicker(kind: .audio, label: "Audio", rows: audioTracks) { track in
+                            controller.onSelectAudioTrack?(track.id)
+                            controller.rememberAudioTrack(track)
+                            refreshTracks()
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Speed")
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(SumiTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 6) {
+                            ForEach(PlayerController.playbackSpeeds, id: \.self) { rate in
+                                Button(action: { controller.setPlaybackRate(rate) }) {
+                                    HStack(spacing: 6) {
+                                        if rate != 0.5 { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
+                                        Text(PlayerController.speedLabel(rate))
+                                            .fontWeight(controller.playbackRate == rate ? .semibold : .regular)
+                                            .foregroundColor(controller.playbackRate == rate ? SumiTheme.foreground : SumiTheme.muted)
+                                    }
+                                    .font(.system(size: 12))
+                                    .monospacedDigit()
+                                }
+                                .buttonStyle(.sumiPressable)
+                            }
+                        }
                     }
                 }
-            }
-
-            Rectangle().fill(SumiTheme.border).frame(height: 1)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Speed")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(SumiTheme.muted)
-                HStack(spacing: 6) {
-                    ForEach(PlayerController.playbackSpeeds, id: \.self) { rate in
-                        Button(action: { controller.setPlaybackRate(rate) }) {
-                            HStack(spacing: 6) {
-                                if rate != 0.5 { Text("/").foregroundColor(SumiTheme.muted.opacity(0.6)) }
-                                Text(PlayerController.speedLabel(rate))
-                                    .fontWeight(controller.playbackRate == rate ? .semibold : .regular)
-                                    .foregroundColor(controller.playbackRate == rate ? SumiTheme.foreground : SumiTheme.muted)
+                .frame(width: 228, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 14) {
+                    pictureColumn
+                    if PlayerController.smoothMotionSupported {
+                        Button {
+                            controller.showsSmoothReadout.toggle()
+                        } label: {
+                            HStack {
+                                Text("Frame generation readout")
+                                Spacer()
+                                Text(controller.showsSmoothReadout ? "On" : "Off")
+                                    .foregroundColor(controller.showsSmoothReadout ? SumiTheme.indigo : SumiTheme.muted)
                             }
-                            .font(.system(size: 12))
-                            .monospacedDigit()
+                            .font(.system(size: 11))
+                            .foregroundColor(SumiTheme.muted)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.sumiPressable)
                     }
                 }
+                .frame(width: 228, alignment: .topLeading)
             }
 
             if controller.onListReleases != nil {
@@ -1837,7 +1834,7 @@ public struct PlayerView: View {
             streamDetailsSection
         }
         .padding(16)
-        .frame(width: 360, alignment: .leading)
+        .frame(width: Self.panelWidth, alignment: .leading)
         }
         // Once a second while the section is open. Both reads are hops off
         // the main thread (mpv's core lock, the engine queue), and nothing
@@ -1850,7 +1847,7 @@ public struct PlayerView: View {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
-        .frame(width: 360, height: 460)
+        .frame(width: Self.panelWidth, height: 500)
         .scrollBounceBehavior(.basedOnSize)
     }
 

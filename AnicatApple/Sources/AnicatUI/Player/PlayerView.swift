@@ -430,6 +430,22 @@ public struct PlayerView: View {
         let naturalBottom = geometry.naturalBottom
         let topGap = geometry.topGap
         let bottomGap = geometry.bottomGap
+        // The share of the picture, from its bottom edge, that something
+        // draws over: the glow fills black encoded in the frame, and the
+        // bottom bar covers more while it is up. mpv puts the dialogue at
+        // the bottom of the frame, which in a letterboxed scene is inside
+        // that black, so the line was hidden under the glow and cut in half
+        // by the bar's ground (Kono Oto Tomare S2 E4, 10% bars). Raised
+        // clear of both, as the TV does for its controls.
+        let subtitleLift: Double = {
+            guard !isMinimized, controller.sidewaysState == 0, videoRect.height > 0 else { return 0 }
+            var covered = glowActive ? controller.chromeContentInset.bottom : 0
+            if chromeShown {
+                let windowBlack = max(0, windowSize.height - videoRect.maxY)
+                covered = max(covered, Double(max(0, bottomGap - windowBlack) / videoRect.height))
+            }
+            return (covered * 100).rounded() / 100
+        }()
         let miniCenter = CGPoint(
             x: windowSize.width - Self.miniSize.width / 2 - 24,
             y: windowSize.height - Self.miniSize.height / 2 - 24
@@ -454,6 +470,9 @@ public struct PlayerView: View {
                 .ignoresSafeArea()
                 .onAppear {
                     withAnimation(.smooth(duration: 0.35)) { backdropShown = true }
+                }
+                .onChange(of: subtitleLift, initial: true) { _, share in
+                    controller.liftSubtitles(by: share)
                 }
 
             // The episode still the play was started from, at the size and

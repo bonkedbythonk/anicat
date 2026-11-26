@@ -1539,6 +1539,14 @@ public struct MpvSurface {
             // Text subtitles do not go through the ASS styles; their bottom
             // margin is in 720-line units, and 22 is mpv's own default.
             mpv_set_property_string(mpv, "sub-margin-y", "\(Int(22 + lift * 720))")
+            // Blu-ray and DVD subtitles are pictures placed in the frame; no
+            // margin moves them, so the official PGS track of Kono Oto
+            // Tomare S2 kept its dialogue under the glow-filled bar with
+            // every margin raised. `sub-pos` shifts the pictures up. Text
+            // tracks keep 100: on ASS it moves signs along with dialogue.
+            let codec = stringProperty("current-tracks/sub/codec") ?? ""
+            let isImage = ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"].contains(codec)
+            mpv_set_property_string(mpv, "sub-pos", isImage ? "\(Int((100 - lift * 100).rounded()))" : "100")
         }
 
         /// The TV's controls lifting the dialogue clear of them; see
@@ -2680,11 +2688,12 @@ public struct MpvSurface {
                             // miss every dialogue line of the second.
                             let found = header.map(SubtitleStyle.dialogueStyles(fromHeader:)) ?? []
                             let styles = found.isEmpty ? ["Default"] : found
-                            if height != self.scriptHeight || styles != self.dialogueStyles {
-                                self.scriptHeight = height
-                                self.dialogueStyles = styles
-                                self.setSubtitleStyle(SubtitleStyle.current)
-                            }
+                            // Every time, not only on a new header: a switch
+                            // to an image track has no header at all, and
+                            // `sub-pos` has to follow it.
+                            self.scriptHeight = height
+                            self.dialogueStyles = styles
+                            self.setSubtitleStyle(SubtitleStyle.current)
                         } else if name == "demuxer-cache-state" {
                             // mpv fires this on every cache write, tens of
                             // times a second while a swarm delivers; the bar

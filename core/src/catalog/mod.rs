@@ -28,12 +28,14 @@ use cache::AniListCache;
 const THREAD_COMMENTS_PER_PAGE: i64 = 50;
 
 /// Rows per page of the airing calendar, and the ceiling on how many pages
-/// one window is allowed to cost. A week of a busy season is around 250
-/// slots, so 10 pages of 50 covers it with room to spare; the cap is there so
-/// a caller that asks for a year cannot spend fifty requests against
-/// AniList's 90/min budget and starve the rest of the app.
+/// one window is allowed to cost. The calendar asks for a month plus a week
+/// each side; in Autumn 2026 that window ran past 491 slots, 10 pages ended
+/// on 22 November, and the Days view's current week showed nothing at all,
+/// since time order puts the cut on the newest days. 20 pages is 1000 slots.
+/// The cap is there so a caller that asks for a year cannot spend fifty
+/// requests against AniList's budget and starve the rest of the app.
 const AIRING_PER_PAGE: i64 = 50;
-const AIRING_MAX_PAGES: i64 = 10;
+const AIRING_MAX_PAGES: i64 = 20;
 
 /// How many of the viewer's titles seed the "Because you watched" shelf, and
 /// how many recommendations each is asked for.

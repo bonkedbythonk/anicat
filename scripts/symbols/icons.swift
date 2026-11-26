@@ -118,6 +118,10 @@ icons["list.number"] = [.s(P("M3.6 5.2L5 4.2V8.6")), .s(P("M3.4 11Q4.4 9.8 5.6 1
 icons["rectangle.stack"] = [.s(tabP(3, 9.5, 18, 10.5)), .s(P("M5 6.5H19")), .s(P("M7 3.8H17"))]
 icons["square.stack.3d.up"] = [.s(P("M12 4L20 8L12 12L4 8Z")), .s(P("M4 12L12 16L20 12")), .s(P("M4 16L12 20L20 16"))]
 icons["square.stack.3d.up.slash"] = icons["square.stack.3d.up"]! + [.x(P(slash)), .s(P(slash))]
+// Rail: Discover and Schedule. Up next, Library and Discover were three stack glyphs
+// once the rail dropped its labels, and three stacks cannot be told apart at a glance.
+icons["safari"] = [.s(encl), .f(P("M15.6 8.4L13.1 13.1L8.4 15.6L10.9 10.9Z"))]
+icons["calendar"] = [.s(tabP(3.5, 5, 17, 15)), .s(P("M3.5 9.5H20.5")), .s(P("M8 3V6.5M16 3V6.5")), .f(dot(8, 13.5)), .f(dot(12, 13.5)), .f(dot(16, 13.5)), .f(dot(8, 17)), .f(dot(12, 17))]
 icons["list.and.film"] = [.s(tabP(3, 5, 8.5, 14)), .s(P("M3 9.5H5.5M3 14.5H5.5")), .s(P("M15 7H21M15 12H21M15 17H21"))]
 // Smooth motion (owner's pick A): a frame gliding right, its trail behind it.
 icons["film.stack"] = [.s(tabP(8.5, 6, 12.5, 12)), .s(P("M5.5 8.5V15.5")), .s(P("M2.5 10.5V13.5"))]

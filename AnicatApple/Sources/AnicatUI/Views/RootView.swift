@@ -8,6 +8,7 @@ import AppKit
 public struct RootView: View {
     @Bindable public var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotionForPushBack
+    @Environment(\.openSettings) private var openSettings
 
     private var updatePromptHint: String {
         #if os(macOS)
@@ -95,7 +96,7 @@ public struct RootView: View {
             SumiGround()
                 .ignoresSafeArea()
 
-            // Ink & Index shell: fixed 200pt sidebar rail + 1px hairline border +
+            // Ink & Index shell: fixed 72pt icon rail + 1px hairline border +
             // full-bleed main column. We deliberately avoid NavigationSplitView,
             // which injects AppKit NSToolbar items, creates floating rounded
             // inset sidebars, and forces top titlebar gaps.
@@ -120,34 +121,12 @@ public struct RootView: View {
                         }
                     ),
                     mode: model.appMode,
-                    modeCaption: model.appMode == .cinema ? "Films and series" : "Anime",
-                    // nil hides the switch entirely: with no TMDB key there is
-                    // no second world to move to.
-                    switchModeCaption: model.cinemaAvailable
-                        ? (model.appMode == .cinema ? "anime" : "cinema")
-                        : nil,
-                    // With no key the mark is still a control, and pressing it
-                    // lands on the card that asks for one. Drawn as a plain
-                    // watermark instead, the switch was reported as broken by
-                    // someone who had no way to tell it was never there.
-                    switchModeLocked: !model.cinemaAvailable,
                     // Signed out there is no Watching list to judge by, and
                     // the calendar's global view is the whole point of it.
                     showsSchedule: !model.isSignedIn || model.scheduleItems.contains(where: \.isWatching),
-                    onSwitchMode: {
-                        guard model.cinemaAvailable else {
-                            model.clearPersonPages()
-                            model.clearDetail()
-                            model.currentNavSection = .settings
-                            return
-                        }
-                        withAnimation(.smooth(duration: 0.3)) {
-                            model.setAppMode(model.appMode == .cinema ? .anime : .cinema)
-                        }
-                    },
                     onOpenSearchPalette: { model.paletteOpen = true }
                 )
-                .frame(width: 200)
+                .frame(width: SidebarView.width)
 
                 // 1px hairline border separating sidebar and main content
                 Group {
@@ -166,7 +145,9 @@ public struct RootView: View {
                     // Anime mode only: cinema tracks nothing on AniList, and
                     // a film viewer with no account was told a service they
                     // never use was down, on every launch of an outage.
-                    if model.isAniListDown, model.appMode == .anime {
+                    // Not on Discover: it says the same thing in the page,
+                    // next to what the outage stopped.
+                    if model.isAniListDown, model.appMode == .anime, model.currentNavSection != .search {
                         HStack(spacing: 12) {
                             Image(anicat: "exclamationmark.triangle.fill")
                                 .foregroundColor(SumiTheme.warning)
@@ -209,6 +190,7 @@ public struct RootView: View {
                     // the already-fully-opaque section beneath instantly.
                     ZStack {
                         sectionContent
+                            .environment(\.sumiPageScope, pageScope)
                             .id(model.currentNavSection)
                             .transition(.opacity)
                             .zIndex(1)
@@ -330,7 +312,12 @@ public struct RootView: View {
                             }
                         }
                     }
-                }) {
+                }, onAsk: model.appMode == .anime ? { text in
+                    // Ask's conversation is drawn on the Search page, so the
+                    // answer has somewhere to appear.
+                    model.askChat.open(text, model: model)
+                    openSection(.search)
+                } : nil) {
                     withAnimation(.snappy) {
                         model.paletteOpen = false
                     }
@@ -813,6 +800,57 @@ public struct RootView: View {
     }
 
     // MARK: - Section Content Switcher
+    /// Opens a section the way a rail click does: the detail and person pages
+    /// draw over the sections and have to close for the switch to show.
+    private func openSection(_ section: SidebarView.NavSection) {
+        model.clearPersonPages()
+        model.clearDetail()
+        model.currentNavSection = section
+    }
+
+    /// Anime and cinema are one switch in the page header now that the rail's
+    /// paw mark is gone. With no TMDB key, picking cinema lands on the
+    /// Settings card that asks for one: a choice that silently did nothing
+    /// was reported as broken when it was the mode mark.
+    private func switchAppMode() {
+        guard model.cinemaAvailable else {
+            openSection(.settings)
+            return
+        }
+        withAnimation(.smooth(duration: 0.3)) {
+            model.setAppMode(model.appMode == .cinema ? .anime : .cinema)
+        }
+    }
+
+    /// The header switch for the section showing (see `SumiPageScope`): the
+    /// media pages the rail folded into one icon, and Profile's two pages.
+    private var pageScope: SumiPageScope? {
+        let section = model.currentNavSection
+        let pick: (String) -> Void = { id in
+            if id == "mode" {
+                switchAppMode()
+            } else if let target = SidebarView.NavSection(rawValue: id) {
+                withAnimation(.snappy(duration: 0.3)) { openSection(target) }
+            }
+        }
+        switch (section, model.appMode) {
+        case (.upNext, .anime), (.manga, .anime), (.novels, .anime):
+            return SumiPageScope(
+                options: [("home", "Anime"), ("manga", "Manga"), ("novels", "Light novels"), ("mode", "Films and TV")],
+                selected: section.rawValue, select: pick)
+        case (.manga, .cinema), (.novels, .cinema):
+            return SumiPageScope(
+                options: [("mode", "Anime"), ("manga", "Films"), ("novels", "Series")],
+                selected: section.rawValue, select: pick)
+        case (.history, _), (.stats, _):
+            return SumiPageScope(
+                options: [("profile", "History"), ("stats", "Stats")],
+                selected: section.rawValue, select: pick)
+        default:
+            return nil
+        }
+    }
+
     private var sectionContent: some View {
         sectionBody
     }
@@ -921,31 +959,13 @@ public struct RootView: View {
                     }
                 },
                 isCovered: model.isSectionCovered,
-                onAsk: { model.askChat.open($0, model: model) }
+                onAsk: { model.askChat.open($0, model: model) },
+                seasonalItems: model.seasonalItems,
+                isAniListDown: model.isAniListDown
             )
             }
         case .settings:
-            SettingsView(
-                isSignedIn: model.isSignedIn,
-                username: model.viewer?.name,
-                onSaveToken: { token in
-                    Task { await model.signIn(token: token) }
-                },
-                onDisconnectAniList: {
-                    model.signOut()
-                },
-                onClearRegistry: {
-                    await model.clearLocalRegistry()
-                },
-                onResetOnboarding: {
-                    withAnimation(.smooth(duration: 0.4)) {
-                        model.onboardingOpen = true
-                    }
-                },
-                onOpenShortcuts: {
-                    model.shortcutsOpen = true
-                }
-            )
+            AppSettingsPane(model: model)
         case .library:
             if model.appMode == .cinema {
                 CinemaHomeView(model: model, namespace: cardNamespace, page: .watching, focusSearchOnAppear: false)
@@ -1038,6 +1058,12 @@ public struct RootView: View {
                     Task { await model.clearWatchHistory() }
                 }
             )
+            // The page loads its own log and profile. They used to arrive
+            // only with `refreshAll`, which a launch skips while the home
+            // snapshot is fresh, so after a quick relaunch Profile showed the
+            // signed-out header over "Nothing watched yet" until an episode
+            // was closed.
+            .task { await model.loadHistory() }
         case .stats:
             StatsView(
                 stats: model.watchStatsSnapshot,
@@ -1064,8 +1090,11 @@ public struct RootView: View {
                     // nothing to do with the row's own file.
                     Task { await model.playDownloadedFile(download) }
                 },
+                // Deletes the file too, as the phone already did: the page's
+                // Delete now says it frees the space, and dropping only the
+                // row left the file on disk and the row back at next launch.
                 onRemove: { download in
-                    model.libraryDownloads.removeAll { $0.id == download.id }
+                    model.removeDownload(download, deleteFile: true)
                 },
                 chapters: model.offlineChapters,
                 chapterBytes: model.offlineBytes,
@@ -1089,6 +1118,12 @@ public struct RootView: View {
             // once it crosses into the @MainActor closure, and re-deriving it
             // from the string on the other side keeps the capture Sendable.
             let raw = section.rawValue
+            if section == .settings {
+                let openSettings = self.openSettings
+                return CommandPalette.Command(id: raw, label: "Settings") {
+                    Task { @MainActor in openSettings() }
+                }
+            }
             return CommandPalette.Command(id: raw, label: "Go to \(section.label)") {
                 Task { @MainActor in
                     guard let target = SidebarView.NavSection(rawValue: raw) else { return }
@@ -1604,6 +1639,44 @@ private func playEpisode(
 extension View {
     fileprivate func globalKeyboardShortcuts(model: AppModel) -> some View {
         self.modifier(GlobalKeyboardShortcutsModifier(model: model))
+    }
+}
+#endif
+
+#if os(macOS)
+/// Settings with its actions wired to the model. The main window's Settings
+/// section and the Settings window (Cmd-,) draw this one pane, so the two
+/// cannot drift apart in what they offer.
+public struct AppSettingsPane: View {
+    let model: AppModel
+
+    public init(model: AppModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        SettingsView(
+            isSignedIn: model.isSignedIn,
+            username: model.viewer?.name,
+            avatarUrl: model.viewer?.avatarUrl,
+            onSaveToken: { token in
+                Task { await model.signIn(token: token) }
+            },
+            onDisconnectAniList: {
+                model.signOut()
+            },
+            onClearRegistry: {
+                await model.clearLocalRegistry()
+            },
+            onResetOnboarding: {
+                withAnimation(.smooth(duration: 0.4)) {
+                    model.onboardingOpen = true
+                }
+            },
+            onOpenShortcuts: {
+                model.shortcutsOpen = true
+            }
+        )
     }
 }
 #endif

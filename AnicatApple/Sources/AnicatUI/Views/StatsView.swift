@@ -152,9 +152,14 @@ public struct StatsView: View {
             // The phone pushes this page under a "Stats" nav title, so the
             // heading here printed the word twice.
             #if !os(iOS)
-            Text("Stats")
-                .font(.sumiHeading(size: 28, weight: .bold))
-                .foregroundColor(SumiTheme.foreground)
+            // Profile's History / Stats switch on the title's line, where
+            // every other page's header carries its switch.
+            HStack(alignment: .firstTextBaseline, spacing: 24) {
+                Text("Stats")
+                    .font(.sumiHeading(size: 28, weight: .bold))
+                    .foregroundColor(SumiTheme.foreground)
+                SumiPageScopeBar()
+            }
             #endif
             Text("The last 365 days, from this device's own watch log.")
                 .font(.system(size: 14))

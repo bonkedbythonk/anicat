@@ -1,41 +1,31 @@
 import SwiftUI
 import AnicatCoreKit
 
-/// The Details tab of a cinema page: what TMDB knows about a film or series
-/// that AniList has no field for.
+/// The right-hand column of a cinema page's About tab: what TMDB knows
+/// about a film or series that AniList has no field for.
 ///
-/// It exists because the anime page's own tabs go thin on a film -- no
-/// relations graph, no forum threads, no per-episode list worth a tab -- and
-/// what replaces them is real: the box office, the studios or networks, the
-/// season breakdown, the stills. A row is drawn only when there is a value
-/// for it, so a title TMDB knows little about shows a short panel rather than
-/// a column of dashes.
+/// It was a Details tab of its own, which made the cinema page's tabs a
+/// different set from every other page's. A row is drawn only when there is
+/// a value for it, so a title TMDB knows little about shows a short column
+/// rather than a column of dashes.
 struct CinemaDetailsTabSection: View {
     let extras: CinemaExtras
     let genres: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            if let tagline = extras.tagline {
-                Text(tagline)
-                    .font(.system(size: 15, weight: .medium, design: .serif))
-                    .italic()
-                    .foregroundColor(SumiTheme.foreground.opacity(0.85))
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(facts, id: \.0) { label, value in
+                    DetailFactRow(label: label) { Text(value) }
+                }
             }
-
-            factsGrid
 
             if !extras.seasons.isEmpty {
                 seasons
             }
 
-            if !extras.gallery.isEmpty {
-                stills
-            }
-
             links
         }
-        .padding(.vertical, 4)
     }
 
     // MARK: - Facts
@@ -76,85 +66,20 @@ struct CinemaDetailsTabSection: View {
         return rows
     }
 
-    private var factsGrid: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 220, maximum: 340), spacing: 16, alignment: .leading)],
-            alignment: .leading,
-            spacing: 14
-        ) {
-            ForEach(facts, id: \.0) { label, value in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(label)
-                        .sumiTabularMono(size: 9.5, weight: .bold)
-                        .foregroundColor(SumiTheme.muted)
-                    Text(value)
-                        .font(.system(size: 13))
-                        .foregroundColor(SumiTheme.foreground)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
     // MARK: - Seasons
 
     private var seasons: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Seasons")
-                .sumiTabularMono(size: 9.5, weight: .bold)
-                .foregroundColor(SumiTheme.muted)
+        VStack(alignment: .leading, spacing: 4) {
+            SumiSectionHeader("Seasons", trailing: "\(extras.seasons.count)")
 
             // The same map the engine numbers episodes against, so what this
             // shows and what a play resolves cannot disagree: episode 11 of a
             // ten-episode first season is season 2 episode 1 in both places.
             ForEach(extras.seasons, id: \.number) { season in
-                HStack(spacing: 10) {
-                    Text("Season \(season.number)")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(SumiTheme.foreground)
-                    Spacer()
+                DetailFactRow(label: "Season \(season.number)") {
                     Text("\(season.episodeCount) episodes")
-                        .sumiTabularMono(size: 11)
-                        .foregroundColor(SumiTheme.muted)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(SumiTheme.card)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8).stroke(SumiTheme.border, lineWidth: 1)
-                )
             }
-        }
-    }
-
-    // MARK: - Stills
-
-    private var stills: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Stills")
-                .sumiTabularMono(size: 9.5, weight: .bold)
-                .foregroundColor(SumiTheme.muted)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 12) {
-                    ForEach(extras.gallery, id: \.self) { url in
-                        CachedAsyncImage(url: URL(string: url)) { image in
-                            image.resizable().scaledToFill()
-                        } placeholder: {
-                            SumiTheme.card
-                        }
-                        .frame(width: 260, height: 146)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8).stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                    }
-                }
-                .padding(.vertical, 2)
-            }
-            .backSwipeExempt()
         }
     }
 
@@ -218,5 +143,34 @@ struct CinemaDetailsTabSection: View {
 
     static func language(_ code: String) -> String {
         Locale.current.localizedString(forLanguageCode: code)?.capitalized ?? code.uppercased()
+    }
+}
+
+/// A film's or series' stills, left of the facts in About.
+struct CinemaStillsShelf: View {
+    let gallery: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SumiSectionHeader("Stills")
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 12) {
+                    ForEach(gallery, id: \.self) { url in
+                        CachedAsyncImage(url: URL(string: url)) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            SumiTheme.card
+                        }
+                        .frame(width: 260, height: 146)
+                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
+                        .overlay(
+                            SumiRect(cornerRadius: SumiTheme.radiusSm).stroke(SumiTheme.border, lineWidth: 1)
+                        )
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .backSwipeExempt()
+        }
     }
 }

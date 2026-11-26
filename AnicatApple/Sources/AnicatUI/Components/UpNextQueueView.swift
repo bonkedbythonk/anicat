@@ -491,3 +491,423 @@ public struct UpNextQueueView: View {
         }
     }
 }
+
+/// Where the viewer stands inside a title's next episode, read off the main
+/// actor from the detail snapshot and the watch registry.
+struct UpNextResume: Sendable {
+    let still: URL?
+    let episodeTitle: String?
+    /// Both nil when nothing was started, or past 85%, where the episode is
+    /// recorded watched and replays from the start.
+    let stopSeconds: Int?
+    let durationSeconds: Int?
+
+    var secondsLeft: Int? {
+        guard let stopSeconds, let durationSeconds else { return nil }
+        return durationSeconds - stopSeconds
+    }
+
+    var fraction: Double {
+        guard let stopSeconds, let durationSeconds, durationSeconds > 0 else { return 0 }
+        return Double(stopSeconds) / Double(durationSeconds)
+    }
+}
+
+/// The top of Up next: one large Continue tile for the title the viewer is
+/// most likely to resume, with the one primary button the page has.
+struct UpNextContinueTile: View {
+    let entry: UpNextQueueView.QueueEntry
+    /// Where the viewer stands inside `entry`'s next episode; nil until the
+    /// registry read lands, or when nothing was started.
+    let resume: UpNextResume?
+    /// The thumbnail-to-video morph a Play press starts. Only the tile
+    /// carries it: the Continue shelf below is portrait posters, and a
+    /// portrait source interpolated into the landscape video frame squashes.
+    let playerNamespace: Namespace.ID?
+    /// Which tile that morph starts from, as "upnext:<id>:<episode>".
+    let playerSourceKey: String?
+    let onSelect: (UpNextQueueView.QueueEntry) -> Void
+    /// The second argument is the picture the tile is showing: it is what
+    /// flies into the video frame, and a different one would visibly swap.
+    let onPlay: (UpNextQueueView.QueueEntry, URL?) -> Void
+
+    /// 16:9, the video frame's shape, since the tile is the morph's source.
+    /// The approved page drew it 340 wide at this height.
+    static let tileSize = CGSize(width: 466, height: 262)
+
+    init(
+        entry: UpNextQueueView.QueueEntry,
+        resume: UpNextResume? = nil,
+        playerNamespace: Namespace.ID? = nil,
+        playerSourceKey: String? = nil,
+        onSelect: @escaping (UpNextQueueView.QueueEntry) -> Void,
+        onPlay: @escaping (UpNextQueueView.QueueEntry, URL?) -> Void
+    ) {
+        self.entry = entry
+        self.resume = resume
+        self.playerNamespace = playerNamespace
+        self.playerSourceKey = playerSourceKey
+        self.onSelect = onSelect
+        self.onPlay = onPlay
+    }
+
+    private var morphSource: EpisodeMorphSource? {
+        guard let playerNamespace,
+              let playerSourceKey,
+              playerSourceKey == UpNextQueueView.playerMorphKey(catalogId: entry.id, episode: entry.nextEpisodeOrChapter)
+        else { return nil }
+        return EpisodeMorphSource(key: playerSourceKey, namespace: playerNamespace)
+    }
+
+    /// The episode's own still first. The banner, then the cover, stand in
+    /// when the title has never been opened and no episode list is on disk.
+    private var pictureURL: URL? {
+        resume?.still ?? entry.bannerURL ?? entry.thumbnailURL
+    }
+
+    private var resumeSeconds: Int? { resume?.stopSeconds }
+    private var durationSeconds: Int? { resume?.durationSeconds }
+
+    private static func clock(_ seconds: Int) -> String {
+        PlayerController.formatTimestamp(Double(seconds), padded: false)
+    }
+
+    /// Says exactly what the press does. Nil while the next episode has not
+    /// aired: a Play there ended in "No HD torrent found", so the tile then
+    /// offers only the page. Nil for chapters too: home has no way into the
+    /// reader at a chapter, only to the title's page, which "Chapters" says.
+    private var primaryLabel: String? {
+        if entry.isAwaitingEpisode { return nil }
+        let n = entry.nextEpisodeOrChapter
+        switch entry.unit {
+        case "CH": return nil
+        case "FILM": return resumeSeconds.map { "Resume at \(Self.clock($0))" } ?? "Play"
+        default: return resumeSeconds.map { "Resume E\(n) at \(Self.clock($0))" } ?? "Play E\(n)"
+        }
+    }
+
+    private func primaryAction() {
+        if primaryLabel == nil {
+            onSelect(entry)
+        } else {
+            onPlay(entry, pictureURL)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 24) {
+            picture
+            info
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: Self.tileSize.height)
+    }
+
+    private var picture: some View {
+        Button(action: primaryAction) {
+            ZStack(alignment: .bottomLeading) {
+                CachedAsyncImage(url: pictureURL, maxPixelSize: 960) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    SumiTheme.card
+                }
+                .frame(width: Self.tileSize.width, height: Self.tileSize.height)
+                .clipped()
+                LinearGradient(
+                    stops: [
+                        .init(color: .black.opacity(0.72), location: 0),
+                        .init(color: .clear, location: 0.72),
+                    ],
+                    startPoint: .bottom,
+                    endPoint: .top
+                )
+                pictureCaption
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 18)
+            }
+            .frame(width: Self.tileSize.width, height: Self.tileSize.height)
+            .background(SumiTheme.card)
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusXl))
+            .overlay(SumiRect(cornerRadius: SumiTheme.radiusXl).stroke(SumiTheme.border, lineWidth: 1))
+            .sumiBrackets()
+            .sumiFrame(radius: SumiTheme.radiusXl)
+            .ifLet(morphSource) { view, source in
+                view.matchedGeometryEffect(id: source.key, in: source.namespace)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .accessibilityLabel(primaryLabel ?? "Open \(entry.title)")
+        #if os(macOS)
+        .contextMenu {
+            if let primaryLabel {
+                Button(primaryLabel) { onPlay(entry, pictureURL) }
+            }
+            Button("Open") { onSelect(entry) }
+        }
+        #endif
+    }
+
+    /// The position inside the episode when one is stored, the place in the
+    /// series otherwise. Fixed white: palette ink vanished into dark stills
+    /// under the light palettes.
+    @ViewBuilder
+    private var pictureCaption: some View {
+        if let at = resumeSeconds, let duration = durationSeconds {
+            caption("Paused at \(Self.clock(at)) of \(Self.clock(duration))", fraction: resume?.fraction ?? 0)
+        } else if entry.totalCount > 0 {
+            caption(entry.countLabel, fraction: entry.progressPercent / 100)
+        }
+    }
+
+    private func caption(_ text: String, fraction: Double) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(text)
+                .sumiTabularMono(size: 12)
+                .foregroundColor(.white.opacity(0.92))
+            UpNextProgressBar(fraction: fraction, track: .white.opacity(0.22))
+        }
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Continue")
+                .sumiTabularMono(size: 11.5)
+                .foregroundColor(SumiTheme.muted)
+            Button { onSelect(entry) } label: {
+                Text(entry.title)
+                    .font(.sumiHeading(size: 28, weight: .bold))
+                    .tracking(-0.5)
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.sumiPressable)
+            metaLine
+            HStack(spacing: 8) {
+                if let primaryLabel {
+                    Button(action: primaryAction) {
+                        Label(primaryLabel, anicat: "play.fill")
+                    }
+                    .sumiPrimaryButton()
+                    .controlSize(.extraLarge)
+                }
+                Button(entry.unit == "CH" ? "Chapters" : "Episodes") { onSelect(entry) }
+                    .sumiSecondaryButton()
+                    .controlSize(.extraLarge)
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    /// `Ep 5 "The Northern Plateau" · 12 min left`, then whichever of the
+    /// old spotlight row's notes applies.
+    private var metaLine: some View {
+        HStack(spacing: 6) {
+            Text(episodePhrase)
+                .lineLimit(1)
+            if let left = resume?.secondsLeft {
+                Text("·")
+                Text("\(max(1, left / 60)) min left")
+            }
+            if entry.isRewatch == true {
+                Text("·")
+                Text("Rewatch").foregroundColor(SumiTheme.indigo)
+            }
+            if let airingAt = entry.nextAiringAt, entry.isAwaitingEpisode {
+                Text("·")
+                Text("Airs \(AppModel.countdown(to: Date(timeIntervalSince1970: TimeInterval(airingAt))))")
+            } else if resume?.secondsLeft == nil, let watched = entry.watchedTimeAgo {
+                Text("·")
+                Text("Watched \(watched)")
+            }
+        }
+        .sumiTabularMono(size: 13)
+        .foregroundColor(SumiTheme.muted)
+    }
+
+    /// The episode title only when it says more than the number: AniList
+    /// fills untitled episodes with "Episode 5", which printed twice.
+    private var episodePhrase: String {
+        let n = entry.nextEpisodeOrChapter
+        let number = entry.unit == "CH" ? "Ch. \(n)" : entry.unit == "FILM" ? "Film" : "Ep \(n)"
+        if let title = resume?.episodeTitle, !title.isEmpty,
+           !title.lowercased().hasPrefix("episode") {
+            return "\(number) \u{201C}\(title)\u{201D}"
+        }
+        return number
+    }
+}
+
+extension UpNextQueueView.QueueEntry {
+    /// "Ep 7 / 25", "Ch. 262 / 327": the shelf card's figure.
+    var shortCountLabel: String {
+        if unit == "FILM" { return "Film" }
+        let noun = unit == "CH" ? "Ch." : "Ep"
+        return totalCount > 0 ? "\(noun) \(nextEpisodeOrChapter) / \(totalCount)" : "\(noun) \(nextEpisodeOrChapter)"
+    }
+}
+
+/// A 3pt accent line over a faint track, or the segmented bar under the
+/// Cyber and Evangelion skins, as the app's other progress lines draw it.
+struct UpNextProgressBar: View {
+    let fraction: Double
+    var track: Color = SumiTheme.foreground.opacity(0.12)
+
+    var body: some View {
+        let pct = CGFloat(min(max(fraction, 0), 1))
+        if ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva {
+            CyberSegmentedBar(
+                fraction: pct,
+                cells: ThemeStore.shared.palette.isEva ? 24 : 12,
+                tone: ThemeStore.shared.palette.isEva ? SumiTheme.indigoLight : nil
+            )
+            .frame(height: 4)
+        } else {
+            ZStack(alignment: .leading) {
+                Capsule().fill(track)
+                Capsule()
+                    .fill(SumiTheme.indigo)
+                    .scaleEffect(x: pct, y: 1, anchor: .leading)
+            }
+            .frame(height: 3)
+        }
+    }
+}
+
+/// "New for you": titles on the list with an episode out that the viewer
+/// has not started. A short column beside the tile, not a shelf.
+struct UpNextNewList: View {
+    let entries: [UpNextQueueView.QueueEntry]
+    let resume: [Int64: UpNextResume]
+    let onSelect: (UpNextQueueView.QueueEntry) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SumiSectionHeader("New for you")
+                .padding(.bottom, 6)
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                Button { onSelect(entry) } label: {
+                    HStack(spacing: 14) {
+                        CachedAsyncImage(url: resume[entry.id]?.still ?? entry.bannerURL ?? entry.thumbnailURL, maxPixelSize: 200) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            SumiTheme.card
+                        }
+                        .frame(width: 84, height: 47)
+                        .clipShape(RoundedRectangle(cornerRadius: SumiTheme.radiusSm))
+                        .overlay(RoundedRectangle(cornerRadius: SumiTheme.radiusSm).stroke(SumiTheme.border, lineWidth: 1))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.title)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(SumiTheme.foreground)
+                                .lineLimit(1)
+                            Text("\(entry.unit == "CH" ? "Ch." : "Ep") \(entry.nextEpisodeOrChapter) out")
+                                .sumiTabularMono(size: 11.5, weight: .semibold)
+                                .foregroundColor(SumiTheme.indigo)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                if index < entries.count - 1 {
+                    Rectangle().fill(SumiTheme.border).frame(height: 1)
+                }
+            }
+        }
+    }
+}
+
+/// The Continue shelf: every title in progress after the tile's, anime and
+/// reading alike, as posters with the place in the series under them.
+struct UpNextContinueShelf: View {
+    let entries: [UpNextQueueView.QueueEntry]
+    let onSelect: (UpNextQueueView.QueueEntry) -> Void
+    let onPlay: (UpNextQueueView.QueueEntry) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SumiSectionHeader("Continue", trailing: "\(entries.count) in progress")
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 16) {
+                    ForEach(entries) { entry in
+                        UpNextContinueCard(entry: entry, onSelect: { onSelect(entry) }, onPlay: { onPlay(entry) })
+                            .frame(width: 180)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+}
+
+private struct UpNextContinueCard: View {
+    let entry: UpNextQueueView.QueueEntry
+    let onSelect: () -> Void
+    let onPlay: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 7) {
+                Color.clear
+                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                    .overlay {
+                        CachedAsyncImage(url: entry.thumbnailURL, maxPixelSize: 400) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            SumiTheme.card
+                        }
+                    }
+                    .overlay(alignment: .bottom) {
+                        if entry.totalCount > 0, entry.progressPercent > 0 {
+                            UpNextProgressBar(fraction: entry.progressPercent / 100, track: .white.opacity(0.22))
+                                .padding(8)
+                        }
+                    }
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        SumiRect(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(isHovered ? SumiTheme.foreground.opacity(0.25) : SumiTheme.border, lineWidth: 1)
+                    )
+                    .sumiBrackets()
+                    .sumiFrame(radius: SumiTheme.radiusMd)
+
+                Text(entry.title)
+                    .font(.sumiHeading(size: 14, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .topLeading)
+
+                HStack(spacing: 6) {
+                    Text(entry.shortCountLabel)
+                    if entry.isRewatch == true {
+                        Text("Rewatch").foregroundColor(SumiTheme.indigo)
+                    }
+                    if let airingAt = entry.nextAiringAt, entry.isAwaitingEpisode {
+                        Text("Airs \(AppModel.countdown(to: Date(timeIntervalSince1970: TimeInterval(airingAt))))")
+                    }
+                }
+                .lineLimit(1)
+                .sumiTabularMono(size: 11.5)
+                .foregroundColor(SumiTheme.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .stableHover { isHovered = $0 }
+        // The old queue rows showed Play on hover; a poster has no room for
+        // a second button, so the menu keeps the one-press play.
+        .contextMenu {
+            if !entry.isAwaitingEpisode, entry.unit != "CH" {
+                Button("Play Ep \(entry.nextEpisodeOrChapter)", action: onPlay)
+            }
+            Button("Open", action: onSelect)
+        }
+    }
+}

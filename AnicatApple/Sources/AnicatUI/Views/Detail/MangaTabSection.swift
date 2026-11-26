@@ -19,7 +19,7 @@ struct MangaTabSection: View {
             VStack(alignment: .leading, spacing: 12) {
                 lnoriDisabledCard
                 if !novelVolumes.isEmpty {
-                    LazyVStack(spacing: 8) {
+                    LazyVStack(spacing: 0) {
                         ForEach(novelVolumes, id: \.url) { volume in
                             volumeRow(volume)
                         }
@@ -29,7 +29,7 @@ struct MangaTabSection: View {
         } else if isLoadingNovelVolumes {
             EpisodeListSkeleton(count: 4, isCompact: true)
         } else if !novelVolumes.isEmpty {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: 0) {
                 ForEach(novelVolumes, id: \.url) { volume in
                     volumeRow(volume)
                 }
@@ -84,85 +84,57 @@ struct MangaTabSection: View {
         SumiSwitch(isOn: $lnoriEnabled)
     }
 
+    /// One volume, ruled like the chapter rows: its title and its state in
+    /// words. Download, removal and the EPUB export are the context menu; as
+    /// two icons in a boxed card per volume they were the only boxed rows
+    /// left on the page.
     @ViewBuilder
     private func volumeRow(_ volume: NovelChapterRef) -> some View {
         let state = novelVolumeStates[volume.url] ?? .none
-        HStack(spacing: 12) {
-            Button { onReadVolume?(volume) } label: {
-                HStack(spacing: 12) {
-                    Image(anicat: state == .stored ? "book.closed.fill" : "book.closed")
-                        .font(.system(size: 13))
-                        .foregroundColor(state == .stored ? SumiTheme.indigo : SumiTheme.muted)
-                        .frame(width: 20)
-                    Text(volume.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(SumiTheme.foreground)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                }
-                .contentShape(Rectangle())
+        Button { onReadVolume?(volume) } label: {
+            HStack(spacing: 12) {
+                Text(volume.title)
+                    .font(.system(size: 13))
+                    .foregroundColor(SumiTheme.foreground)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(Self.volumeStateLabel(state))
+                    .font(.system(size: 11.5))
+                    .foregroundColor(state == .failed ? SumiTheme.danger : (state == .stored ? SumiTheme.success : SumiTheme.muted))
+                    .lineLimit(1)
             }
-            .buttonStyle(.sumiPressable)
-
-            volumeAction(
-                systemImage: state == .stored ? "checkmark.circle.fill" : "arrow.down.circle",
-                help: state == .stored ? "Downloaded. Click to remove." : "Keep this volume for reading offline",
-                busy: state == .downloading,
-                tint: state == .stored ? SumiTheme.indigo : SumiTheme.muted
-            ) {
-                if state == .stored {
-                    onDeleteVolumeDownload?(volume)
-                } else {
-                    onDownloadVolume?(volume)
-                }
+            .padding(.vertical, 10)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(SumiTheme.border).frame(height: 1)
             }
-
-            // Export is offered whether or not the volume is downloaded: it
-            // downloads first when it has to, so sending a book to a reader is
-            // one action rather than two in an order the user has to know.
-            volumeAction(
-                systemImage: "square.and.arrow.up",
-                help: "Save as an EPUB for an e-reader",
-                busy: state == .exporting,
-                tint: SumiTheme.muted
-            ) {
-                onExportVolume?(volume)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(SumiTheme.card)
-        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
-        .overlay(
-            SumiRect(cornerRadius: SumiTheme.radiusMd)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
-    }
-
-    @ViewBuilder
-    private func volumeAction(
-        systemImage: String,
-        help: String,
-        busy: Bool,
-        tint: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Group {
-                if busy {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(anicat: systemImage)
-                        .font(.system(size: 13))
-                        .foregroundColor(tint)
-                }
-            }
-            .frame(width: 22, height: 22)
             .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)
-        .disabled(busy)
-        .help(help)
+        .contextMenu {
+            Button("Read") { onReadVolume?(volume) }
+            Divider()
+            if state == .stored {
+                Button("Remove download") { onDeleteVolumeDownload?(volume) }
+            } else if state != .downloading {
+                Button(state == .failed ? "Retry download" : "Download for offline reading") { onDownloadVolume?(volume) }
+            }
+            // Offered whether or not the volume is downloaded: it downloads
+            // first when it has to, so sending a book to a reader is one
+            // action rather than two in an order the user has to know.
+            if state != .exporting {
+                Button("Save as EPUB…") { onExportVolume?(volume) }
+            }
+        }
+    }
+
+    private static func volumeStateLabel(_ state: MediaDetailView.ChapterOfflineState) -> String {
+        switch state {
+        case .stored: return "Downloaded"
+        case .downloading: return "Downloading"
+        case .exporting: return "Saving EPUB"
+        case .failed: return "Download failed"
+        case .none: return ""
+        }
     }
 
     let chapters: [MediaDetailView.MangaChapterItem]
@@ -185,7 +157,6 @@ struct MangaTabSection: View {
     var onExportVolume: ((NovelChapterRef) -> Void)?
     // `AppModel.isJapaneseManga` owns the reader and the default (off).
     @AppStorage("anicat_manga_japanese") private var japaneseManga: Bool = false
-    var onToggleJapaneseManga: (() -> Void)?
     /// Which chapters are on disk, or on their way there. Keyed by chapter
     /// id because that is what the registry and the files are keyed on.
     var offlineStates: [String: MediaDetailView.ChapterOfflineState] = [:]
@@ -194,34 +165,7 @@ struct MangaTabSection: View {
     let onReadChapter: (MediaDetailView.MangaChapterItem) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if format != "NOVEL" { languageRow }
-            list
-        }
-    }
-
-    /// The language the chapters are read in, on the page they are listed
-    /// on: the reason a list is Japanese or empty and the way to change it,
-    /// without a trip to Settings. Ruled like the chapter rows below it.
-    private var languageRow: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Language")
-                    .font(.sumiHeading(size: 13.5, weight: .medium))
-                    .foregroundColor(SumiTheme.foreground)
-                Text("Japanese raws come from Sen Manga, which has fewer titles than the English chapters.")
-                    .font(.system(size: 12))
-                    .foregroundColor(SumiTheme.muted)
-            }
-            Spacer(minLength: 12)
-            SumiSlashToggle([(true, "日本語"), (false, "English")], selection: japaneseManga) { japaneseManga = $0 }
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 12)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(SumiTheme.border).frame(height: 1)
-        }
-        .onChange(of: japaneseManga) { _, _ in onToggleJapaneseManga?() }
+        list
     }
 
     @ViewBuilder
@@ -260,7 +204,7 @@ struct MangaTabSection: View {
                 if let owning { expandedGroups.insert(owning.start) }
             }
         } else {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: 0) {
                 chapterRows(chapters[...])
             }
         }
@@ -279,11 +223,20 @@ struct MangaTabSection: View {
         }
     }
 
+    /// The first chapter numbered past AniList's progress: the one the
+    /// header's button opens, so the row it names says so.
+    private var nextChapterId: String? {
+        let progress = Double(readProgress ?? 0)
+        return chapters.first { (Double($0.number) ?? -1) > progress }?.id
+    }
+
     private func chapterRows(_ rows: ArraySlice<MediaDetailView.MangaChapterItem>) -> some View {
-        ForEach(rows) { chapter in
+        let next = nextChapterId
+        return ForEach(rows) { chapter in
             MediaDetailView.ChapterRowView(
                 chapter: chapter,
                 isRead: (Double(chapter.number) ?? .infinity) <= Double(readProgress ?? 0),
+                isNext: chapter.id == next,
                 offline: offlineStates[chapter.id] ?? .none,
                 onDownload: onDownloadChapter.map { action in { action(chapter) } },
                 onDeleteDownload: onDeleteChapterDownload.map { action in { action(chapter) } }

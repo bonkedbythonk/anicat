@@ -9,6 +9,7 @@ public struct SumiPageHeader<Trailing: View>: View {
     let title: String
     let subtitle: String?
     @ViewBuilder let trailing: () -> Trailing
+    @Environment(\.sumiPageScope) private var scope
 
     public init(title: String, subtitle: String? = nil, @ViewBuilder trailing: @escaping () -> Trailing) {
         self.title = title
@@ -23,11 +24,19 @@ public struct SumiPageHeader<Trailing: View>: View {
     public var body: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.sumiHeading(size: 19, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundColor(SumiTheme.foreground)
-                    .textCase(isHud ? .uppercase : nil)
+                // The switch sits on the title's line, not at the foot of
+                // the block: there it rode up and down between pages with
+                // and without a subtitle as the viewer flicked through them.
+                HStack(alignment: .firstTextBaseline, spacing: 24) {
+                    Text(title)
+                        .font(.sumiHeading(size: 19, weight: .semibold))
+                        .tracking(-0.3)
+                        .foregroundColor(SumiTheme.foreground)
+                        .textCase(isHud ? .uppercase : nil)
+                    if let scope {
+                        SumiPageScopeToggle(scope: scope)
+                    }
+                }
                 if ThemeStore.shared.palette.isCyber {
                     // The short underline under a menu title in the game.
                     Rectangle().fill(SumiTheme.indigo).frame(width: 36, height: 2)
@@ -62,6 +71,55 @@ public struct SumiPageHeader<Trailing: View>: View {
                 .offset(y: -40)
                 .allowsHitTesting(false)
             }
+        }
+    }
+}
+
+/// The switch between sibling pages in a page header: Anime / Manga / Light
+/// novels / Films, History / Stats. The rail lost its Manga, Light Novels,
+/// cinema and Stats rows to the icon redesign, and this is where they went.
+/// `RootView` sets it on the section it belongs to; with none set, nothing
+/// draws, so every other header lays out exactly as before.
+public struct SumiPageScope {
+    public let options: [(id: String, label: String)]
+    public let selected: String
+    public let select: (String) -> Void
+
+    public init(options: [(id: String, label: String)], selected: String, select: @escaping (String) -> Void) {
+        self.options = options
+        self.selected = selected
+        self.select = select
+    }
+}
+
+public extension EnvironmentValues {
+    @Entry var sumiPageScope: SumiPageScope? = nil
+}
+
+struct SumiPageScopeToggle: View {
+    let scope: SumiPageScope
+
+    var body: some View {
+        SumiSlashToggle(scope.options.map { ($0.id, $0.label) }, selection: scope.selected) { id in
+            if id != scope.selected {
+                SumiHaptics.selection()
+                scope.select(id)
+            }
+        }
+        .font(.system(size: 12.5))
+    }
+}
+
+/// The same switch for the pages that draw their own title instead of a
+/// `SumiPageHeader` (Stats, the cinema shelves).
+public struct SumiPageScopeBar: View {
+    @Environment(\.sumiPageScope) private var scope
+
+    public init() {}
+
+    public var body: some View {
+        if let scope {
+            SumiPageScopeToggle(scope: scope)
         }
     }
 }

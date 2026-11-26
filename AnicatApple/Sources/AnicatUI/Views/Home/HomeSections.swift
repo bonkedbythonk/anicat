@@ -4,126 +4,131 @@ import AnicatCoreKit
 import AppKit
 #endif
 
-/// The `.upNext` section: queue, week strip, Watching, and every configurable
-/// discover row. Pulled out of `RootView.sectionContent` because it used to
-/// be a computed property inlined into the 1198-line body — any one shelf's
-/// array changing (a Watching progress tick from playback, a background
-/// refreshAll updating Trending) re-evaluated every other shelf's layout
-/// along with it. Own `@State` for the two sheets it owns, since neither is
+/// The `.upNext` section: the Continue tile with New for you beside it, the
+/// Continue shelf, the week strip, and every configurable discover row.
+/// Pulled out of `RootView.sectionContent` because it used to be a computed
+/// property inlined into the 1198-line body — any one shelf's array changing
+/// (a Watching progress tick from playback, a background refreshAll updating
+/// Trending) re-evaluated every other shelf's layout along with it. Own `@State` for the two sheets it owns, since neither is
 /// read outside this section.
 struct HomeSectionView: View {
     @Bindable var model: AppModel
     let namespace: Namespace.ID
-    /// The episode-still-to-video namespace, for the Up Next shelf's Play.
+    /// The episode-still-to-video namespace, for the Continue tile's Play.
     let playerNamespace: Namespace.ID
     // 5th arg is the shelf-scoped source key for the poster morph (e.g.
     // "watching:12345"), nil where there's no card to morph from.
     let onOpenDetail: (Int64, String, URL?, Bool, String?) -> Void
 
     @State private var showHomeCustomize = false
-    /// Up Next shows four rows until asked for the rest: eight or more
-    /// in-progress titles pushed the week strip and every shelf below the
-    /// fold, and the first row is the one that gets played anyway.
-    @State private var upNextExpanded = false
-    private static let upNextCollapsedCount = 4
     @State private var showPicker = false
+    /// Where each anime title stands inside its next episode, read off the
+    /// main actor. Nil until the first read lands; New for you waits for it,
+    /// or every title with an episode out drew there for a frame and then
+    /// jumped into the Continue shelf.
+    @State private var resume: [Int64: UpNextResume]?
 
-    /// "3 in progress · 2 new episodes" — the count of new episodes is only
-    /// appended when there are any, matching HomeView.tsx.
-    private var upNextSubtitle: String {
-        let inProgress = model.upNextItems.count
-        let new = model.upNextItems.lazy.filter(\.hasNewEpisode).count
-        var out = "\(inProgress) in progress"
-        if new > 0 {
-            out += " · \(new) new episode\(new == 1 ? "" : "s")"
+    /// Beside the tile and its text, New for you needs about 1000pt; under
+    /// that (the 1080pt window minimum, less the rail and the page margins)
+    /// it goes below them instead of crushing the title to one word a line.
+    private static let wideLayoutWidth: CGFloat = 1000
+    /// Three 63pt rows and the heading fit the 262pt tile; the rest of the
+    /// news stays in the Continue shelf rather than being dropped.
+    private static let newForYouLimit = 3
+
+    /// Anime from the watching list first (it is in recency order and the
+    /// tile reads `first`), then manga and novels already started. Reading
+    /// titles carry no recency, so they cannot be interleaved honestly.
+    private var inProgress: [UpNextQueueView.QueueEntry] {
+        let reading = (model.mangaReading + model.novelReading).compactMap { item -> UpNextQueueView.QueueEntry? in
+            // A "reading" entry at chapter 0 was never begun; offering to
+            // continue it is the queue's job only once it has.
+            guard let progress = item.progress, progress > 0 else { return nil }
+            let total = item.totalEpisodesOrChapters ?? 0
+            return UpNextQueueView.QueueEntry(
+                id: item.id,
+                title: item.title,
+                thumbnailURL: item.coverImageURL,
+                nextEpisodeOrChapter: progress + 1,
+                totalCount: total,
+                progressPercent: total > 0 ? Double(progress) / Double(total) * 100 : 0,
+                unit: "CH"
+            )
         }
-        return out
+        return model.upNextItems + reading
+    }
+
+    /// The phone's rule: a started episode is something to resume, an
+    /// unstarted one that has aired is news. One place per title. Airing
+    /// shows only: `hasNewEpisode` is "progress below released", which is
+    /// true of every half-watched show that ended years ago.
+    private func isNews(_ entry: UpNextQueueView.QueueEntry, airing: Set<Int64>) -> Bool {
+        guard let resume, entry.unit == "EP", airing.contains(entry.id) else { return false }
+        return entry.hasNewEpisode && !entry.isAwaitingEpisode && resume[entry.id]?.secondsLeft == nil
     }
 
     var body: some View {
         // Measured out here, not inside: a reader within the scroll view
         // reports the content's width, which is the thing being sized.
         GeometryReader { viewport in
+        let contentWidth = SumiContentWidth.forAvailable(viewport.size.width) - 80
+        let wide = contentWidth >= Self.wideLayoutWidth
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 40) {
-                // Up Next Section Header
-                VStack(alignment: .leading, spacing: 12) {
-                    SumiPageHeader(
-                        title: "Up Next",
-                        subtitle: model.upNextItems.isEmpty ? nil : upNextSubtitle
-                    ) {
-                        // Words, like the detail page's secondary actions:
-                        // two boxed buttons were the last boxes left on the
-                        // home screen once the queue lost its frame.
-                        HStack(spacing: 14) {
-                            headerAction("Pick for me") { showPicker = true }
-                            Rectangle().fill(SumiTheme.border).frame(width: 1, height: 14)
-                            // Reorders/hides the configurable rows below.
-                            // Shown even signed-out: Trending, Newly
-                            // releasing and Seasonal all work without a
-                            // token, only Planning needs one.
-                            headerAction("Customize") { showHomeCustomize = true }
+                SumiPageHeader(title: "Up next") {
+                    // Words, like the detail page's secondary actions: two
+                    // boxed buttons were the last boxes left on the home
+                    // screen once the queue lost its frame.
+                    HStack(spacing: 14) {
+                        headerAction("Pick for me") { showPicker = true }
+                        Rectangle().fill(SumiTheme.border).frame(width: 1, height: 14)
+                        // Reorders/hides the configurable rows below. Shown
+                        // even signed-out: Trending, Newly releasing and
+                        // Seasonal all work without a token, only Planning
+                        // needs one.
+                        headerAction("Customize") { showHomeCustomize = true }
+                    }
+                }
+
+                let all = inProgress
+                if let hero = all.first {
+                    let rest = Array(all.dropFirst())
+                    let airing = Set(model.watchingItems.lazy.filter(\.isAiring).map(\.id))
+                    let news = Array(rest.filter { isNews($0, airing: airing) }.prefix(Self.newForYouLimit))
+                    let newsIds = Set(news.map(\.id))
+                    let shelf = rest.filter { !newsIds.contains($0.id) }
+
+                    if wide {
+                        HStack(alignment: .top, spacing: 24) {
+                            tile(hero)
+                            if !news.isEmpty {
+                                newList(news).frame(width: 240)
+                            }
+                        }
+                    } else {
+                        tile(hero)
+                        if !news.isEmpty {
+                            newList(news)
                         }
                     }
 
-                    // Up Next Queue Container
-                    if !model.upNextItems.isEmpty {
-                        UpNextQueueView(
-                            items: upNextExpanded ? model.upNextItems : Array(model.upNextItems.prefix(Self.upNextCollapsedCount)),
-                            namespace: namespace,
-                            playerNamespace: playerNamespace,
-                            playerSourceKey: model.openingPlayerSourceKey,
-                            onSelect: { entry in
-                                onOpenDetail(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH", nil)
-                            },
-                            onPlay: { entry in
-                                if entry.unit == "CH" {
-                                    onOpenDetail(entry.id, entry.title, entry.thumbnailURL, true, nil)
-                                } else {
-                                    playFromShelf(
-                                        model: model,
-                                        catalogId: entry.id,
-                                        episode: entry.nextEpisodeOrChapter,
-                                        title: entry.title,
-                                        coverURL: entry.thumbnailURL,
-                                        morphThumbnailURL: entry.thumbnailURL
-                                    )
-                                }
-                            }
-                        )
-                        if model.upNextItems.count > Self.upNextCollapsedCount {
-                            Button {
-                                withAnimation(.smooth(duration: 0.35)) { upNextExpanded.toggle() }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Text(upNextExpanded ? "Show fewer" : "Show all \(model.upNextItems.count)")
-                                        .font(.system(size: 12.5, weight: .semibold))
-                                    Image(anicat: upNextExpanded ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: 10, weight: .semibold))
-                                }
-                                .foregroundColor(SumiTheme.muted)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.sumiPressable)
-                            .frame(maxWidth: .infinity)
-                            .accessibilityLabel(upNextExpanded ? "Show fewer Up Next titles" : "Show all Up Next titles")
-                        }
-                    } else {
-                        // Mirrors HomeView.tsx: an empty queue states the absence
-                        // plainly rather than leaving the "Up Next" heading over
-                        // nothing. 15pt semibold headline, 13pt muted detail.
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Nothing in progress")
-                                .font(.system(size: 15, weight: .semibold))
-                                .tracking(-0.2)
-                                .foregroundColor(SumiTheme.foreground)
-                            Text("Pick something from your library and it shows up here.")
-                                .font(.system(size: 13))
-                                .foregroundColor(SumiTheme.muted)
-                        }
-                        .padding(.horizontal, 4)
+                    if !shelf.isEmpty {
+                        UpNextContinueShelf(entries: shelf, onSelect: select, onPlay: { play($0, picture: nil) })
+                    }
+                } else if model.isSignedIn && model.isLoading {
+                    // Signed in only: signed out the list never arrives, and
+                    // the placeholder would sit on the page for good.
+                    UpNextSkeleton(wide: wide)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Nothing to continue yet")
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundColor(SumiTheme.foreground)
+                        Text(model.isSignedIn
+                             ? "Start something below and it shows up here."
+                             : "Start something below, or sign in to bring your AniList list over.")
+                            .font(.system(size: 12.5))
+                            .foregroundColor(SumiTheme.muted)
                     }
                 }
 
@@ -171,6 +176,82 @@ struct HomeSectionView: View {
             )
         }
         }
+        // Keyed on the episode, and on what is playing: finishing one moves
+        // the title to the next episode, and closing the player has to drop
+        // the "Resume at" the tile showed before it opened.
+        .task(id: "\(model.upNextItems.map { "\($0.id):\($0.nextEpisodeOrChapter)" })|\(model.currentPlaybackCatalogId ?? 0):\(model.currentPlaybackEpisode ?? 0)") {
+            let entries = model.upNextItems.filter { $0.unit == "EP" }
+            let engine = model.engine
+            resume = await Task.detached(priority: .utility) {
+                Self.lookUp(entries, engine: engine)
+            }.value
+        }
+    }
+
+    private func tile(_ entry: UpNextQueueView.QueueEntry) -> some View {
+        UpNextContinueTile(
+            entry: entry,
+            resume: resume?[entry.id],
+            playerNamespace: playerNamespace,
+            playerSourceKey: model.openingPlayerSourceKey,
+            onSelect: select,
+            onPlay: { play($0, picture: $1) }
+        )
+    }
+
+    private func newList(_ entries: [UpNextQueueView.QueueEntry]) -> some View {
+        UpNextNewList(entries: entries, resume: resume ?? [:], onSelect: select)
+    }
+
+    private func select(_ entry: UpNextQueueView.QueueEntry) {
+        onOpenDetail(entry.id, entry.title, entry.thumbnailURL, entry.unit == "CH", nil)
+    }
+
+    /// Chapters open the page: there is no one-press read from home. `picture`
+    /// is the tile's still, nil from the shelf, whose portrait poster would
+    /// squash flying into the landscape video frame.
+    private func play(_ entry: UpNextQueueView.QueueEntry, picture: URL?) {
+        if entry.unit == "CH" {
+            onOpenDetail(entry.id, entry.title, entry.thumbnailURL, true, nil)
+        } else {
+            playFromShelf(
+                model: model,
+                catalogId: entry.id,
+                episode: entry.nextEpisodeOrChapter,
+                title: entry.title,
+                coverURL: entry.thumbnailURL,
+                morphThumbnailURL: picture
+            )
+        }
+    }
+
+    /// The still, the episode title and the position for each title's next
+    /// episode: the first two from the detail snapshot, the last from the
+    /// watch registry. Disk reads and a synchronous FFI call per title, which
+    /// is why this runs detached and never from `body`. Same reads as the
+    /// phone's Up Next tab.
+    nonisolated private static func lookUp(_ entries: [UpNextQueueView.QueueEntry], engine: AnicatEngine?) -> [Int64: UpNextResume] {
+        var found: [Int64: UpNextResume] = [:]
+        for entry in entries {
+            let episode = DetailCache.peekEpisode(id: entry.id, number: entry.nextEpisodeOrChapter)
+            var stop: Int?
+            var duration: Int?
+            if let progress = try? engine?.getProgress(catalog: .anilist, catalogId: entry.id, episodeNumber: Int64(entry.nextEpisodeOrChapter)),
+               progress.stopTime > 0, progress.duration > 0,
+               // Past 85% the episode is recorded watched and replays from
+               // the start (`resolveAndPlay`), so there is nothing to resume.
+               Double(progress.stopTime) / Double(progress.duration) < 0.85 {
+                stop = Int(progress.stopTime)
+                duration = Int(progress.duration)
+            }
+            found[entry.id] = UpNextResume(
+                still: episode?.thumbnailURL,
+                episodeTitle: episode?.title,
+                stopSeconds: stop,
+                durationSeconds: duration
+            )
+        }
+        return found
     }
 
     private func headerAction(_ title: String, action: @escaping () -> Void) -> some View {

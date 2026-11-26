@@ -5,10 +5,10 @@ import AnicatCoreKit
 /// for the visible month, laid out Monday-first, with a day's full list in a
 /// column beside it.
 ///
-/// Its sibling tab, the week list, is driven by `nextAiringEpisode` on the
-/// titles the home page already fetched, so it can only ever show the *next*
-/// episode of each. This one asks the engine for a real date window, which is
-/// why it can show a month at all.
+/// `ScheduleView`'s Month half. `ScheduleItem`, which the home page builds
+/// from `nextAiringEpisode`, only ever holds the *next* episode of each
+/// title; this asks the engine for a real date window, which is why it can
+/// show a month at all, and the Days half reads the same slots.
 public struct CalendarView: View {
     /// One square of the grid. `inMonth` is false for the pad days that fill
     /// the first and last week — they are still real dates and still carry

@@ -23,7 +23,7 @@ public struct ReadingView: View {
             trendingShelf: "Trending manga"
         )
         public static let novels = Config(
-            title: "Light Novels",
+            title: "Light novels",
             unit: "CH",
             browseLabel: "Browse all novels",
             readingShelf: "Reading",

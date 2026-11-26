@@ -29,6 +29,10 @@ public struct CommandPalette: View {
     /// up: the placeholder still says "Search shows, actions, pages" either
     /// way, but only a caller that passes this actually searches shows.
     var onSearchTitles: ((String) async -> [Command])?
+    /// Hands a typed request ("something cozy under 13 episodes") to Ask.
+    /// Ask used to be reachable only by typing into the Search page; the
+    /// palette is where every other "do something" already lives.
+    var onAsk: ((String) -> Void)?
 
     @State private var query = ""
     @State private var highlighted = 0
@@ -45,10 +49,12 @@ public struct CommandPalette: View {
     public init(
         commands: [Command],
         onSearchTitles: ((String) async -> [Command])? = nil,
+        onAsk: ((String) -> Void)? = nil,
         onDismiss: @escaping () -> Void
     ) {
         self.commands = commands
         self.onSearchTitles = onSearchTitles
+        self.onAsk = onAsk
         self.onDismiss = onDismiss
     }
 
@@ -57,7 +63,15 @@ public struct CommandPalette: View {
         guard !q.isEmpty else { return commands }
         // Title matches first: with a query typed, a specific show is almost
         // always what's being looked for, not "Go to Home".
-        return titleMatches + commands.filter { $0.label.lowercased().contains(q) }
+        return askMatch(for: query) + titleMatches + commands.filter { $0.label.lowercased().contains(q) }
+    }
+
+    /// The same test the Search page uses to offer Ask, so a request reads
+    /// as one in both places and a title search never does.
+    private func askMatch(for raw: String) -> [Command] {
+        let text = raw.trimmingCharacters(in: .whitespaces)
+        guard let onAsk, AskSearch.isAvailable, AskSearch.looksLikeRequest(text) else { return [] }
+        return [Command(id: "ask", label: "Ask Anicat: \(text)", group: "Ask") { onAsk(text) }]
     }
 
     /// Groups in the order their first command appears, so the list does not

@@ -8,6 +8,9 @@ public struct SyosetuReaderView: View {
     @Bindable var model: AppModel
     @State private var urlField: String = ""
     @State private var showToc = false
+    /// The contents column beside the text, on a window wide enough for it.
+    /// Narrower windows and the phone open the contents as a sheet instead.
+    @State private var showSidebar = true
     @State private var showTypography = false
     @State private var typography = NovelPreferences.typography()
     /// Which paragraphs are on screen. The smallest of them is the reading
@@ -133,34 +136,25 @@ public struct SyosetuReaderView: View {
         model.syosetuSession?.chapterImages ?? []
     }
 
+    /// Below this the text column and a 240pt contents column do not both
+    /// fit at a readable width.
+    private static let sidebarMinWidth: CGFloat = 900
+    private static let sidebarWidth: CGFloat = 240
+
     @ViewBuilder
     private func readerBody(_ session: AppModel.SyosetuSession) -> some View {
-        VStack(spacing: 0) {
-            header(session)
-            progressBar
-            Divider().background(SumiTheme.border.opacity(0.4))
-
-            Group {
-                if let error = session.errorMessage {
-                    SumiEmptyState(headline: "Could not load", detail: error)
-                        .frame(maxHeight: .infinity)
-                } else if session.isLoading && session.chapterText.isEmpty {
-                    ProgressView().controlSize(.large).frame(maxHeight: .infinity)
-                } else {
-                    chapterText(session)
+        GeometryReader { geo in
+            let wide = Self.allowsSidebar && geo.size.width >= Self.sidebarMinWidth
+            HStack(spacing: 0) {
+                if wide && showSidebar {
+                    contentsSidebar(session)
+                        .frame(width: Self.sidebarWidth)
+                        .overlay(alignment: .trailing) {
+                            Rectangle().fill(divider).frame(width: 1)
+                        }
                 }
+                readerColumn(session, wide: wide)
             }
-            // The spinner snapped straight to the first chapter's text.
-            // `.id` because these are a conditional chain: a transition on
-            // the enclosing `Group` never fires while the Group's own
-            // identity is stable. Only the first load crosses here — a later
-            // chapter keeps the previous text on screen while it fetches, so
-            // this phase does not change and the ScrollView is not rebuilt.
-            .sumiTransition(.opacity)
-            .id(bodyPhase(session))
-            .animation(.sumi(.page), value: bodyPhase(session))
-
-            footer(session)
         }
         .background(typography.theme.background)
         .focusable()
@@ -184,6 +178,113 @@ public struct SyosetuReaderView: View {
         .sheet(isPresented: $showToc) {
             tocSheet(session)
         }
+    }
+
+    /// The Mac only: no phone is 900pt wide, and beside a 240pt column the
+    /// text on one would be a few words to a line.
+    private static var allowsSidebar: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// Hairline in the page theme's own ink, so it holds on Sepia and Paper
+    /// as well as on the app's ground.
+    private var divider: Color { typography.theme.muted.opacity(0.18) }
+
+    private func readerColumn(_ session: AppModel.SyosetuSession, wide: Bool) -> some View {
+        VStack(spacing: 0) {
+            header(session, wide: wide)
+            Rectangle().fill(divider).frame(height: 1)
+
+            Group {
+                if let error = session.errorMessage {
+                    SumiEmptyState(headline: "Could not load", detail: error)
+                        .frame(maxHeight: .infinity)
+                } else if session.isLoading && session.chapterText.isEmpty {
+                    ProgressView().controlSize(.large).frame(maxHeight: .infinity)
+                } else {
+                    chapterText(session)
+                }
+            }
+            // The spinner snapped straight to the first chapter's text.
+            // `.id` because these are a conditional chain: a transition on
+            // the enclosing `Group` never fires while the Group's own
+            // identity is stable. Only the first load crosses here — a later
+            // chapter keeps the previous text on screen while it fetches, so
+            // this phase does not change and the ScrollView is not rebuilt.
+            .sumiTransition(.opacity)
+            .id(bodyPhase(session))
+            .animation(.sumi(.page), value: bodyPhase(session))
+
+            footer(session)
+        }
+    }
+
+    private func sidebarHeading(_ session: AppModel.SyosetuSession) -> String {
+        let chapters = session.info?.chapters ?? []
+        guard chapters.indices.contains(session.currentChapterIndex),
+              let volume = chapters[session.currentChapterIndex].volumeName else { return "Contents" }
+        return "\(volume) · Contents"
+    }
+
+    /// The table of contents as a column, the current chapter marked. Scrolls
+    /// itself to the open chapter, which in a long web novel would otherwise
+    /// sit far below the fold.
+    private func contentsSidebar(_ session: AppModel.SyosetuSession) -> some View {
+        let chapters = session.info?.chapters ?? []
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(sidebarHeading(session))
+                .sumiTabularMono(size: 11.5)
+                .foregroundColor(typography.theme.muted)
+                .lineLimit(1)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 8)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(chapters.enumerated()), id: \.offset) { index, chapter in
+                            contentsRow(chapter.title, isOn: index == session.currentChapterIndex) {
+                                Task { await model.loadSyosetuChapter(url: chapter.url, index: index) }
+                            }
+                            .id(index)
+                        }
+                    }
+                    .padding(.bottom, 16)
+                }
+                .onAppear { proxy.scrollTo(session.currentChapterIndex, anchor: .center) }
+                .onChange(of: session.currentChapterIndex) { _, index in
+                    proxy.scrollTo(index, anchor: .center)
+                }
+            }
+        }
+        .padding(.top, 20)
+        // The column runs to the top of the window, under the transparent
+        // title strip, which would otherwise eat clicks on the first rows.
+        #if os(macOS)
+        .padding(.top, Self.titleStripHeight)
+        #endif
+    }
+
+    private func contentsRow(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12.5, weight: isOn ? .semibold : .regular))
+                .foregroundColor(isOn ? typography.theme.foreground : typography.theme.muted)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    SumiRect(cornerRadius: SumiTheme.radiusSm)
+                        .fill(isOn ? typography.theme.foreground.opacity(0.08) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.sumiPressable)
+        .padding(.horizontal, 8)
     }
 
     /// Which of the three states the reader body is in, so one
@@ -232,7 +333,9 @@ public struct SyosetuReaderView: View {
                     }
                 }
                 .frame(maxWidth: typography.columnWidth)
-                .padding(32)
+                .padding(.horizontal, 32)
+                .padding(.top, 44)
+                .padding(.bottom, 32)
                 .frame(maxWidth: .infinity)
             }
             // Keyed on the chapter text rather than the index so a reopen of
@@ -319,10 +422,8 @@ public struct SyosetuReaderView: View {
         )
     }
 
-    /// How far through the open chapter the reader is. Two points tall and
-    /// under the header rather than in it: it is a place-in-the-page readout,
-    /// not a control, and the chapter counter in the footer is what answers
-    /// "where am I in the book".
+    /// How far through the open chapter the reader is: a 2pt line in the
+    /// footer beside the chapter counter, a readout rather than a control.
     private var progressBar: some View {
         GeometryReader { geo in
             let total = max(paragraphs.count - 1, 1)
@@ -333,31 +434,48 @@ public struct SyosetuReaderView: View {
                 .animation(reduceMotion ? nil : .snappy, value: fraction)
         }
         .frame(height: 2)
-        .background(typography.theme.muted.opacity(0.18))
+        .background(divider)
     }
 
-    private func header(_ session: AppModel.SyosetuSession) -> some View {
-        HStack {
-            SumiOutlineButton("Close", systemImage: "xmark", action: model.closeSyosetuReader)
-            Spacer()
-            VStack(spacing: 2) {
+    private func header(_ session: AppModel.SyosetuSession, wide: Bool) -> some View {
+        HStack(spacing: 12) {
+            Button(action: model.closeSyosetuReader) {
+                Image(anicat: "chevron.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(typography.theme.foreground.opacity(0.8))
+                    .frame(width: Self.glyphHit, height: Self.glyphHit)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.sumiPressable)
+            .help("Close the reader")
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text(session.info?.title ?? "")
-                    .font(.sumiHeading(size: 13, weight: .medium))
+                    .font(.sumiHeading(size: 13, weight: .semibold))
                     .foregroundColor(typography.theme.foreground)
                     .lineLimit(1)
-                if let author = session.info?.author {
-                    Text(author).sumiTabularMono(size: 10.5).foregroundColor(typography.theme.muted)
+                Text(headerMeta(session))
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(typography.theme.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            SumiOutlineButton("Contents") {
+                if wide {
+                    withAnimation(.snappy) { showSidebar.toggle() }
+                } else {
+                    showToc = true
                 }
             }
-            Spacer()
-            SumiOutlineButton("Aa", systemImage: "textformat.size", action: { showTypography = true })
+            .disabled(session.info == nil)
+            SumiOutlineButton("Aa") { showTypography = true }
+                .help("Reader settings")
                 .sumiPopover(isPresented: $showTypography, arrowEdge: .bottom) {
                     typographyPopover
                 }
-            SumiOutlineButton("Chapters", systemImage: "list.bullet", action: { showToc = true })
-                .disabled(session.info == nil)
         }
-        .padding(12)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
         // Below the title strip, not beside it. The reader fills the window,
         // so its own bar starts where the window's does -- and that strip is
         // not merely where the traffic lights are drawn, it is a region that
@@ -368,22 +486,79 @@ public struct SyosetuReaderView: View {
         #endif
     }
 
+    /// "Chapter 7 · Author", the author dropped when the source gave none
+    /// (an lnori volume never does).
+    private func headerMeta(_ session: AppModel.SyosetuSession) -> String {
+        let chapter = "Chapter \(session.currentChapterIndex + 1)"
+        guard let author = session.info?.author, !author.isEmpty else { return chapter }
+        return "\(chapter) · \(author)"
+    }
+
+    /// 28pt is a pointer target; on the phone the close button needs a
+    /// thumb's 44.
+    #if os(iOS)
+    private static let glyphHit: CGFloat = 44
+    #else
+    private static let glyphHit: CGFloat = 28
+    #endif
+
     /// The height AppKit's transparent title bar occupies over the content,
     /// matching `TitleStripDoubleClick.stripHeight` in the app target.
     static let titleStripHeight: CGFloat = 28
 
     private var typographyPopover: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            slider("Size", value: $typography.fontSize, range: NovelTypography.fontSizeRange, step: 1, format: "%.0f pt")
+        VStack(alignment: .leading, spacing: 12) {
+            row("Face") {
+                SumiSlashToggle(NovelTypography.Family.allCases.map { ($0, $0.label) }, selection: typography.family) {
+                    typography.family = $0
+                }
+            }
+            row("Size") {
+                HStack(spacing: 8) {
+                    SumiOutlineButton("A\u{2212}") { stepFontSize(by: -1) }
+                        .disabled(typography.fontSize <= NovelTypography.fontSizeRange.lowerBound)
+                    Text(String(format: "%.0f", typography.fontSize))
+                        .sumiTabularMono(size: 12.5)
+                        .foregroundColor(SumiTheme.foreground)
+                        .frame(minWidth: 20)
+                    SumiOutlineButton("A+") { stepFontSize(by: 1) }
+                        .disabled(typography.fontSize >= NovelTypography.fontSizeRange.upperBound)
+                }
+            }
+            row("Line width") {
+                SumiSlashToggle(
+                    NovelTypography.lineWidths.map { ($0.width, $0.label) },
+                    selection: typography.nearestLineWidth
+                ) {
+                    typography.columnWidth = $0
+                }
+            }
+            row("Page") {
+                SumiSlashToggle(NovelTypography.PageTheme.allCases.map { ($0, $0.label) }, selection: typography.theme) {
+                    typography.theme = $0
+                }
+            }
             slider("Line height", value: $typography.lineHeight, range: NovelTypography.lineHeightRange, step: 0.05, format: "%.2f")
-            slider("Column", value: $typography.columnWidth, range: NovelTypography.columnWidthRange, step: 10, format: "%.0f pt")
             slider("Paragraph gap", value: $typography.paragraphSpacing, range: NovelTypography.paragraphSpacingRange, step: 1, format: "%.0f pt")
-
-            picker("Typeface", selection: $typography.family, options: NovelTypography.Family.allCases) { $0.label }
-            picker("Page", selection: $typography.theme, options: NovelTypography.PageTheme.allCases) { $0.label }
         }
-        .padding(16)
-        .frame(width: 320)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(width: 340)
+        #if os(iOS)
+        .presentationCompactAdaptation(.popover)
+        #endif
+    }
+
+    private func stepFontSize(by delta: Double) {
+        typography.fontSize = (typography.fontSize + delta).clamped(to: NovelTypography.fontSizeRange)
+    }
+
+    private func row<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack {
+            Text(label).font(.system(size: 12.5)).foregroundColor(SumiTheme.foreground)
+            Spacer(minLength: 12)
+            control()
+        }
     }
 
     private func slider(
@@ -395,10 +570,10 @@ public struct SyosetuReaderView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(label).font(.system(size: 12, weight: .medium)).foregroundColor(SumiTheme.foreground)
+                Text(label).font(.system(size: 12.5)).foregroundColor(SumiTheme.foreground)
                 Spacer()
                 Text(String(format: format, value.wrappedValue))
-                    .sumiTabularMono(size: 11)
+                    .sumiTabularMono(size: 11.5)
                     .foregroundColor(SumiTheme.muted)
             }
             // The reader is not on the TV; `Slider` is not in its SDK.
@@ -408,46 +583,32 @@ public struct SyosetuReaderView: View {
         }
     }
 
-    private func picker<Option: Hashable>(
-        _ label: String,
-        selection: Binding<Option>,
-        options: [Option],
-        title: (Option) -> String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(.system(size: 12, weight: .medium)).foregroundColor(SumiTheme.foreground)
-            SumiSlashToggle(options.map { ($0, title($0)) }, selection: selection.wrappedValue) {
-                selection.wrappedValue = $0
-            }
-        }
-    }
-
     private func footer(_ session: AppModel.SyosetuSession) -> some View {
-        HStack {
+        HStack(spacing: 14) {
+            if let info = session.info {
+                Text("Chapter \(session.currentChapterIndex + 1) of \(info.chapters.count)")
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(typography.theme.muted)
+                    .fixedSize()
+            }
+            progressBar
             Button {
                 jump(session, by: -1)
             } label: {
-                Label("Previous", anicat: "chevron.left")
+                Text("Previous").sumiTabularMono(size: 11.5, weight: .medium)
             }
             .disabled(session.currentChapterIndex <= 0)
-
-            Spacer()
-            if let info = session.info {
-                Text("\(session.currentChapterIndex + 1) / \(info.chapters.count)")
-                    .sumiTabularMono(size: 11.5)
-                    .foregroundColor(typography.theme.muted)
-            }
-            Spacer()
-
             Button {
                 jump(session, by: 1)
             } label: {
-                Label("Next", anicat: "chevron.right")
+                Text("Next").sumiTabularMono(size: 11.5, weight: .medium)
             }
             .disabled((session.info?.chapters.count ?? 0) <= session.currentChapterIndex + 1)
         }
+        .foregroundColor(typography.theme.foreground)
         .buttonStyle(.sumiPressable)
-        .padding(12)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
     }
 
     private func jump(_ session: AppModel.SyosetuSession, by delta: Int) {

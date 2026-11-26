@@ -13,12 +13,13 @@ struct SettingsCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(SumiTheme.muted)
+                    .font(.system(size: 15, weight: .semibold))
+                    .tracking(-0.2)
+                    .foregroundColor(SumiTheme.foreground)
 
                 if let description {
                     Text(description)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11.5))
                         .foregroundColor(SumiTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -30,7 +31,7 @@ struct SettingsCard<Content: View>: View {
                     if row.id != rows.first?.id {
                         SettingsHairline()
                     }
-                    row.padding(.vertical, 10)
+                    row.padding(.vertical, 9)
                 }
             }
         }
@@ -59,19 +60,19 @@ struct SettingField<Trailing: View>: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(label)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 13))
                             .foregroundColor(SumiTheme.foreground)
 
                         if let badge {
                             Text(badge)
-                                .font(.system(size: 11).smallCaps())
+                                .sumiTabularMono()
                                 .foregroundColor(SumiTheme.muted)
                         }
                     }
 
                     if let description {
                         Text(description)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
                             .foregroundColor(SumiTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -85,19 +86,19 @@ struct SettingField<Trailing: View>: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(label)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 13))
                             .foregroundColor(SumiTheme.foreground)
 
                         if let badge {
                             Text(badge)
-                                .font(.system(size: 11).smallCaps())
+                                .sumiTabularMono()
                                 .foregroundColor(SumiTheme.muted)
                         }
                     }
 
                     if let description {
                         Text(description)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
                             .foregroundColor(SumiTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }

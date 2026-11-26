@@ -66,8 +66,22 @@ public struct MangaReaderView: View {
     @State private var readingMode: ReadingMode
     @State private var readingDirection: ReadingDirection
     @State private var offsetCover: Bool
+    @State private var pageGaps: Bool
+    /// The paged mode "Paged" returns to. The toolbar offers Paged / Scroll,
+    /// and single or double is chosen in the settings popover; without this
+    /// a reader on double pages who looked at the scroll came back to single.
+    @State private var lastPagedMode: ReadingMode
+    @State private var showSettings = false
+    /// Whether this chapter's finish went out to AniList, for the line on the
+    /// end-of-chapter card. Kept apart from `syncToast`, which clears itself
+    /// after two seconds, long before a reader scrolls down to the card.
+    @State private var chapterSynced = false
+    /// One automatic chapter turn per chapter. The sentinel under the card
+    /// can appear more than once while the next chapter's pages load, and
+    /// each appearance would otherwise skip another chapter.
+    @State private var didAutoAdvance = false
     /// Chrome pinned by a tap. Cleared by scrolling: reading is the reason
-    /// the reader is open, and a bar with a gradient under it sitting over
+    /// the reader is open, and a bar sitting over
     /// the page is the app talking over the thing being read.
     @State private var showControls: Bool = true
     /// Chrome asked for by putting the pointer at the top or bottom edge --
@@ -82,7 +96,10 @@ public struct MangaReaderView: View {
     /// with the pointer resting mid-page never triggers it.
     private static let edgeReveal: CGFloat = 96
 
-    private var chromeVisible: Bool { showControls || hoverChrome }
+    /// The settings popover counts as wanting the chrome: it hangs off the
+    /// top bar, and the pointer moving into it leaves the edge band, which
+    /// would take the bar away and close the popover under the pointer.
+    private var chromeVisible: Bool { showControls || hoverChrome || showSettings }
 
     @State private var currentZoom: CGFloat = 1.0
     @State private var finalZoom: CGFloat = 1.0
@@ -152,7 +169,10 @@ public struct MangaReaderView: View {
         // the preferences below are the title's own from the first frame.
         let catalogId = ReaderBridge.shared.catalogId
         self.catalogId = catalogId
-        self._readingMode = State(initialValue: ReaderPreferences.mode(catalogId: catalogId))
+        let mode = ReaderPreferences.mode(catalogId: catalogId)
+        self._readingMode = State(initialValue: mode)
+        self._lastPagedMode = State(initialValue: mode == .webtoon ? .single : mode)
+        self._pageGaps = State(initialValue: ReaderPreferences.hasPageGaps(catalogId: catalogId))
         self._readingDirection = State(
             initialValue: ReaderPreferences.isRightToLeft(catalogId: catalogId) ? .rtl : .ltr
         )
@@ -288,6 +308,7 @@ public struct MangaReaderView: View {
         didFinishChapter = true
         Task {
             guard await ReaderBridge.shared.finishChapter() else { return }
+            chapterSynced = true
             withAnimation(.snappy) { syncToast = true }
             try? await Task.sleep(for: .seconds(2.2))
             withAnimation(.snappy) { syncToast = false }
@@ -608,11 +629,17 @@ public struct MangaReaderView: View {
             didPreloadNextChapter = false
             didFinishChapter = false
             syncToast = false
+            chapterSynced = false
+            didAutoAdvance = false
             noteReadingPosition(0)
         }
         .onChange(of: readingMode) { _, mode in
             ReaderPreferences.setMode(mode, catalogId: catalogId)
+            if mode != .webtoon { lastPagedMode = mode }
             updateSwipeMonitor()
+        }
+        .onChange(of: pageGaps) { _, gaps in
+            ReaderPreferences.setPageGaps(gaps, catalogId: catalogId)
         }
         .onChange(of: readingDirection) { _, direction in
             ReaderPreferences.setRightToLeft(direction == .rtl, catalogId: catalogId)
@@ -707,7 +734,7 @@ public struct MangaReaderView: View {
 
     private func webtoonColumn(fit: ImageFit) -> some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(spacing: 0) {
+            LazyVStack(spacing: pageGaps ? Self.pageGap : 0) {
                 ForEach(Array(pageURLs.enumerated()), id: \.offset) { index, url in
                     ReaderPageImage(url: url, fit: fit, onDecoded: { notePageSize(index: index, size: $0) }) {
                         Rectangle()
@@ -740,9 +767,74 @@ public struct MangaReaderView: View {
                         noteReadingPosition(index)
                     }
                 }
+                if !pageURLs.isEmpty {
+                    chapterEnd
+                    // Siblings of the card, not inside it: a LazyVStack runs
+                    // `onAppear` for everything in a row when the row is
+                    // built, so a sentinel inside the card would fire as
+                    // soon as the card came into view.
+                    Color.clear
+                        .frame(height: max(readerHeight, 400))
+                    Color.clear
+                        .frame(height: 1)
+                        .onAppear {
+                            guard !didAutoAdvance else { return }
+                            didAutoAdvance = true
+                            onNextChapter()
+                        }
+                }
             }
             .frame(maxWidth: Self.webtoonMaxWidth)
         }
+    }
+
+    /// Gap between pages when "Gaps between pages" is on.
+    private static let pageGap: CGFloat = 12
+
+    /// The card under the last page: whether the chapter reached AniList,
+    /// and the way on. Below it sits one reader-height of empty column with
+    /// a sentinel at its foot, so scrolling on past the card opens the next
+    /// chapter. The spacer is what keeps that from firing on its own: with
+    /// the sentinel straight under the card, a short chapter in a tall
+    /// window would show it on the first frame and skip the chapter unread.
+    private var chapterEnd: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                if chapterSynced {
+                    Text("Marked read on AniList")
+                        .sumiTabularMono(size: 11.5)
+                        .foregroundColor(SumiTheme.success)
+                }
+                Text("End of chapter")
+                    .font(.sumiHeading(size: 19, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+                Text(chapterTitle)
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(SumiTheme.muted)
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: 14) {
+                Text("Next chapter")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(SumiTheme.foreground)
+                Spacer(minLength: 8)
+                Button("Read next chapter", action: onNextChapter)
+                    .sumiPrimaryButton()
+            }
+            .padding(14)
+            .background(SumiTheme.card)
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusXl))
+            .overlay(SumiRect(cornerRadius: SumiTheme.radiusXl).stroke(SumiTheme.border, lineWidth: 1))
+
+            Text("Keep scrolling and the next chapter starts here on its own.")
+                .sumiTabularMono(size: 11.5)
+                .foregroundColor(SumiTheme.muted)
+        }
+        .padding(.horizontal, SumiTheme.spaceMd)
+        .padding(.top, 34)
+        .frame(maxWidth: 560, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Single Page View
@@ -805,20 +897,34 @@ public struct MangaReaderView: View {
 
     // MARK: - Top Bar
     private var topBar: some View {
-        // Two rows when one does not fit: the phone shows this same bar, and
-        // the mode words alone take most of an iPhone's width.
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 16) {
+        Group {
+            #if os(iOS)
+            // The phone keeps the title and the settings up here and moves
+            // the mode words to the bottom bar: with both toggles in one row
+            // the bar wrapped to two lines over the first page.
+            HStack(spacing: 10) {
                 barTitle
-                Spacer()
-                barControls
+                Spacer(minLength: 8)
+                settingsButton
             }
-            VStack(alignment: .leading, spacing: 10) {
-                barTitle
-                barControls
+            #else
+            // Two rows when one does not fit: a narrow window cannot hold
+            // the title and both toggles side by side.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    barTitle
+                    Spacer()
+                    barControls
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    barTitle
+                    barControls
+                }
             }
+            #endif
         }
-        .padding(SumiTheme.spaceMd)
+        .padding(.horizontal, SumiTheme.spaceMd)
+        .padding(.vertical, 10)
         // Clear of the window's transparent title strip, which takes the
         // click rather than passing it down: at a 16pt inset the top 12pt of
         // the close button was dead, and the same bug had the novel reader's
@@ -826,37 +932,52 @@ public struct MangaReaderView: View {
         #if os(macOS)
         .padding(.top, SyosetuReaderView.titleStripHeight)
         #endif
-        .background(
-            LinearGradient(
-                colors: [SumiTheme.background.opacity(0.95), Color.clear],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .background(SumiTheme.background.opacity(0.95).ignoresSafeArea(edges: .top))
+        .overlay(alignment: .bottom) { hairline }
+    }
+
+    private var hairline: some View {
+        Rectangle().fill(SumiTheme.border).frame(height: 1)
     }
 
     private var barTitle: some View {
         HStack(spacing: 8) {
             Button(action: exitReader) {
-                barGlyph("xmark")
+                barGlyph("chevron.left")
             }
             .buttonStyle(.sumiPressable)
+            .help("Close the reader")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.sumiHeading(size: 14, weight: .semibold))
+                    .font(.sumiHeading(size: 13, weight: .semibold))
                     .foregroundColor(SumiTheme.foreground)
                     .lineLimit(1)
                 Text(chapterTitle)
-                    .sumiTabularMono(size: 11)
+                    .sumiTabularMono(size: 11.5)
                     .foregroundColor(SumiTheme.muted)
                     .lineLimit(1)
             }
         }
     }
 
+    private var modeToggle: some View {
+        SumiSlashToggle([(false, "Paged"), (true, "Scroll")], selection: readingMode == .webtoon) { scroll in
+            readingMode = scroll ? .webtoon : lastPagedMode
+        }
+    }
+
     private var barControls: some View {
         HStack(spacing: 14) {
+            modeToggle
+            // Gaps only exist in the scroll column; paged modes draw one
+            // page or one spread at a time.
+            if readingMode == .webtoon {
+                SumiSlashToggle([(false, "No gaps"), (true, "Gaps between pages")], selection: pageGaps) {
+                    pageGaps = $0
+                }
+            }
+
             // macOS only: on the phone the reader already fills the screen,
             // and the button rendered with an empty action.
             #if os(macOS)
@@ -866,30 +987,74 @@ public struct MangaReaderView: View {
                 barGlyph("arrow.up.left.and.arrow.down.right")
             }
             .buttonStyle(.sumiPressable)
+            .help("Full screen")
             #endif
 
-            // Only meaningful while pages are being paired, and a toggle that
+            settingsButton
+        }
+    }
+
+    private var settingsButton: some View {
+        SumiOutlineButton("Aa") { showSettings = true }
+            .help("Reader settings")
+            .sumiPopover(isPresented: $showSettings, arrowEdge: .bottom) {
+                settingsPopover
+            }
+    }
+
+    /// Page layout, direction and the cover offset: the choices that sat in
+    /// the top bar beside the mode words, moved here so the bar holds only
+    /// the two a reader changes while reading.
+    private var settingsPopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if readingMode != .webtoon {
+                settingsRow("Pages") {
+                    SumiSlashToggle([(ReadingMode.single, "Single"), (.double, "Double")], selection: readingMode) {
+                        readingMode = $0
+                    }
+                }
+            }
+            #if os(iOS)
+            // The phone's top bar has no room for the gaps words.
+            if readingMode == .webtoon {
+                settingsRow("Gaps") {
+                    SumiSlashToggle([(false, "None"), (true, "Between pages")], selection: pageGaps) {
+                        pageGaps = $0
+                    }
+                }
+            }
+            #endif
+            settingsRow("Direction") {
+                SumiSlashToggle([(ReadingDirection.rtl, "Right to left"), (.ltr, "Left to right")], selection: readingDirection) {
+                    readingDirection = $0
+                }
+            }
+            // Only meaningful while pages are being paired, and a choice that
             // changes nothing visible is worse than an absent one.
             if readingMode == .double {
-                Button(action: { offsetCover.toggle() }) {
-                    Label {
-                        Text("Offset cover")
-                    } icon: {
-                        barGlyph("book.closed", isOn: offsetCover)
+                settingsRow("First page") {
+                    SumiSlashToggle([(false, "Paired"), (true, "Alone")], selection: offsetCover) {
+                        offsetCover = $0
                     }
-                    .labelStyle(.iconOnly)
                 }
-                .buttonStyle(.sumiPressable)
                 .help("Show the first page alone so the spreads after it match the printed pairing.")
             }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(width: 320, alignment: .leading)
+        #if os(iOS)
+        .presentationCompactAdaptation(.popover)
+        #endif
+    }
 
-            SumiSlashToggle([(ReadingDirection.rtl, "RTL"), (.ltr, "LTR")], selection: readingDirection) {
-                readingDirection = $0
-            }
-
-            SumiSlashToggle(ReadingMode.allCases.map { ($0, $0.label) }, selection: readingMode) {
-                readingMode = $0
-            }
+    private func settingsRow<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12.5))
+                .foregroundColor(SumiTheme.foreground)
+            Spacer(minLength: 12)
+            control()
         }
     }
 
@@ -909,17 +1074,17 @@ public struct MangaReaderView: View {
     private static let glyphHit: CGFloat = 28
     #endif
 
-    /// Names both pages of a spread rather than only its first: "Page 11 / 40"
+    /// Names both pages of a spread rather than only its first: "Page 11 of 40"
     /// while pages 11 and 12 are on screen is a readout that disagrees with
     /// what the reader can see.
     private var pageReadout: String {
         let total = max(pageURLs.count, 1)
         let pages = visiblePages
-        guard let first = pages.first else { return "Page 1 / \(total)" }
+        guard let first = pages.first else { return "Page 1 of \(total)" }
         if let last = pages.last, last != first {
-            return "Pages \(first + 1)-\(last + 1) / \(total)"
+            return "Pages \(first + 1)-\(last + 1) of \(total)"
         }
-        return "Page \(first + 1) / \(total)"
+        return "Page \(first + 1) of \(total)"
     }
 
     /// A page bar under the readout: drag or click to jump. The readout
@@ -935,13 +1100,13 @@ public struct MangaReaderView: View {
         let rtl = readingDirection == .rtl && readingMode != .webtoon
         return GeometryReader { geo in
             ZStack(alignment: rtl ? .trailing : .leading) {
-                Capsule()
+                Rectangle()
                     .fill(SumiTheme.foregroundWash)
-                Capsule()
+                Rectangle()
                     .fill(SumiTheme.indigo)
                     .frame(width: geo.size.width * CGFloat(fraction / Double(total)))
             }
-            .frame(height: 3)
+            .frame(height: 2)
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             // `DragGesture` is not in the tvOS SDK; the bar is read-only
@@ -981,41 +1146,51 @@ public struct MangaReaderView: View {
 
     // MARK: - Bottom Bar
     private var bottomBar: some View {
-        HStack(spacing: 16) {
-            Button(action: onPrevChapter) {
-                Text("Previous chapter")
-                    .sumiTabularMono(size: 11, weight: .medium)
-                    .foregroundColor(SumiTheme.foreground)
-            }
-            .buttonStyle(.sumiPressable)
-
-            Spacer()
-
-            VStack(spacing: 6) {
-                Text(pageReadout)
-                    .sumiTabularMono(size: 12, weight: .medium)
-                    .foregroundColor(SumiTheme.foreground)
+        Group {
+            #if os(iOS)
+            VStack(spacing: 8) {
                 pageScrubber
+                HStack {
+                    pageReadoutText
+                    Spacer()
+                    modeToggle
+                }
+                HStack {
+                    chapterButton("Previous chapter", action: onPrevChapter, color: SumiTheme.foreground)
+                    Spacer()
+                    chapterButton("Next chapter", action: onNextChapter, color: SumiTheme.indigo)
+                }
             }
-            .frame(maxWidth: 360)
-
-            Spacer()
-
-            Button(action: onNextChapter) {
-                Text("Next chapter")
-                    .sumiTabularMono(size: 11, weight: .medium)
-                    .foregroundColor(SumiTheme.indigo)
+            #else
+            HStack(spacing: 14) {
+                pageReadoutText
+                pageScrubber
+                chapterButton("Previous chapter", action: onPrevChapter, color: SumiTheme.foreground)
+                chapterButton("Next chapter", action: onNextChapter, color: SumiTheme.indigo)
             }
-            .buttonStyle(.sumiPressable)
+            #endif
         }
-        .padding(SumiTheme.spaceMd)
-        .background(
-            LinearGradient(
-                colors: [Color.clear, SumiTheme.background.opacity(0.95)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .padding(.horizontal, SumiTheme.spaceMd)
+        .padding(.vertical, 8)
+        .background(SumiTheme.background.opacity(0.95).ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) { hairline }
+    }
+
+    private var pageReadoutText: some View {
+        Text(pageReadout)
+            .sumiTabularMono(size: 11.5)
+            .foregroundColor(SumiTheme.muted)
+            .fixedSize()
+    }
+
+    private func chapterButton(_ label: String, action: @escaping () -> Void, color: Color) -> some View {
+        Button(action: action) {
+            Text(label)
+                .sumiTabularMono(size: 11.5, weight: .medium)
+                .foregroundColor(color)
+                .fixedSize()
+        }
+        .buttonStyle(.sumiPressable)
     }
 }
 

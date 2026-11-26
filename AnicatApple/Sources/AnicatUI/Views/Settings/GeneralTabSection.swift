@@ -11,115 +11,59 @@ struct GeneralTabSection: View {
     // changed nothing. They come back with the feature that reads them.
     @AppStorage("anicat_time_format") private var selectedTimeFormat: String = "24-hour"
     @AppStorage("anicat_poster_accent") private var posterAccentEnabled: Bool = true
-    // The appearance controls gate view *structure* on `skin.hasLight` and on
+    // The appearance row is gated on `skin.hasLight` and shows
     // `appearance`, so both reads have to be observed ones.
     @State private var themeStore = ThemeStore.shared
 
     var body: some View {
-    VStack(alignment: .leading, spacing: 28) {
-        SettingsCard(title: "Appearance") {
-            SettingField(
-                label: "Theme",
-                description: "Ink & Index is the original warm sumi-ink skin, Sakura Zen a cherry-dark one with serif titles, Royal Neon an electric violet one, Evangelion a black, orange and green one; all four have a light half. Night City is black glass with cut corners and a yellow accent, and OLED is a true black for panels that switch pixels off; both are dark only.",
-                isStacked: true
-            ) {
-                ThemePicker()
-            }
+    VStack(alignment: .leading, spacing: 18) {
+        SettingsCard(title: "Skin") {
+            ThemePicker()
 
-            // OLED has no light half, so it gets no appearance control at all
-            // rather than one whose Light quietly stays dark.
+            // OLED and Night City have no light half, so they get no
+            // appearance row at all rather than one whose Light stays dark.
             if themeStore.skin.hasLight {
-                SettingField(
-                    label: "Follow system appearance",
-                    description: "Light or dark to match macOS. Turning this off lands on whichever side the system was already showing, so nothing changes colour until you pick."
-                ) {
-                    SumiSwitch(isOn: Binding(
-                        get: { themeStore.appearance == .system },
-                        set: { follows in
-                            themeStore.select(follows
-                                ? .system
-                                : (ThemeStore.systemPrefersDark ? .dark : .light))
-                        }
-                    ))
-                }
-
-                if themeStore.appearance != .system {
-                    SettingField(
-                        label: "Appearance",
-                        description: "Which half of the skin to draw, regardless of macOS."
-                    ) {
-                        SumiSegmentedControl(
-                            options: [("light", "Light"), ("dark", "Dark")],
-                            selection: Binding(
-                                get: { themeStore.appearance == .light ? "light" : "dark" },
-                                set: { themeStore.select($0 == "light" ? .light : .dark) }
-                            )
-                        )
-                    }
+                SettingField(label: "Light and dark") {
+                    SumiSlashToggle(
+                        [(AnicatAppearance.light, "Light"), (.dark, "Dark"), (.system, "Match the system")],
+                        selection: themeStore.appearance
+                    ) { themeStore.select($0) }
                 }
             }
 
             SettingField(
                 label: "Poster accent",
-                description: "Tint the accent to the cover of the title you have open. Off keeps the skin's own colour everywhere."
+                description: "Tint the accent to the cover of the title you have open"
             ) {
-                SumiSwitch(isOn: $posterAccentEnabled)
+                SumiSwitch(isOn: $posterAccentEnabled, label: "Poster accent")
             }
 
-            SettingField(
-                label: "Time format",
-                description: "How dates and times should be displayed."
-            ) {
-                SumiDropdown(
-                    options: ["24-hour", "12-hour (AM/PM)"],
-                    selected: $selectedTimeFormat
-                )
+            SettingField(label: "Time format") {
+                SumiSlashToggle(
+                    [("24-hour", "24-hour"), ("12-hour (AM/PM)", "12-hour")],
+                    selection: selectedTimeFormat
+                ) { selectedTimeFormat = $0 }
             }
         }
 
-        // Ask only appears where Apple Intelligence runs, so this card is the one
-        // place that says whether it is on and, if not, what to do about it.
-        SettingsCard(title: "Ask") {
+        SettingsCard(title: "Ask and shortcuts") {
+            // Ask only appears where Apple Intelligence runs, so this row is
+            // the one place that says whether it is on and, if not, why.
             let ask = AskAvailability.summary
             SettingField(label: "Ask Anicat", description: ask.text) {
                 Text(ask.isOn ? "On" : "Unavailable")
-                    .font(.system(size: 12, weight: .medium))
+                    .sumiTabularMono()
                     .foregroundColor(ask.isOn ? SumiTheme.indigo : SumiTheme.muted)
             }
-        }
 
-        // Moved off the player tab: the shortcuts are the whole app's, not
-        // playback's, and they were the only reference card sitting in a
-        // list of switches.
-        SettingsCard(title: "Keyboard shortcuts") {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Cheat sheet")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(SumiTheme.foreground)
-
-                    Text("Press ? anywhere in the app to view the keyboard shortcuts cheat sheet.")
-                        .font(.system(size: 12))
-                        .foregroundColor(SumiTheme.muted)
-                }
-
-                Spacer()
-
+            SettingField(
+                label: "Keyboard shortcuts",
+                description: "Press ? anywhere in the app to see them"
+            ) {
                 if let onOpenShortcuts {
                     Button("View shortcuts", action: onOpenShortcuts)
                         .sumiSecondaryButton()
-                } else {
-                    Text("?")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundColor(SumiTheme.foreground)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(SumiTheme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
+                        .controlSize(.small)
                 }
             }
         }

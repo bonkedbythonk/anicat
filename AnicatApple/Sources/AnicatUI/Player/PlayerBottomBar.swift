@@ -7,7 +7,6 @@ struct PlayerBottomBar: View {
     @Bindable var controller: PlayerController
     /// Named in the top bar's label slot; see `ChromeName`.
     let chromeHover: ChromeHoverState
-    @AppStorage("anicat_ambient_glow") private var ambientGlowEnabled: Bool = true
     /// The hairline exists to separate a bar sitting in solid letterbox
     /// black from the picture above it. When the bar overlays the picture
     /// (a 16:9 window, gradient scrim) the same line reads as a white
@@ -24,14 +23,6 @@ struct PlayerBottomBar: View {
         #endif
         if controller.volume < 0.5 { return "speaker.wave.1.fill" }
         return "speaker.wave.2.fill"
-    }
-
-    private var rotateHelpText: String {
-        switch controller.sidewaysState {
-            case 1: return "Rotated 90 clockwise (Shift+V)"
-            case 2: return "Rotated 90 counterclockwise (Shift+V)"
-            default: return "Rotate video (Shift+V)"
-        }
     }
 
     var body: some View {
@@ -147,60 +138,6 @@ struct PlayerBottomBar: View {
                     .tint(PlayerChrome.foreground.opacity(0.85))
                     #endif
                 }
-
-                // Upscaling (Anime4K)
-                Button(action: { controller.toggleAnime4K() }) {
-                    // Rejected before this one: "sparkles" (reads as an AI
-                    // feature), "camera.filters" and an outlined "A4K" chip.
-                    Image(anicat: "4k.tv")
-                    .font(.system(size: 14))
-                    .foregroundColor(controller.isAnime4KEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
-                    .frame(width: 40, height: 40)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-                .chromeName("Upscaling", isOn: controller.isAnime4KEnabled, chromeHover)
-                .accessibilityLabel(controller.isAnime4KEnabled ? "Upscaling: On" : "Upscaling: Off")
-
-                // Smooth motion. Same key as Settings; judged on a pan, so
-                // it sits beside upscaling.
-                if PlayerController.smoothMotionSupported {
-                    Button(action: { controller.toggleSmoothMotion() }) {
-                        Image(anicat: "film.stack")
-                        .font(.system(size: 14))
-                        .foregroundColor(controller.isInterpolationEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
-                        .frame(width: 40, height: 40)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.sumiPressable)
-                    .chromeName("Smooth motion", isOn: controller.isInterpolationEnabled, chromeHover)
-                    .accessibilityLabel(controller.isInterpolationEnabled ? "Smooth motion: On" : "Smooth motion: Off")
-                }
-
-                // Ambient glow. The same key Settings writes; the player is
-                // where the effect is judged, so the switch lives here too.
-                Button(action: { ambientGlowEnabled.toggle() }) {
-                    Image(anicat: ambientGlowEnabled ? "light.max" : "light.min")
-                    .font(.system(size: 14))
-                    .foregroundColor(ambientGlowEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
-                    .frame(width: 40, height: 40)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-                .chromeName("Ambient glow", isOn: ambientGlowEnabled, chromeHover)
-                .accessibilityLabel(ambientGlowEnabled ? "Ambient glow: On" : "Ambient glow: Off")
-
-                // Rotate 90 degrees (off / CW / CCW)
-                Button(action: { controller.cycleSideways() }) {
-                    Image(anicat: "rotate.right")
-                    .font(.system(size: 14))
-                    .foregroundColor(controller.sidewaysState != 0 ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.8))
-                    .frame(width: 40, height: 40)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-                .chromeName(rotateHelpText, chromeHover)
-                .accessibilityLabel(rotateHelpText)
 
                 // Fullscreen. The whole control is compiled out on iOS
                 // rather than guarding only its action: there is no window

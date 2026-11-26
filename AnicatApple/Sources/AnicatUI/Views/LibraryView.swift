@@ -4,7 +4,7 @@ import SwiftUI
 /// The Library: the AniList list, one status bucket at a time.
 ///
 /// Poster grid by default because choosing what to watch is a visual
-/// decision; the table is for sorting and scanning, and the choice sticks.
+/// decision; the list is for scanning, and the choice sticks.
 public struct LibraryView: View {
     let items: [MediaCard.Item]
     let isLoading: Bool
@@ -15,7 +15,11 @@ public struct LibraryView: View {
     let openingSourceKey: String?
     let onSelect: (MediaCard.Item) -> Void
 
+    /// "table" is the stored value for the list, kept from when the list was
+    /// a `Table`: renamed, a saved preference would match neither word and
+    /// the toggle would show nothing chosen.
     @AppStorage("anicat_library_layout") private var layout: String = "grid"
+    @State private var sort: SortKey = .updated
 
     public init(
         items: [MediaCard.Item],
@@ -37,18 +41,45 @@ public struct LibraryView: View {
         self.onSelect = onSelect
     }
 
+    /// Replaces the `Table`'s header sort, so it applies to the grid too.
+    /// "Last updated" is no sort at all: AniList returns the list most
+    /// recently updated first.
+    fileprivate enum SortKey: String, CaseIterable {
+        case updated, title, progress, score
+
+        var label: String {
+            switch self {
+            case .updated: "Last updated"
+            case .title: "Title"
+            case .progress: "Progress"
+            case .score: "Score"
+            }
+        }
+    }
+
+    private var isManga: Bool { mediaType == "MANGA" }
+
     /// The label changes with the type — a manga list is "Reading", not
     /// "Watching" — but the AniList status behind it is the same value.
     private var tabs: [(key: String, label: String)] {
-        let manga = mediaType == "MANGA"
-        return [
-            ("CURRENT", manga ? "Reading" : "Watching"),
-            ("REPEATING", manga ? "Rereading" : "Rewatching"),
-            ("COMPLETED", "Completed"),
+        [
+            ("CURRENT", isManga ? "Reading" : "Watching"),
             ("PLANNING", "Planning"),
+            ("COMPLETED", "Completed"),
             ("PAUSED", "Paused"),
             ("DROPPED", "Dropped"),
+            ("REPEATING", isManga ? "Rereading" : "Rewatching"),
         ]
+    }
+
+    private var sortedItems: [MediaCard.Item] {
+        switch sort {
+        case .updated: items
+        case .title: items.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        // By count, not fraction: an airing title has no total to divide by.
+        case .progress: items.sorted { ($0.progress ?? 0) > ($1.progress ?? 0) }
+        case .score: items.sorted { ($0.score ?? -1) > ($1.score ?? -1) }
+        }
     }
 
     /// The count and first id are the half that matters: they change when the
@@ -61,57 +92,18 @@ public struct LibraryView: View {
     }
 
     public var body: some View {
-        #if os(macOS)
-        // Outside `SumiPage`: that page is a vertical `ScrollView`, and a
-        // `Table` inside one has no height of its own and collapses to its
-        // header. Here the table takes the rest of the window and scrolls
-        // itself, inside the page's own insets.
-        if isSignedIn && !items.isEmpty && layout != "grid" {
-            GeometryReader { viewport in
-            VStack(alignment: .leading, spacing: 20) {
-                pageHeader
-                LibraryTable(items: items, onSelect: onSelect)
-                    .opacity(isLoading ? 0.5 : 1)
-                    .animation(.snappy, value: isLoading)
-            }
-            .padding(.horizontal, SumiPage<EmptyView>.horizontalInset)
-            .padding(.top, 40)
-            .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), maxHeight: .infinity, alignment: .topLeading)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
-            .background(SumiTheme.background)
-        } else {
-            scrollingPage
-        }
-        #else
-        scrollingPage
-        #endif
-    }
-
-    @ViewBuilder
-    private var pageHeader: some View {
-        SumiPageHeader(
-            title: "Library",
-            subtitle: "\(items.count) \(mediaType == "MANGA" ? "manga" : "anime") · \(layout)"
-        ) {
-            HStack(spacing: 12) {
+        SumiPage {
+            SumiPageHeader(
+                title: "Library",
+                subtitle: "\(items.count) \(isManga ? "manga" : "anime")"
+            ) {
                 SumiSegmentedControl(
                     options: [("ANIME", "Anime"), ("MANGA", "Manga")],
                     selection: $mediaType
                 )
-                SumiSegmentedControl(
-                    options: [("grid", "Grid"), ("table", "Table")],
-                    selection: $layout
-                )
             }
-        }
 
-        SumiTabBar(tabs: tabs, selection: $status)
-    }
-
-    private var scrollingPage: some View {
-        SumiPage {
-            pageHeader
+            tabRow
 
             Group {
                 if !isSignedIn {
@@ -129,7 +121,7 @@ public struct LibraryView: View {
                     )
                 } else if layout == "grid" {
                     SumiPosterGrid(
-                        items: items,
+                        items: sortedItems,
                         namespace: namespace,
                         openingSourceKey: openingSourceKey,
                         shelfKey: "library",
@@ -138,7 +130,7 @@ public struct LibraryView: View {
                     .opacity(isLoading ? 0.5 : 1)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else {
-                    LibraryTable(items: items, onSelect: onSelect)
+                    LibraryList(items: sortedItems, isManga: isManga, onSelect: onSelect)
                         .opacity(isLoading ? 0.5 : 1)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
@@ -147,127 +139,156 @@ public struct LibraryView: View {
             .animation(.smooth, value: status)
             .animation(.smooth(duration: 0.3), value: contentKey)
             .animation(.smooth, value: layout)
+            .animation(.smooth, value: sort)
         }
     }
-}
 
-#if os(macOS)
-/// `score` and `progress` are optional and `Optional` is not `Comparable`,
-/// so `KeyPathComparator` cannot sort on them directly. Progress sorts by
-/// count, not fraction: an airing title has no total to divide by.
-fileprivate extension MediaCard.Item {
-    var progressSortKey: Int { progress ?? 0 }
-    var scoreSortKey: Int { score ?? -1 }
-}
-
-private struct LibraryTable: View {
-    let items: [MediaCard.Item]
-    let onSelect: (MediaCard.Item) -> Void
-
-    /// Empty until a header is clicked, so the list first shows in the order
-    /// AniList returns it: most recently updated first.
-    @State private var sortOrder: [KeyPathComparator<MediaCard.Item>] = []
-    @State private var selection: MediaCard.Item.ID?
-
-    private var rows: [MediaCard.Item] {
-        sortOrder.isEmpty ? items : items.sorted(using: sortOrder)
+    /// Status words on the left, sort and layout on the right, over one
+    /// hairline. Six tabs and both controls measure about 770pt; in a window
+    /// narrower than that one row pushed the controls past the edge, so they
+    /// drop to a line of their own instead.
+    private var tabRow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                SumiTabBar(tabs: tabs, selection: $status)
+                Spacer(minLength: 16)
+                controls
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                SumiTabBar(tabs: tabs, selection: $status)
+                controls
+            }
+        }
+        .padding(.bottom, 6)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(SumiTheme.border).frame(height: 1)
+        }
     }
 
-    var body: some View {
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("Title", value: \.title, comparator: .localizedStandard) { item in
-                Text(item.title)
-                    .font(.system(size: 13))
-                    .foregroundColor(SumiTheme.foreground)
-                    .lineLimit(1)
+    private var controls: some View {
+        HStack(spacing: 14) {
+            sortMenu
+            SumiSegmentedControl(
+                options: [("grid", "Grid"), ("table", "List")],
+                selection: $layout
+            )
+        }
+        .fixedSize()
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(SortKey.allCases, id: \.self) { key in
+                Button {
+                    sort = key
+                } label: {
+                    HStack {
+                        Text(key.label)
+                        if key == sort {
+                            Image(anicat: "checkmark")
+                        }
+                    }
+                }
             }
-            TableColumn("Progress", value: \.progressSortKey) { item in
-                Text("\(item.progress ?? 0) / \(item.totalEpisodesOrChapters.map(String.init) ?? "?")")
-                    .sumiTabularMono(size: 11.5)
+        } label: {
+            HStack(spacing: 6) {
+                // One `Text`: under `.borderlessButton` the menu is an
+                // NSPopUpButton, which draws only the first `Text` of its
+                // label, so the chosen sort as a sibling never showed.
+                (Text("Sort: ").foregroundColor(SumiTheme.muted)
+                    + Text(sort.label).foregroundColor(SumiTheme.foreground))
+                Image(anicat: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(SumiTheme.muted)
             }
-            .width(min: 80, ideal: 110, max: 140)
-            TableColumn("Score", value: \.scoreSortKey) { item in
-                Text(item.score.map { "\($0)%" } ?? "—")
-                    .sumiTabularMono(size: 11.5)
-                    .foregroundColor(SumiTheme.muted)
-            }
-            .width(min: 60, ideal: 80, max: 100)
+            .font(.system(size: 12))
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(SumiTheme.card)
+            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
+            .overlay(
+                SumiRect(cornerRadius: SumiTheme.radiusSm)
+                    .stroke(SumiTheme.border, lineWidth: 1)
+            )
         }
-        .tableStyle(.inset(alternatesRowBackgrounds: false))
-        .scrollContentBackground(.hidden)
-        .tint(SumiTheme.indigo)
-        // The button rows this replaced opened on a single click; a table's
-        // primary action is a double-click. Selection opens instead, and is
-        // cleared at once: left set, a second click on the same row changes
-        // nothing and opens nothing.
-        .onChange(of: selection) { _, id in
-            guard let id, let item = items.first(where: { $0.id == id }) else { return }
-            selection = nil
-            onSelect(item)
-        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 }
-#else
-private struct LibraryTable: View {
+
+/// One row per title: cover, title, progress, score, split by hairlines.
+/// Opens on a single click, as the grid does; the `Table` it replaced opened
+/// on selection and had to clear it at once so a second click still worked.
+private struct LibraryList: View {
     let items: [MediaCard.Item]
+    let isManga: Bool
     let onSelect: (MediaCard.Item) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                header("Title", width: nil)
-                header("Progress", width: 120)
-                header("Score", width: 80)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .overlay(Rectangle().fill(SumiTheme.border).frame(height: 1), alignment: .bottom)
-
-            LazyVStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+        LazyVStack(spacing: 0) {
+            ForEach(items) { item in
                 Button { onSelect(item) } label: {
-                    HStack(spacing: 0) {
+                    HStack(spacing: 14) {
+                        // 36pt wide, so 120px covers Retina without decoding
+                        // a poster no row draws.
+                        CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 120) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Rectangle().fill(SumiTheme.card)
+                        }
+                        .frame(width: 36, height: 54)
+                        .background(SumiTheme.card)
+                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
+                        .overlay(
+                            SumiRect(cornerRadius: SumiTheme.radiusSm)
+                                .stroke(SumiTheme.border, lineWidth: 1)
+                        )
+
                         Text(item.title)
-                            .font(.system(size: 13))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(SumiTheme.foreground)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("\(item.progress ?? 0) / \(item.totalEpisodesOrChapters.map(String.init) ?? "?")")
-                            .sumiTabularMono(size: 11.5)
-                            .foregroundColor(SumiTheme.muted)
-                            .frame(width: 120, alignment: .leading)
+
+                        progress(item)
+                            .frame(width: 200, alignment: .leading)
+
                         Text(item.score.map { "\($0)%" } ?? "—")
                             .sumiTabularMono(size: 11.5)
                             .foregroundColor(SumiTheme.muted)
-                            .frame(width: 80, alignment: .leading)
+                            .frame(width: 50, alignment: .trailing)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-
-                if index < items.count - 1 {
+                .overlay(alignment: .bottom) {
                     Rectangle().fill(SumiTheme.border).frame(height: 1)
                 }
             }
-            }
         }
-        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusLg))
-        .overlay(
-            SumiRect(cornerRadius: SumiTheme.radiusLg)
-                .stroke(SumiTheme.border, lineWidth: 1)
-        )
     }
 
-    private func header(_ text: String, width: CGFloat?) -> some View {
-        Text(text)
-            .sumiTabularMono(size: 11.5, weight: .medium)
-            .foregroundColor(SumiTheme.muted)
-            .frame(width: width, alignment: .leading)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+    private func progress(_ item: MediaCard.Item) -> some View {
+        let unit = isManga ? "Ch." : "Ep"
+        let done = item.progress ?? 0
+        return HStack(spacing: 6) {
+            if done > 0 {
+                Text(item.totalEpisodesOrChapters.map { "\(unit) \(done) / \($0)" } ?? "\(unit) \(done)")
+            } else if let total = item.totalEpisodesOrChapters {
+                Text("\(total) \(isManga ? "chapters" : "episodes")")
+            } else {
+                Text("—")
+            }
+            if item.hasNewEpisode {
+                Text("\(unit) \(done + 1) out")
+                    .foregroundColor(SumiTheme.indigo)
+                    .fontWeight(.semibold)
+            }
+        }
+        .sumiTabularMono(size: 11.5)
+        .foregroundColor(SumiTheme.muted)
+        .lineLimit(1)
     }
 }
-#endif
 #endif

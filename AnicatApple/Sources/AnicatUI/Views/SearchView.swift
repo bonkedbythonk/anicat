@@ -39,6 +39,13 @@ public struct SearchView: View {
     /// Return on a request ("something like Frieren but darker") hands the
     /// text here instead of searching for it.
     public var onAsk: (String) -> Void = { _ in }
+    /// `AppModel.seasonalItems`: the current AniList season, drawn as the
+    /// shelf under the season words. Empty leaves the shelf out and makes
+    /// the current season a word like the others.
+    public var seasonalItems: [MediaCard.Item] = []
+    /// `AppModel.isAniListDown`. Replaces the empty or loading state with a
+    /// plain sentence and a retry; what is already on screen stays, dimmed.
+    public var isAniListDown: Bool = false
 
     @State private var searchType: String = "ANIME"
 
@@ -81,7 +88,9 @@ public struct SearchView: View {
         isLoadingMoreDiscover: Bool = false,
         onLoadMoreDiscover: @escaping (String) -> Void = { _ in },
         isCovered: Bool = false,
-        onAsk: @escaping (String) -> Void = { _ in }
+        onAsk: @escaping (String) -> Void = { _ in },
+        seasonalItems: [MediaCard.Item] = [],
+        isAniListDown: Bool = false
     ) {
         self._searchText = searchText
         self.results = results
@@ -101,6 +110,8 @@ public struct SearchView: View {
         self.onLoadMore = onLoadMore
         self.isCovered = isCovered
         self.onAsk = onAsk
+        self.seasonalItems = seasonalItems
+        self.isAniListDown = isAniListDown
     }
 
     /// Titles to complete the query with, from the results already on screen
@@ -121,8 +132,90 @@ public struct SearchView: View {
         case "NOVEL": return "Search light novels, authors, genres…"
         // Where Ask works the field itself says so: nothing else tells a viewer
         // that a sentence is welcome here.
-        default: return AskSearch.isAvailable ? "Search anime, or describe what you want…" : "Search anime, studios, genres…"
+        default: return AskSearch.isAvailable ? "Search anime, or describe what you want…" : "Title or studio. Try genre:romance year:2024"
         }
+    }
+
+    /// The browse layout: nothing typed and no filter the query uses. A
+    /// filter alone runs a real search via `commitSearch`; showing trending
+    /// under a picked genre read as the genre silently doing nothing.
+    private var isBrowsing: Bool {
+        searchText.isEmpty && !hasActiveFilters
+    }
+
+    /// The current AniList season and the three before it, as
+    /// ("<SEASON>-<year>", "Autumn 2026"). From `currentAniListSeason`, so
+    /// December is next year's Winter here as on the home shelf.
+    private static var recentSeasons: [(key: String, label: String)] {
+        let order = ["WINTER", "SPRING", "SUMMER", "FALL"]
+        let words = ["WINTER": "Winter", "SPRING": "Spring", "SUMMER": "Summer", "FALL": "Autumn"]
+        let now = AppModel.currentAniListSeason()
+        var index = order.firstIndex(of: now.season) ?? 0
+        var year = now.year
+        var out: [(key: String, label: String)] = []
+        for _ in 0..<4 {
+            out.append(("\(order[index])-\(year)", "\(words[order[index]] ?? "") \(year)"))
+            if index == 0 { index = order.count - 1; year -= 1 } else { index -= 1 }
+        }
+        return out
+    }
+
+    private func pickSeason(_ key: String) {
+        let parts = key.split(separator: "-")
+        guard parts.count == 2 else { return }
+        seasonFilter = String(parts[0])
+        yearFilter = String(parts[1])
+    }
+
+    /// The genre tiles: sentence-case words over the AniList values, which
+    /// are exact strings ("Slice of Life", "Sci-Fi"), so the label is never
+    /// what gets sent.
+    private static let genreTiles: [(value: String, label: String)] = [
+        ("Action", "Action"), ("Romance", "Romance"), ("Slice of Life", "Slice of life"),
+        ("Fantasy", "Fantasy"), ("Mystery", "Mystery"), ("Comedy", "Comedy"),
+        ("Sci-Fi", "Sci-fi"), ("Sports", "Sports"), ("Drama", "Drama"),
+        ("Psychological", "Psychological"), ("Horror", "Horror"), ("Music", "Music")
+    ]
+
+    private var resultsHeading: String {
+        switch searchType {
+        case "MANGA": return "Manga"
+        case "NOVEL": return "Light novels"
+        default: return "Anime"
+        }
+    }
+
+    /// Moves `genre:`, `year:` and `format:` words out of the query into the
+    /// dropdowns, which stay the one place a filter lives (Clear filters
+    /// resets them). Left in the query they would reach AniList as search
+    /// text, which matches titles, not filters.
+    /// A word whose value is not an option stays in the query untouched.
+    private func absorbTokens() {
+        let normalize: (String) -> String = {
+            $0.lowercased().replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+        }
+        func match(_ raw: String, _ options: [(value: String, label: String)]) -> String? {
+            let wanted = normalize(raw)
+            return options.first { !$0.value.isEmpty && (normalize($0.value) == wanted || normalize($0.label) == wanted) }?.value
+        }
+        var kept: [Substring] = []
+        var changed = false
+        for word in searchText.split(separator: " ", omittingEmptySubsequences: true) {
+            let pair = word.split(separator: ":", maxSplits: 1)
+            guard pair.count == 2 else { kept.append(word); continue }
+            let value = String(pair[1])
+            switch pair[0].lowercased() {
+            case "genre":
+                if let hit = match(value, Self.genreOptions) { genreFilter = hit; changed = true; continue }
+            case "year":
+                if let hit = match(value, Self.yearOptions) { yearFilter = hit; changed = true; continue }
+            case "format":
+                if let options = formatOptions, let hit = match(value, options) { formatFilter = hit; changed = true; continue }
+            default: break
+            }
+            kept.append(word)
+        }
+        if changed { searchText = kept.joined(separator: " ") }
     }
 
     private static let genreOptions: [(value: String, label: String)] = [
@@ -135,8 +228,11 @@ public struct SearchView: View {
     ]
 
     private static var yearOptions: [(value: String, label: String)] {
+        // Next year too: in December the current season is next year's
+        // Winter, and a year outside this list shows "Any" in the dropdown
+        // while the query filters by it.
         let currentYear = Calendar.current.component(.year, from: Date())
-        return [("", "Any")] + (1970...currentYear).reversed().map { (String($0), String($0)) }
+        return [("", "Any")] + (1970...(currentYear + 1)).reversed().map { (String($0), String($0)) }
     }
 
     private static let seasonOptions: [(value: String, label: String)] = [
@@ -299,6 +395,7 @@ public struct SearchView: View {
     }
 
     private func commitSearch() {
+        absorbTokens()
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         // A blank query with a filter set is a legitimate browse ("show me
         // Action anime"), not a no-op — AniList's `Page.media` accepts a
@@ -325,20 +422,14 @@ public struct SearchView: View {
             VStack(alignment: .leading, spacing: 24) {
                 // Header & Search Input
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .center) {
-                        Text("Search & Browse")
-                            .font(.sumiHeading(size: 19, weight: .semibold))
-                            .tracking(-0.3)
-                            .foregroundColor(SumiTheme.foreground)
-
-                        Spacer()
-
-                        SumiSegmentedControl(
-                            options: [("ANIME", "Anime"), ("MANGA", "Manga"), ("NOVEL", "Novels")],
-                            selection: $searchType
-                        )
-
-                        SumiOutlineButton("Shuffle", systemImage: "shuffle", action: { onShuffle(searchType) })
+                    SumiPageHeader(title: "Discover") {
+                        HStack(spacing: 12) {
+                            SumiSegmentedControl(
+                                options: [("ANIME", "Anime"), ("MANGA", "Manga"), ("NOVEL", "Novels")],
+                                selection: $searchType
+                            )
+                            SumiOutlineButton("Shuffle", systemImage: "shuffle", action: { onShuffle(searchType) })
+                        }
                     }
 
                     HStack(spacing: 12) {
@@ -430,8 +521,10 @@ public struct SearchView: View {
                     // 1100pt cap left, and an `HStack` answered
                     // that by pushing Sort and "Clear filters" off the edge.
                     SumiWrapHStack(spacing: 8, lineSpacing: 8) {
-                        SumiFilterDropdown(label: "Genre", options: Self.genreOptions, selected: $genreFilter)
+                        SumiFilterDropdown(label: "Sort", options: Self.sortOptions, selected: $sortFilter)
                         SumiFilterDropdown(label: "Year", options: Self.yearOptions, selected: $yearFilter)
+                        SumiFilterDropdown(label: "Status", options: Self.statusOptions, selected: $statusFilter)
+                        SumiFilterDropdown(label: "Genre", options: Self.genreOptions, selected: $genreFilter)
                         if showsSeasonFilter {
                             SumiFilterDropdown(label: "Season", options: Self.seasonOptions, selected: $seasonFilter)
                         }
@@ -440,8 +533,6 @@ public struct SearchView: View {
                         }
                         SumiFilterDropdown(label: "Origin", options: Self.countryOptions(for: searchType), selected: $countryFilter)
                         SumiFilterDropdown(label: "Score", options: Self.scoreOptions, selected: $minScoreFilter)
-                        SumiFilterDropdown(label: "Status", options: Self.statusOptions, selected: $statusFilter)
-                        SumiFilterDropdown(label: "Sort", options: Self.sortOptions, selected: $sortFilter)
 
                         if hasAnyFilterSet {
                             Button {
@@ -504,25 +595,29 @@ public struct SearchView: View {
                 }
                 .padding(.horizontal, 40)
 
-                // Discover Section — trending, unfiltered. Shown only when
-                // there's neither a typed query nor an active filter; a
-                // filter alone now drives a real (filtered) search via
-                // `commitSearch`, so leaving this condition at `searchText.
-                // isEmpty` used to show trending nonsense right underneath a
-                // picked genre that silently did nothing.
-                if searchText.isEmpty && !hasActiveFilters {
+                if isAniListDown {
+                    outageNotice
+                        .padding(.horizontal, 40)
+                }
+
+                // Browse: seasons, genres, then trending. Each season word
+                // and genre tile writes the same filter state the dropdowns
+                // hold, so the page turns into those results with the
+                // dropdowns showing what was picked.
+                if isBrowsing {
+                    VStack(alignment: .leading, spacing: 24) {
+                        if showsSeasonFilter {
+                            seasonsSection
+                        }
+                        genresSection
+                    }
+                    .padding(.horizontal, 40)
+                    .opacity(isAniListDown ? 0.55 : 1)
+
                     if !discoverItems.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Text("Discover")
-                                    .font(.sumiHeading(size: 17, weight: .semibold))
-                                    .foregroundColor(SumiTheme.foreground)
-                                Spacer()
-                                Text("Trending")
-                                    .sumiTabularMono(size: 11.5)
-                                    .foregroundColor(SumiTheme.indigo)
-                            }
-                            .padding(.horizontal, 40)
+                            SumiSectionHeader("Trending")
+                                .padding(.horizontal, 40)
 
                             LazyVGrid(
                                 columns: [GridItem(.adaptive(minimum: 165, maximum: 200), spacing: 20, alignment: .top)],
@@ -552,7 +647,7 @@ public struct SearchView: View {
                                 }
                             }
                             .padding(.horizontal, 40)
-                            .opacity(isLoading ? 0.5 : 1)
+                            .opacity(isLoading ? 0.5 : (isAniListDown ? 0.55 : 1))
                             .animation(.snappy, value: isLoading)
 
                             if isLoadingMoreDiscover {
@@ -565,16 +660,8 @@ public struct SearchView: View {
                         }
                     } else if isLoading {
                         VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Text("Discover")
-                                    .font(.sumiHeading(size: 17, weight: .semibold))
-                                    .foregroundColor(SumiTheme.foreground)
-                                Spacer()
-                                Text("Trending")
-                                    .sumiTabularMono(size: 11.5)
-                                    .foregroundColor(SumiTheme.indigo)
-                            }
-                            .padding(.horizontal, 40)
+                            SumiSectionHeader("Trending")
+                                .padding(.horizontal, 40)
 
                             MediaGridSkeleton(count: 12)
                                 .padding(.horizontal, 40)
@@ -585,11 +672,11 @@ public struct SearchView: View {
                 // Results Count
                 Group {
                     if !results.isEmpty {
-                        HStack {
-                            Text("\(results.count) results")
-                                .sumiTabularMono(size: 11.5)
-                                .foregroundColor(SumiTheme.muted)
-                            Spacer()
+                        // One heading for the toggled type: a search covers one
+                        // AniList type at a time, so this is the whole grouping
+                        // the results carry.
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            SumiSectionHeader(resultsHeading, trailing: "\(results.count) results")
                             // Loose matches for a description are still matches, so
                             // the page showed them and never said the model could
                             // read the sentence instead.
@@ -632,7 +719,7 @@ public struct SearchView: View {
                             }
                         }
                         .padding(.horizontal, 40)
-                        .opacity(isLoading ? 0.5 : 1)
+                        .opacity(isLoading ? 0.5 : (isAniListDown ? 0.55 : 1))
                         .animation(.snappy, value: isLoading)
                         // The first result's id, and deliberately not the
                         // count: a page appended by `loadMore` leaves the id
@@ -661,7 +748,7 @@ public struct SearchView: View {
                         SumiEmptyState(headline: "No title matches that", detail: "Press Return to ask Anicat to find it instead.")
                             .padding(.horizontal, 40)
                             .task { AskSearch.prewarm() }
-                    } else if !searchText.isEmpty || hasActiveFilters {
+                    } else if !isAniListDown, !searchText.isEmpty || hasActiveFilters {
                         SumiEmptyState(headline: searchText.isEmpty ? "No titles found" : "No titles found for \"\(searchText)\"")
                             .padding(.horizontal, 40)
                     }
@@ -702,6 +789,121 @@ public struct SearchView: View {
         // already sitting in `discoverItems` from startup — and flashed the
         // global loading scrim on every visit to Search for no new data.
         .onAppear { if discoverItems.isEmpty { onLoadDiscover(searchType) } }
+    }
+
+    /// No quote of AniList's own wording: the model keeps only a flag, and
+    /// the same flag rises after three plain network failures, when there
+    /// is no AniList message to quote.
+    private var outageNotice: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("AniList isn't answering searches right now")
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundColor(SumiTheme.foreground)
+            // Only with something below to point at: a retry or a type
+            // toggle empties the arrays before fetching.
+            Text((isBrowsing ? discoverItems.isEmpty : results.isEmpty)
+                 ? "This is usually on AniList's side and clears on its own."
+                 : "This is usually on AniList's side and clears on its own. What is below is from the last time it answered.")
+                .font(.system(size: 12.5))
+                .foregroundColor(SumiTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            SumiOutlineButton("Try again") {
+                if isBrowsing { onLoadDiscover(searchType) } else { commitSearch() }
+            }
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+    }
+
+    private var seasonsSection: some View {
+        let seasons = Self.recentSeasons
+        // With no seasonal shelf to show, nothing is "on": every word,
+        // the current season included, then runs that season's search.
+        let current = seasonalItems.isEmpty ? "" : (seasons.first?.key ?? "")
+        return VStack(alignment: .leading, spacing: 12) {
+            SumiSectionHeader("Seasons")
+            HStack(spacing: 6) {
+                SumiSlashToggle(seasons.map { ($0.key, $0.label) }, selection: current) { key in
+                    pickSeason(key)
+                }
+                Text("/").foregroundColor(SumiTheme.muted.opacity(0.6))
+                    .font(.system(size: 12.5))
+                yearMenu
+            }
+            if !seasonalItems.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 20) {
+                        // No `.id(item.id)` here: the same show sits in
+                        // Trending below, and the arrow keys' `scrollTo`
+                        // would land on this copy instead of the grid's.
+                        ForEach(seasonalItems) { item in
+                            MediaCard(
+                                item: item,
+                                namespace: openingSourceKey == "search-seasonal:\(item.id)" ? namespace : nil
+                            ) {
+                                onSelectMedia(item, "search-seasonal:\(item.id)")
+                            }
+                            .equatable()
+                            .frame(width: 165)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    /// "Pick a year" as the last word of the season row. One `Text` as the
+    /// label: a borderless `Menu` on macOS is an NSPopUpButton, which draws
+    /// only the first `Text` it finds.
+    private var yearMenu: some View {
+        Menu {
+            ForEach(Self.yearOptions.dropFirst(), id: \.value) { option in
+                Button(option.label) {
+                    seasonFilter = ""
+                    yearFilter = option.value
+                }
+            }
+        } label: {
+            Text("Pick a year")
+                .font(.system(size: 12.5))
+                .foregroundColor(SumiTheme.muted)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var genresSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SumiSectionHeader("Genres")
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140), spacing: 12)],
+                alignment: .leading,
+                spacing: 12
+            ) {
+                ForEach(Self.genreTiles, id: \.value) { genre in
+                    Button {
+                        genreFilter = genre.value
+                    } label: {
+                        Text(genre.label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(SumiTheme.foreground)
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 10)
+                            .frame(maxWidth: .infinity, minHeight: 72, alignment: .bottomLeading)
+                            .background(SumiTheme.card)
+                            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
+                            .overlay(
+                                SumiRect(cornerRadius: SumiTheme.radiusMd)
+                                    .stroke(SumiTheme.border, lineWidth: 1)
+                            )
+                            .contentShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
+                    }
+                    .buttonStyle(.sumiPressable)
+                }
+            }
+        }
     }
 }
 

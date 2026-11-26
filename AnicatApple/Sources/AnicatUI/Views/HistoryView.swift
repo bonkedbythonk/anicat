@@ -140,6 +140,10 @@ public struct HistoryView: View {
         SumiPage {
             if let viewer {
                 profileHeader(viewer)
+                // The signed-in header is the profile card, not a
+                // `SumiPageHeader`, so Profile's History / Stats switch has to
+                // be placed by hand; without it Stats had no way in.
+                SumiPageScopeBar()
             } else {
                 SumiPageHeader(
                     title: "History",

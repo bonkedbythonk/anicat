@@ -36,7 +36,7 @@ public struct SidebarView: View {
             case (.schedule, _): return "Schedule"
             case (.library, _): return "Library"
             case (.manga, _): return "Manga"
-            case (.novels, _): return "Light Novels"
+            case (.novels, _): return "Light novels"
             case (.search, _): return "Search"
             case (.history, _): return "History"
             case (.stats, _): return "Stats"
@@ -134,43 +134,23 @@ public struct SidebarView: View {
     @Binding public var currentView: NavSection
     public let mode: AppModel.AppMode
     public let onOpenSearchPalette: () -> Void
-    /// What the mark at the foot of the rail is showing right now, and what
-    /// pressing it switches to. Passed in rather than read from `AppModel`
-    /// here so the rail stays a view of its inputs.
-    public let modeCaption: String
-    public let switchModeCaption: String?
-    /// Cinema exists in this build but has no TMDB credential to read with.
-    /// The mark stays a control and says so: hidden, it was indistinguishable
-    /// from a decorative logo, and the one report this produced was "the
-    /// toggle doesn't work" for a toggle that was never drawn.
-    public let switchModeLocked: Bool
-    public let onSwitchMode: () -> Void
     /// Off while nothing on the viewer's Watching list is airing: the
     /// calendar then only lists shows they do not follow, and the owner does
     /// not use it in that state. The section itself stays on Go > Cmd-2.
     public let showsSchedule: Bool
-    @State private var isModeHovered = false
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
 
     public init(
         currentView: Binding<NavSection>,
         mode: AppModel.AppMode = .anime,
-        // Not "Anime and manga": this mode is also where the light novels
-        // are, and a caption that lists two of the three reads as a promise
-        // that the third is somewhere else.
-        modeCaption: String = "Anime",
-        switchModeCaption: String? = nil,
-        switchModeLocked: Bool = false,
         showsSchedule: Bool = true,
-        onSwitchMode: @escaping () -> Void = {},
         onOpenSearchPalette: @escaping () -> Void
     ) {
         self._currentView = currentView
         self.mode = mode
-        self.modeCaption = modeCaption
-        self.switchModeCaption = switchModeCaption
-        self.switchModeLocked = switchModeLocked
         self.showsSchedule = showsSchedule
-        self.onSwitchMode = onSwitchMode
         self.onOpenSearchPalette = onOpenSearchPalette
     }
 
@@ -180,107 +160,68 @@ public struct SidebarView: View {
         ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva
     }
 
-    /// The wordmark over the rail on the two HUD skins: a hazard bar on
-    /// Evangelion, a short accent bar on Night City.
-    private var brand: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if ThemeStore.shared.palette.isEva {
-                SumiHazard().frame(height: 6)
-            } else {
-                Rectangle().fill(SumiTheme.indigo).frame(width: 28, height: 3)
-            }
-            Text("anicat")
-                .font(.sumiHeading(size: 22, weight: .heavy))
-                .textCase(.uppercase)
-                .tracking(1.5)
-                .foregroundColor(SumiTheme.indigo)
+    /// The rail is 64pt of icons, not a 200pt list of words. With four or five
+    /// destinations the list left most of its height empty, and the owner
+    /// picked the icon rail over filling it: a second list of titles beside
+    /// the shelves "you just get too much double in 1 screen". Names live in
+    /// each button's tooltip and accessibility label.
+    ///
+    /// 72, not the mockup's 64: the window's traffic lights are fixed by the
+    /// system at about 10-62pt from the left edge, and in 64 they sat 4pt
+    /// right of centre with almost no margin on the right.
+    public static let width: CGFloat = 72
+
+    /// One rail icon per place, not per section. Manga, light novels and the
+    /// cinema pages are reached from the media switch in the page header, and
+    /// Stats from Profile's, so the rail holds what the mockups show. The
+    /// sections themselves stay: they number the Cmd-1..9 shortcuts and the
+    /// `anicat://section/` links, and removing a case renumbers both.
+    private var topItems: [NavSection] {
+        let home: NavSection = mode == .cinema ? .manga : .upNext
+        var items: [NavSection] = [home, .search, .library]
+        if mode == .anime, showsSchedule || currentView == .schedule {
+            items.append(.schedule)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
+        return items
+    }
+
+    /// The rail icon a section lights up: the page-header switches keep the
+    /// icon of the place they belong to lit.
+    private func railOwner(of section: NavSection) -> NavSection {
+        switch (section, mode) {
+        case (.manga, .anime), (.novels, .anime): return .upNext
+        case (.novels, .cinema), (.upNext, .cinema): return .manga
+        case (.stats, _): return .history
+        default: return section
+        }
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Window Drag Region Spacer (38px on macOS for traffic lights)
+        VStack(spacing: 6) {
+            // Window drag region: the traffic lights sit over the top of the rail.
             Color.clear
                 .frame(height: 38)
 
-            if isHud { brand }
+            RailButton(
+                symbol: "magnifyingglass",
+                label: "Search anything (⌘K)",
+                isActive: false,
+                action: onOpenSearchPalette
+            )
+            Color.clear.frame(height: 6)
 
-            // Nav Groups
-            VStack(alignment: .leading, spacing: 0) {
-                // Group: Browse
-                navGroup(
-                    title: "Browse",
-                    items: NavSection.browseItems(for: mode).filter { showsSchedule || $0 != .schedule || currentView == .schedule }
-                )
-
-                // Group: System
-                navGroup(title: "System", items: NavSection.systemItems)
+            ForEach(topItems) { item in
+                navItemButton(item)
             }
-            .padding(.bottom, 8)
 
             Spacer()
 
-            // Bottom Logo & Search Button
-            VStack(spacing: 12) {
-                // The actual mark, not a glyph that resembles one: 80pt,
-                // grayscaled, at 10% opacity. SF Symbols' `pawprint` is a
-                // different drawing at a different weight and reads as a
-                // placeholder next to the app icon's paw.
-                Group {
-                    if switchModeCaption != nil || switchModeLocked {
-                        Button(action: onSwitchMode) { modeMark }
-                            .buttonStyle(.sumiPressable)
-                            #if os(macOS)
-                            .onHover { isModeHovered = $0 }
-                            #endif
-                            .help(switchModeLocked
-                                  ? "Cinema needs a TMDB key — open Settings"
-                                  : "Switch to \(switchModeCaption ?? "")")
-                    } else {
-                        modeMark
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 8)
-
-                // A row, not a box: outlined, it posed as a text field that
-                // opened a palette instead of taking typing.
-                Button(action: onOpenSearchPalette) {
-                    HStack {
-                        Text("Search anything")
-                            .font(.system(size: 12.5))
-                            .foregroundColor(SumiTheme.muted)
-                        Spacer()
-                        Text("⌘K")
-                            .sumiTabularMono(size: 11)
-                            .foregroundColor(isHud ? SumiTheme.indigo : SumiTheme.muted.opacity(0.7))
-                            // A key cap on the HUD skins, like the [Q] and [R]
-                            // hints in the game's prompts.
-                            .padding(.horizontal, isHud ? 5 : 0)
-                            .padding(.vertical, isHud ? 2 : 0)
-                            .overlay {
-                                if isHud {
-                                    SumiRect(cornerRadius: 4).stroke(SumiTheme.indigo.opacity(0.7), lineWidth: 1)
-                                }
-                            }
-                    }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 10)
-                    .padding(.bottom, 2)
-                    .overlay(alignment: .top) {
-                        Rectangle().fill(SumiTheme.border).frame(height: 1)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
+            ForEach([NavSection.downloads, .history, .settings]) { item in
+                navItemButton(item)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
         }
-        .frame(width: 200)
+        .padding(.bottom, 14)
+        .frame(width: Self.width)
         .background {
             if isHud {
                 // Solid, not the system material: the page picture behind the
@@ -293,114 +234,67 @@ public struct SidebarView: View {
         }
     }
 
-    private func navGroup(title: String, items: [NavSection]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if isHud {
-                // An objective line: a pip, the group name, a hairline.
-                HStack(spacing: 8) {
-                    Rectangle().fill(SumiTheme.indigo).frame(width: 5, height: 5)
-                    Text(title)
-                        .font(.sumiHeading(size: 11, weight: .bold))
-                        .textCase(.uppercase)
-                        .tracking(1.2)
-                        .foregroundColor(SumiTheme.muted)
-                    Rectangle().fill(SumiTheme.border).frame(height: 1)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 6)
-            } else {
-                Text(title)
-                    .sumiTabularMono(size: 11.5)
-                    .foregroundColor(SumiTheme.muted)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    .padding(.bottom, 6)
-            }
-
-            ForEach(items) { item in
-                navItemButton(item)
-            }
-        }
-    }
-
     private func navItemButton(_ item: NavSection) -> some View {
-        NavItemButton(item: item, mode: mode, isActive: currentView == item) {
-            if currentView != item {
-                SumiHaptics.selection()
-                // Same curve as the row's own `.animation(value: isActive)`
-                // below. `matchedGeometryEffect` only glides while the leaving
-                // and arriving rows animate in one transaction, so two
-                // different curves here made the highlight jump on whichever
-                // side finished first.
-                withAnimation(.snappy(duration: 0.3)) {
-                    currentView = item
-                }
+        let label = item == .manga && mode == .cinema ? "Home" : item.placeName(for: mode)
+        let isActive = railOwner(of: currentView) == item
+        return RailButton(symbol: item.symbol(for: mode), label: label, isActive: isActive) {
+            #if os(macOS)
+            // Settings is its own window on the Mac (see the scene in
+            // AnicatApp); the gear opens it rather than swapping the page.
+            if item == .settings {
+                openSettings()
+                return
+            }
+            #endif
+            // Set even when already lit: the binding's setter is what closes
+            // an open detail or person page, so a click on the current
+            // place's icon has to reach it to get back to the page itself.
+            if !isActive { SumiHaptics.selection() }
+            withAnimation(.snappy(duration: 0.3)) {
+                currentView = item
             }
         }
     }
 
-    private struct NavItemButton: View {
-        let item: NavSection
-        let mode: AppModel.AppMode
+    private struct RailButton: View {
+        let symbol: String
+        let label: String
         let isActive: Bool
-        let onSelect: () -> Void
+        let action: () -> Void
 
         @State private var isHovered = false
 
         var body: some View {
             let hud = ThemeStore.shared.palette.isCyber || ThemeStore.shared.palette.isEva
-            Button(action: onSelect) {
-                HStack(spacing: 8) {
-                    if hud {
-                        // Active: a filled square, or hazard stripes on
-                        // Evangelion. Resting: an empty one.
-                        if isActive && ThemeStore.shared.palette.isEva {
-                            SumiHazard().frame(width: 10, height: 10)
-                        } else {
-                            Rectangle()
-                                .fill(isActive ? SumiTheme.indigo : SumiTheme.border)
-                                .frame(width: 5, height: 5)
-                                .frame(width: 10)
+            Button(action: action) {
+                Image(anicat: symbol)
+                    .font(.system(size: 17, weight: isActive ? .semibold : .regular))
+                    .foregroundColor(isActive
+                        ? (hud ? SumiTheme.indigo : SumiTheme.foreground)
+                        : (isHovered ? SumiTheme.foreground : SumiTheme.muted))
+                    .frame(width: 40, height: 40)
+                    // The same rounded wash a source list uses to mark its row.
+                    .background {
+                        if isActive || isHovered {
+                            SumiRect(cornerRadius: SumiTheme.radiusMd)
+                                .fill(SumiTheme.isNeon && isActive
+                                    ? SumiTheme.indigo.opacity(0.14)
+                                    : SumiTheme.foreground.opacity(isActive ? 0.08 : 0.04))
+                                .overlay {
+                                    if hud && isActive {
+                                        SumiRect(cornerRadius: SumiTheme.radiusMd)
+                                            .stroke(SumiTheme.indigo.opacity(0.6), lineWidth: 1)
+                                    }
+                                }
+                                .sumiGlow(radius: isActive ? 8 : 0, opacity: 0.25)
                         }
                     }
-                    Text(item.label(for: mode))
-                        .font(hud
-                            ? .sumiHeading(size: 14, weight: .bold)
-                            : .system(size: 13, weight: isActive ? .semibold : .regular))
-                        .textCase(hud ? .uppercase : nil)
-                        .tracking(hud ? 0.6 : 0)
-                        .foregroundColor(isActive ? (hud ? SumiTheme.indigo : SumiTheme.foreground) : (isHovered ? SumiTheme.foreground : SumiTheme.foreground.opacity(0.7)))
-
-                    Spacer()
-                }
-                .frame(minHeight: 23)
-                .padding(.leading, 12)
-                .padding(.trailing, 8)
-                .padding(.vertical, 7)
-                // A rounded wash inset from the rail's edges, where a source
-                // list marks its row. It was an indigo band with a 2pt bar on
-                // the left edge that slid from row to row, an admin-dashboard
-                // nav more than a Mac sidebar.
-                .background {
-                    if isActive || isHovered {
-                        SumiRect(cornerRadius: SumiTheme.radiusSm)
-                            .fill(SumiTheme.isNeon && isActive
-                                ? SumiTheme.indigo.opacity(0.14)
-                                : SumiTheme.foreground.opacity(isActive ? 0.08 : 0.04))
-                            .overlay {
-                                if hud && isActive {
-                                    SumiRect(cornerRadius: SumiTheme.radiusSm)
-                                        .stroke(SumiTheme.indigo.opacity(0.6), lineWidth: 1)
-                                }
-                            }
-                            .sumiGlow(radius: isActive ? 8 : 0, opacity: 0.25)
-                    }
-                }
-                .padding(.horizontal, 8)
-                .contentShape(Rectangle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.sumiPressable)
+            .help(label)
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(isActive ? .isSelected : [])
             #if os(macOS)
             .onHover { isHovered = $0 }
             #endif
@@ -408,43 +302,37 @@ public struct SidebarView: View {
     }
 }
 
-
-extension SidebarView {
-    /// The caption under the mark: the mode showing, or -- on hover -- what a
-    /// press does, which for a build with no TMDB credential is going to
-    /// Settings rather than switching.
-    var hoverCaption: String {
-        guard isModeHovered else { return modeCaption }
-        if switchModeLocked { return "Cinema needs a key" }
-        return switchModeCaption.map { "Switch to \($0)" } ?? modeCaption
+extension SidebarView.NavSection {
+    /// What the rail's tooltips and the Go menu call a section: the places of
+    /// the redesign rather than the old rows ("Anime", "Search", "History"),
+    /// so the menu and the rail name the same page the same way.
+    public func placeName(for mode: AppModel.AppMode) -> String {
+        switch self {
+        case .upNext: return "Up next"
+        case .search: return "Discover"
+        case .history: return "Profile"
+        default: return label(for: mode)
+        }
     }
 
-    /// The mark and the caption under it. The caption names which of the two
-    /// worlds the app is in; on hover it names the one a press would move to,
-    /// because a logo that is also a switch says nothing about being one.
-    ///
-    /// Nothing here may change the block's size. The caption is the longer
-    /// string on hover ("Switch to cinema" against "Anime"), and left to lay
-    /// itself out it wrapped to a second line inside the 200pt rail -- the
-    /// VStack grew, the mark slid up, and the whole foot of the sidebar
-    /// jumped on every pass of the cursor. One line, its own fixed height,
-    /// and the swap crossfades in place.
-    @ViewBuilder
-    var modeMark: some View {
-        VStack(spacing: 6) {
-            SumiLogoMark()
-                .frame(height: 80)
-                .opacity(isModeHovered ? 1.6 : 1)
-            Text(hoverCaption)
-                .sumiTabularMono(size: 9)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(height: 11)
-                .foregroundColor(isModeHovered ? SumiTheme.foreground : SumiTheme.muted)
-                .contentTransition(.opacity)
+    /// The rail icon. Names are Anicat's own drawings, keyed by the SF Symbol
+    /// each replaced; a name with no drawing renders nothing, so every one
+    /// here exists in `Resources/Symbols.xcassets`.
+    func symbol(for mode: AppModel.AppMode) -> String {
+        switch (self, mode) {
+        case (.manga, .cinema): return "film.stack"
+        case (.novels, .cinema): return "tv"
+        case (.upNext, _): return "play.square.stack"
+        case (.schedule, _): return "calendar"
+        case (.library, _): return "rectangle.stack"
+        case (.manga, _): return "book.closed"
+        case (.novels, _): return "book"
+        case (.search, _): return "safari"
+        case (.history, _): return "person.crop.circle"
+        case (.stats, _): return "chart.bar"
+        case (.downloads, _): return "arrow.down.circle"
+        case (.settings, _): return "gearshape"
         }
-        .animation(.snappy(duration: 0.2), value: isModeHovered)
-        .contentShape(Rectangle())
     }
 }
 

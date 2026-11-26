@@ -93,6 +93,58 @@ public struct MediaRowSkeleton: View {
     }
 }
 
+/// Up next on the very first launch, before the home snapshot exists: the
+/// Continue tile, its text, the New for you column and the Continue shelf,
+/// at their real sizes so nothing moves when the list lands. `wide` is the
+/// same switch the page uses to put New for you beside the tile.
+struct UpNextSkeleton: View {
+    let wide: Bool
+
+    private func bar(width: CGFloat? = nil, height: CGFloat, radius: CGFloat = 6) -> some View {
+        RoundedRectangle(cornerRadius: radius)
+            .fill(SumiTheme.foregroundWash)
+            .frame(width: width, height: height)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 40) {
+            HStack(spacing: 24) {
+                SumiRect(cornerRadius: SumiTheme.radiusXl)
+                    .fill(SumiTheme.foregroundWash)
+                    .frame(width: UpNextContinueTile.tileSize.width, height: UpNextContinueTile.tileSize.height)
+                VStack(alignment: .leading, spacing: 12) {
+                    bar(width: 60, height: 12)
+                    bar(height: 28).frame(maxWidth: 360, alignment: .leading)
+                    bar(height: 14).frame(maxWidth: 240, alignment: .leading)
+                    bar(width: 200, height: 40, radius: SumiTheme.radiusLg).padding(.top, 8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if wide {
+                    VStack(alignment: .leading, spacing: 14) {
+                        bar(width: 120, height: 16)
+                        ForEach(0..<3, id: \.self) { _ in bar(height: 48) }
+                    }
+                    .frame(width: 240)
+                }
+            }
+            .frame(height: UpNextContinueTile.tileSize.height)
+
+            VStack(alignment: .leading, spacing: 12) {
+                bar(width: 110, height: 16)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 16) {
+                        ForEach(0..<6, id: \.self) { _ in
+                            MediaCardSkeleton().frame(width: 180)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .scrollDisabled(true)
+            }
+        }
+    }
+}
+
 /// Single episode placeholder matching EpisodeRow / CompactEpisodeRow height and layout.
 public struct EpisodeRowSkeleton: View {
     public let isCompact: Bool

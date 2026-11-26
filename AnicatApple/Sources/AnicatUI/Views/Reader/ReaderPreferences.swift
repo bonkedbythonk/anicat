@@ -13,11 +13,13 @@ import SwiftUI
 /// answer: a Japanese release reads right to left and pairs into spreads, a
 /// Korean webtoon is one vertical strip, and a reader who sets one of them up
 /// does not want the next title they open to inherit it. The global key is
-/// what a title that has never been opened starts from.
+/// what a title that has never been opened starts from, except the reading
+/// mode, which starts in the scroll (see `mode`).
 public enum ReaderPreferences {
     static let modeKey = "anicat_reader_mode"
     static let rtlKey = "anicat_reader_rtl"
     static let offsetCoverKey = "anicat_reader_offset_cover"
+    static let gapsKey = "anicat_reader_gaps"
     static let syncedChapterKey = "anicat_reader_synced"
 
     /// `<key>_<catalogId>`, or the bare key when the reader was opened from
@@ -42,6 +44,10 @@ public enum ReaderPreferences {
         return defaults.object(forKey: base)
     }
 
+    /// A title never opened starts in Settings' "Layout for new titles",
+    /// scroll unless changed there. The reader no longer writes that global
+    /// key (see `setMode`): when it did, one title switched to paged made
+    /// every title opened after it start paged too.
     public static func mode(
         catalogId: Int64?,
         defaults: UserDefaults = .standard
@@ -57,7 +63,18 @@ public enum ReaderPreferences {
         defaults: UserDefaults = .standard
     ) {
         defaults.set(mode.rawValue, forKey: key(modeKey, catalogId: catalogId))
-        defaults.set(mode.rawValue, forKey: modeKey)
+    }
+
+    /// Whether the scroll column leaves a gap between pages. Off by default:
+    /// a webtoon strip is drawn as one image cut into pages, and a gap
+    /// breaks its panels at every cut.
+    public static func hasPageGaps(catalogId: Int64?, defaults: UserDefaults = .standard) -> Bool {
+        stored(gapsKey, catalogId: catalogId, defaults: defaults) as? Bool ?? false
+    }
+
+    public static func setPageGaps(_ gaps: Bool, catalogId: Int64?, defaults: UserDefaults = .standard) {
+        defaults.set(gaps, forKey: key(gapsKey, catalogId: catalogId))
+        defaults.set(gaps, forKey: gapsKey)
     }
 
     public static func isRightToLeft(catalogId: Int64?, defaults: UserDefaults = .standard) -> Bool {
@@ -116,17 +133,20 @@ public enum ReaderPreferences {
 /// Font size and line height are a property of the reader's eyes, not of the
 /// book, which is the opposite of the manga reader's per-title layout.
 public struct NovelTypography: Equatable, Sendable {
+    /// Named for the face each one draws: the system serif is New York and
+    /// the system sans is SF. Case order is the order the reader lists them
+    /// in; the raw values are what is stored and stay as they were.
     public enum Family: String, CaseIterable, Identifiable, Sendable {
+        case geist
         case serif
         case sans
-        case geist
 
         public var id: String { rawValue }
 
         public var label: String {
             switch self {
-            case .serif: return "Serif"
-            case .sans: return "Sans"
+            case .serif: return "New York"
+            case .sans: return "SF"
             case .geist: return "Geist"
             }
         }
@@ -145,7 +165,7 @@ public struct NovelTypography: Equatable, Sendable {
 
         public var label: String {
             switch self {
-            case .ink: return "Ink"
+            case .ink: return "Skin"
             case .sepia: return "Sepia"
             case .paper: return "Paper"
             case .oled: return "Black"
@@ -191,6 +211,19 @@ public struct NovelTypography: Equatable, Sendable {
     public static let lineHeightRange: ClosedRange<Double> = 1.3...1.9
     public static let columnWidthRange: ClosedRange<Double> = 560...900
     public static let paragraphSpacingRange: ClosedRange<Double> = 4...28
+
+    /// The three line widths the reader offers by name. Medium is the
+    /// default width, so a reader who never touched it lands on a named one.
+    public static let lineWidths: [(width: Double, label: String)] = [
+        (560, "Narrow"), (680, "Medium"), (820, "Wide"),
+    ]
+
+    /// The named width nearest a stored one. A width set with the slider the
+    /// reader used to have sits between presets, and with no word matching
+    /// it the toggle would show nothing selected.
+    public var nearestLineWidth: Double {
+        Self.lineWidths.min { abs($0.width - columnWidth) < abs($1.width - columnWidth) }?.width ?? columnWidth
+    }
 
     /// SwiftUI's `lineSpacing` is the gap *added* between lines, not a
     /// multiple of the line box, so a 1.55 setting at 17pt is 9.35pt of

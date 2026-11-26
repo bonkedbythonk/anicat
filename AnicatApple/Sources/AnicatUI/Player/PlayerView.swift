@@ -64,6 +64,7 @@ public struct PlayerView: View {
     @State private var torrentDetails: [StreamDetailRow] = []
     @State private var showEpisodeList = false
     @State private var showCastMenu = false
+    @State private var showOptionsMenu = false
     @State private var audioTracks: [PlayerTrack] = []
     @State private var subtitleTracks: [PlayerTrack] = []
     /// Which of the two track lists is unfolded in the popover, at most one
@@ -981,7 +982,7 @@ public struct PlayerView: View {
         // opening the card while the layout is still the old size is the
         // mid-screen hang all over again.
         .onChange(of: stageReady) { _, _ in advanceOpeningIfReady() }
-        .onChange(of: showEpisodeList || showInfoMenu || showCastMenu) { _, isOpen in
+        .onChange(of: showEpisodeList || showInfoMenu || showCastMenu || showOptionsMenu) { _, isOpen in
             controller.isMenuOpen = isOpen
             if isOpen {
                 controller.areControlsVisible = true
@@ -1429,46 +1430,23 @@ public struct PlayerView: View {
                 .chromeName("Minimize player", chromeHover)
                 .accessibilityLabel("Minimize Player")
 
-                // Auto-Play Next
-                Button(action: { controller.toggleAutoPlayNext() }) {
-                    Image(anicat: controller.autoPlayNextEnabled ? "play.square.stack.fill" : "play.square.stack")
+                // Picture and playback switches, one panel. They were seven
+                // icon toggles across the two bars (upscaling, smooth motion,
+                // glow, sideways; autoplay, auto-skip, Discord), each told
+                // apart only by a tooltip, and the bars read as cluttered.
+                Button(action: { showOptionsMenu = true }) {
+                    Image(anicat: "line.3.horizontal.decrease.circle")
                         .font(.system(size: 13))
-                        .foregroundColor(controller.autoPlayNextEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
+                        .foregroundColor(PlayerChrome.foreground.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.sumiPressable)
-                .chromeName("Autoplay next", isOn: controller.autoPlayNextEnabled, chromeHover)
-                .accessibilityLabel(controller.autoPlayNextEnabled ? "Auto-Play Next: On" : "Auto-Play Next: Off")
-
-                // Auto-Skip Intro/Outro — Settings has had a toggle for this
-                // since AniSkip was built, but nothing in the player itself
-                // did, which read as "the feature doesn't have a switch" even
-                // though one existed a page away.
-                Button(action: { controller.toggleAutoSkip() }) {
-                    Image(anicat: controller.autoSkipEnabled ? "forward.circle.fill" : "forward.circle")
-                        .font(.system(size: 13))
-                        .foregroundColor(controller.autoSkipEnabled ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
-                        .frame(width: 40, height: 40)
-                        .contentShape(Rectangle())
+                .chromeName("Picture and playback", chromeHover)
+                .accessibilityLabel("Picture and playback")
+                .sumiPopover(isPresented: $showOptionsMenu, arrowEdge: .bottom) {
+                    optionsMenu
                 }
-                .buttonStyle(.sumiPressable)
-                .chromeName(autoSkipName, isOn: controller.autoSkipEnabled, chromeHover)
-                .accessibilityLabel(controller.autoSkipEnabled ? "Auto-Skip Intro/Outro: On" : "Auto-Skip Intro/Outro: Off")
-
-                // Discord presence, here as well as in Settings: whether the
-                // profile says what is on is decided per episode, and Settings
-                // meant leaving the player to change it.
-                Button(action: { discordPresence.toggle() }) {
-                    Image(anicat: discordPresence ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
-                        .font(.system(size: 13))
-                        .foregroundColor(discordPresence ? SumiTheme.indigo : PlayerChrome.foreground.opacity(0.85))
-                        .frame(width: 40, height: 40)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.sumiPressable)
-                .chromeName("Discord status", isOn: discordPresence, chromeHover)
-                .accessibilityLabel(discordPresence ? "Discord Rich Presence: On" : "Discord Rich Presence: Off")
 
                 // Episode List
                 if !controller.episodeList.isEmpty {
@@ -1581,6 +1559,80 @@ public struct PlayerView: View {
     }
 
     // MARK: - Info Menu
+    /// The switches that used to be icons in the bars. Rows of words and a
+    /// switch, as in Settings, because an icon that only says what it is on
+    /// hover cannot be read at a glance.
+    private var optionsMenu: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Picture")
+                    .font(.system(size: 13, weight: .semibold))
+                optionRow("Upscaling", isOn: controller.isAnime4KEnabled) { controller.toggleAnime4K() }
+                if PlayerController.smoothMotionSupported {
+                    optionRow("Smooth motion", isOn: controller.isInterpolationEnabled) { controller.toggleSmoothMotion() }
+                }
+                optionRow("Ambient glow", isOn: ambientGlowEnabled) { ambientGlowEnabled.toggle() }
+                HStack {
+                    Text("Sideways")
+                        .font(.system(size: 12.5))
+                    Spacer()
+                    Text(sidewaysLabel)
+                        .sumiTabularMono(size: 11)
+                        .foregroundColor(SumiTheme.muted)
+                    Button("Turn") { controller.cycleSideways() }
+                        .buttonStyle(.sumiPressable)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(SumiTheme.indigo)
+                        .help("Shift+V")
+                }
+                .padding(.vertical, 6)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Playback")
+                    .font(.system(size: 13, weight: .semibold))
+                optionRow("Play the next episode", isOn: controller.autoPlayNextEnabled) { controller.toggleAutoPlayNext() }
+                optionRow("Skip intros and outros", isOn: controller.autoSkipEnabled, detail: autoSkipDetail) { controller.toggleAutoSkip() }
+                optionRow("Show on Discord", isOn: discordPresence) { discordPresence.toggle() }
+            }
+        }
+        .padding(16)
+        .frame(width: 300)
+    }
+
+    private var sidewaysLabel: String {
+        switch controller.sidewaysState {
+        case 1: return "Clockwise"
+        case 2: return "Counterclockwise"
+        default: return "Off"
+        }
+    }
+
+    /// Why an "On" may skip nothing, from the same source as the old
+    /// tooltip: an "On" over an episode with no skip times read as broken.
+    private var autoSkipDetail: String? {
+        let name = autoSkipName
+        guard let open = name.firstIndex(of: "(") else { return nil }
+        return String(name[name.index(after: open)..<name.index(before: name.endIndex)])
+    }
+
+    private func optionRow(_ title: String, isOn: Bool, detail: String? = nil, toggle: @escaping () -> Void) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12.5))
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundColor(SumiTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer()
+            SumiSwitch(isOn: Binding(get: { isOn }, set: { _ in toggle() }), label: title)
+        }
+        .padding(.vertical, 6)
+    }
+
     private var infoMenu: some View {
         // Fixed size, content scrolling inside it. A popover sizes itself to
         // its content when it is presented and does not grow afterwards, so

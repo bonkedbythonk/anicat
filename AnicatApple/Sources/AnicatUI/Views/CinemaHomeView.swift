@@ -68,6 +68,9 @@ struct CinemaHomeView: View {
         GeometryReader { viewport in
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
+                if page == .films || page == .series {
+                    SumiPageHeader(title: page == .films ? "Films" : "Series")
+                }
                 if showsSearchField { searchField }
 
                 if page == .search {
@@ -106,7 +109,11 @@ struct CinemaHomeView: View {
                     .padding(.top, 8)
             }
             .padding(.horizontal, SumiTheme.spaceLg)
-            .padding(.vertical, 24)
+            // 40 on top as `SumiPage` has it: at 24 the first row (the media
+            // switch, Watching's Continue / Watchlist) sat inside the 28pt
+            // title strip, where the window takes the click for dragging.
+            .padding(.top, 40)
+            .padding(.bottom, 24)
             .frame(maxWidth: SumiContentWidth.forAvailable(viewport.size.width), alignment: .leading)
             .frame(maxWidth: .infinity)
         }

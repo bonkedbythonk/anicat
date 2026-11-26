@@ -90,16 +90,14 @@ struct ReaderPreferencesTests {
         return store
     }
 
-    @Test("A per-title setting wins over the global one, which wins over the default")
+    @Test("A title's saved mode is its own, and a new title starts in the scroll")
     func perTitleFallback() {
         let store = defaults("mode")
         #expect(ReaderPreferences.mode(catalogId: 42, defaults: store) == .webtoon)
 
         ReaderPreferences.setMode(.double, catalogId: 42, defaults: store)
         #expect(ReaderPreferences.mode(catalogId: 42, defaults: store) == .double)
-        // Writing a title also moves the global default, so the next title
-        // opened starts from what was last chosen.
-        #expect(ReaderPreferences.mode(catalogId: 99, defaults: store) == .double)
+        #expect(ReaderPreferences.mode(catalogId: 99, defaults: store) == .webtoon)
 
         ReaderPreferences.setMode(.single, catalogId: 99, defaults: store)
         #expect(ReaderPreferences.mode(catalogId: 42, defaults: store) == .double)

@@ -1,8 +1,9 @@
 import SwiftUI
 import AnicatCoreKit
 
-/// The Related tab's Timeline: the title and everything around it in the
-/// order someone would watch them, grouped by year.
+/// The Related tab's watch order: the title and everything around it in the
+/// order someone would watch them, as one line of posters with "you are
+/// here" marked, then the relations that line does not include.
 ///
 /// Built from the engine's franchise walk (`AppModel.franchise`), which
 /// follows the prequel/sequel line to both ends with start dates. The
@@ -17,16 +18,24 @@ struct WatchOrderTimeline: View {
 
     @State private var groups: [WatchOrder.YearGroup] = []
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ForEach(groups) { group in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(group.label)
-                        .sumiTabularMono(size: 11)
-                        .foregroundColor(SumiTheme.indigo)
+    private var entries: [WatchOrder.Entry] { groups.flatMap(\.entries) }
 
-                    VStack(spacing: 6) {
-                        ForEach(group.entries) { entry in
+    /// Relations the line leaves out. The walk keeps to one media type and
+    /// to sequels and side stories, so the manga a show adapts, a crossover
+    /// or a character relation is not on it -- and before the tabs merged
+    /// those were reachable from the Grid view this replaced.
+    private var otherRelations: [MediaDetailView.RelationItem] {
+        let onLine = Set(entries.map(\.id))
+        return relations.filter { !onLine.contains($0.id) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 12) {
+                SumiSectionHeader("Watch order", trailing: entries.isEmpty ? nil : "Release order · \(entries.count) entries")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 24) {
+                        ForEach(entries) { entry in
                             WatchOrderRow(entry: entry) {
                                 guard !entry.isCurrent else { return }
                                 onSelectMediaId?(
@@ -35,6 +44,29 @@ struct WatchOrderTimeline: View {
                                     entry.coverURL,
                                     AppModel.isMangaFormat(entry.format)
                                 )
+                            }
+                        }
+                    }
+                    // The rail the dots sit on, behind the whole line.
+                    .background(alignment: .topLeading) {
+                        Rectangle()
+                            .fill(SumiTheme.border)
+                            .frame(height: 2)
+                            .padding(.top, 5)
+                            .padding(.horizontal, 6)
+                    }
+                    .padding(.bottom, 4)
+                }
+                .backSwipeExempt()
+            }
+
+            if !otherRelations.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    SumiSectionHeader("Also related", trailing: "\(otherRelations.count)")
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260, maximum: 360), spacing: 24)], spacing: 0) {
+                        ForEach(otherRelations) { rel in
+                            MediaDetailView.RelatedMediaCard(relation: rel) {
+                                onSelectMediaId?(rel.id, rel.title, rel.coverURL, AppModel.isMangaFormat(rel.format))
                             }
                         }
                     }
@@ -152,8 +184,8 @@ struct WatchOrderTimeline: View {
     }
 }
 
-/// One title on the timeline. The viewed title keeps its left rail so the
-/// eye finds "you are here" without reading a single row label.
+/// One title on the line: its dot, its poster, its name and where the
+/// viewer stands with it.
 struct WatchOrderRow: View {
     let entry: WatchOrder.Entry
     let onSelect: () -> Void
@@ -162,57 +194,33 @@ struct WatchOrderRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 12) {
-                Rectangle()
-                    .fill(entry.isCurrent ? SumiTheme.indigo : Color.clear)
-                    .frame(width: 2)
-
+            VStack(alignment: .leading, spacing: 8) {
+                dot
                 Color.clear
-                    .frame(width: 34, height: 48)
+                    .frame(width: 100, height: 150)
                     .overlay {
-                        CachedAsyncImage(url: entry.coverURL, maxPixelSize: 120) { image in
+                        CachedAsyncImage(url: entry.coverURL, maxPixelSize: 300) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
                             Rectangle().fill(SumiTheme.card)
                         }
                     }
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.title)
-                        .font(.system(size: 13, weight: entry.isCurrent ? .bold : .semibold))
-                        .foregroundColor(isHovered && !entry.isCurrent ? SumiTheme.indigo : SumiTheme.foreground)
-                        .lineLimit(1)
-
-                    HStack(spacing: 6) {
-                        Text(badgeLabel)
-                            .sumiTabularMono(size: 9.5)
-                            .foregroundColor(entry.isCurrent ? SumiTheme.indigo : SumiTheme.muted)
-                        if let format = entry.format {
-                            Text(MediaCard.displayFormat(format))
-                                .sumiTabularMono(size: 9.5)
-                                .foregroundColor(SumiTheme.muted.opacity(0.8))
-                        }
-                        if let count = entry.episodeCount, count > 0 {
-                            Text("\(count) ep")
-                                .sumiTabularMono(size: 9.5)
-                                .foregroundColor(SumiTheme.muted.opacity(0.8))
-                        }
-                        if let status = entry.listStatus {
-                            Text(MediaCard.displayRelation(status))
-                                .sumiTabularMono(size: 9.5)
-                                .foregroundColor(SumiTheme.indigo.opacity(0.8))
-                        }
-                    }
-                }
-
-                Spacer(minLength: 0)
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
+                    .overlay(
+                        SumiRect(cornerRadius: SumiTheme.radiusMd)
+                            .stroke(entry.isCurrent ? SumiTheme.indigo : SumiTheme.border, lineWidth: entry.isCurrent ? 2 : 1)
+                    )
+                Text(entry.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(isHovered && !entry.isCurrent ? SumiTheme.indigo : SumiTheme.foreground)
+                    .lineLimit(2, reservesSpace: true)
+                Text(stateLabel)
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(stateColor)
+                    .lineLimit(2)
             }
-            .padding(.trailing, 10)
-            .padding(.vertical, 6)
-            .background(isHovered && !entry.isCurrent ? SumiTheme.card : Color.clear)
-            .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
+            .frame(width: 140, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)
@@ -221,9 +229,40 @@ struct WatchOrderRow: View {
         .animation(.sumi(.pop), value: isHovered)
     }
 
-    private var badgeLabel: String {
+    private var isCompleted: Bool { entry.listStatus == "COMPLETED" }
+
+    /// Filled green once finished, ringed in the accent where the viewer
+    /// is, an empty ring for the rest.
+    private var dot: some View {
+        ZStack {
+            Circle().fill(isCompleted ? SumiTheme.success : SumiTheme.background)
+            Circle().strokeBorder(
+                isCompleted ? SumiTheme.success : (entry.isCurrent ? SumiTheme.indigo : SumiTheme.muted),
+                lineWidth: 2
+            )
+        }
+        .frame(width: 12, height: 12)
+    }
+
+    private var stateLabel: String {
         if entry.isCurrent { return "You are here" }
-        guard let type = entry.relationType else { return "Related" }
-        return MediaCard.displayRelation(type)
+        var parts: [String] = []
+        if let status = entry.listStatus {
+            parts.append(MediaCard.displayRelation(status))
+        } else if let type = entry.relationType {
+            parts.append(MediaCard.displayRelation(type))
+        }
+        if let format = entry.format {
+            parts.append(MediaCard.displayFormat(format))
+        }
+        if let count = entry.episodeCount, count > 0 {
+            parts.append("\(count) eps")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var stateColor: Color {
+        if entry.isCurrent { return SumiTheme.indigo }
+        return isCompleted ? SumiTheme.success : SumiTheme.muted
     }
 }

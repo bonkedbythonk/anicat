@@ -10,18 +10,17 @@ struct AccountTabSection: View {
 
     @State private var anilistTokenInput: String = ""
     @State private var showsDisconnectDialog: Bool = false
-    /// A viewer's own TMDB key, which wins over the one the app carries.
-    /// `TmdbCredential` is the reader; `@AppStorage` needs a literal here, so
-    /// the two spellings have to agree.
-    @AppStorage("anicat_tmdb_key") private var tmdbKeyInput: String = ""
+    // `@AppStorage` needs a literal key, so the spelling and the default
+    // must agree with `AppModel`, which owns the reader.
+    @AppStorage("anicat_discord_presence") private var discordPresence: Bool = false
+    // Same literal-key constraint; `AppModel.discordPresenceDetail` reads it.
+    @AppStorage("anicat_discord_presence_detail") private var discordPresenceDetail: String = "full"
 
     var body: some View {
-    VStack(alignment: .leading, spacing: 28) {
+    VStack(alignment: .leading, spacing: 18) {
         SettingsCard(title: "AniList") {
             if isSignedIn {
-                // Profile Header with Avatar & Disconnect
-                HStack(spacing: 16) {
-                    // Avatar
+                HStack(spacing: 12) {
                     AsyncImage(url: avatarUrl.flatMap(URL.init(string:))) { phase in
                         if let image = phase.image {
                             image
@@ -31,160 +30,105 @@ struct AccountTabSection: View {
                             ZStack {
                                 SumiTheme.card
                                 Image(anicat: "person.fill")
-                                    .font(.system(size: 24))
+                                    .font(.system(size: 15))
                                     .foregroundColor(SumiTheme.muted)
                             }
                         }
                     }
-                    .frame(width: 56, height: 56)
-                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusMd))
+                    .frame(width: 36, height: 36)
+                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
                     .overlay(
-                        SumiRect(cornerRadius: SumiTheme.radiusMd)
+                        SumiRect(cornerRadius: SumiTheme.radiusSm)
                             .stroke(SumiTheme.border, lineWidth: 1)
                     )
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(username ?? "AniList user")
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(SumiTheme.foreground)
-
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(SumiTheme.successLight)
-                                .frame(width: 7, height: 7)
-
-                            Text("Connected to AniList")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(SumiTheme.successLight)
-                        }
+                        Text("Signed in")
+                            .sumiTabularMono()
+                            .foregroundColor(SumiTheme.muted)
                     }
 
-                    Spacer()
+                    Spacer(minLength: 12)
 
-                    Button("Disconnect", role: .destructive) {
+                    Button("Sign out", role: .destructive) {
                         showsDisconnectDialog = true
                     }
                     .sumiSecondaryButton()
-                    .controlSize(.large)
-                    .confirmationDialog("Disconnect from AniList?", isPresented: $showsDisconnectDialog) {
-                        Button("Disconnect", role: .destructive, action: onDisconnectAniList)
+                    .confirmationDialog("Sign out of AniList?", isPresented: $showsDisconnectDialog) {
+                        Button("Sign out", role: .destructive, action: onDisconnectAniList)
                     } message: {
                         Text("Anicat forgets its AniList token and stops syncing progress. Your list on AniList is not changed.")
                     }
                 }
-                .padding(14)
-                .overlay(
-                    SumiRect(cornerRadius: SumiTheme.radiusMd)
-                        .stroke(SumiTheme.border, lineWidth: 1)
-                )
-
-                // API Token
-                SettingField(
-                    label: "API token",
-                    description: "Your authorization token. Keep this private."
-                ) {
-                    Text("••••••••••••••••••••••••••••••••")
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(SumiTheme.muted)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(SumiTheme.background)
-                        .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
-                        .overlay(
-                            SumiRect(cornerRadius: SumiTheme.radiusSm)
-                                .stroke(SumiTheme.border, lineWidth: 1)
-                        )
-                }
             } else {
-                // Not signed in: Login
                 SettingField(
-                    label: "Login",
-                    description: "Authorize Anicat to access your AniList account."
+                    label: "Sign in",
+                    description: "Authorize Anicat on AniList, then paste where it sent you below"
                 ) {
-                    Button {
+                    Button("Connect AniList") {
                         Platform.openExternal(AppModel.aniListAuthorizeURL)
-                    } label: {
-                        // Secondary: Save and connect below is this card's
-                        // prominent button.
-                        Text("Connect AniList")
                     }
                     .sumiSecondaryButton()
-                    .controlSize(.large)
                 }
 
-                // API Token Input
                 SettingField(
-                    label: "API token",
-                    description: "After authorizing, paste the full URL you were redirected to (or just the token)."
+                    label: "Token",
+                    description: "The full redirect URL, or just the token"
                 ) {
                     HStack(spacing: 8) {
-                        SecureField("Paste redirect URL or token…", text: $anilistTokenInput)
+                        SecureField("Paste redirect URL or token", text: $anilistTokenInput)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 13))
+                            .font(.system(size: 12))
                             .foregroundColor(SumiTheme.foreground)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .overlay(
+                                SumiRect(cornerRadius: SumiTheme.radiusSm)
+                                    .stroke(SumiTheme.border, lineWidth: 1)
+                            )
+                            .frame(maxWidth: 240)
 
-                        Button {
+                        Button("Save and connect") {
                             let trimmed = anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
                             if !trimmed.isEmpty {
                                 onSaveToken(trimmed)
                                 anilistTokenInput = ""
                             }
-                        } label: {
-                            Text("Save and connect").fontWeight(.semibold)
                         }
                         .sumiPrimaryButton()
                         .disabled(anilistTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(SumiTheme.background)
-                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
-                    .overlay(
-                        SumiRect(cornerRadius: SumiTheme.radiusSm)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
-                    .frame(maxWidth: 340)
                 }
             }
         }
 
-        // Cinema mode reads TMDB with a key the app carries, so this is
-        // an override and not a requirement -- the field says so, because
-        // an empty credential box otherwise reads as a thing to go and
-        // fill in before films will work.
-        SettingsCard(title: "Cinema (TMDB)") {
+        SettingsCard(title: "Discord") {
             SettingField(
-                label: "Your own TMDB key",
-                description: "Optional. Films and series already work without one. Paste a v3 key or a v4 read token to send requests on your own account instead. It takes effect as you type it."
+                label: "Show what you're watching on your Discord profile",
+                description: "Also what you are reading; picks Discord up whenever it runs"
             ) {
-                SecureField("Leave empty to use the built-in key", text: $tmdbKeyInput)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundColor(SumiTheme.foreground)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(SumiTheme.background)
-                    .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
-                    .overlay(
-                        SumiRect(cornerRadius: SumiTheme.radiusSm)
-                            .stroke(SumiTheme.border, lineWidth: 1)
-                    )
-                    .frame(maxWidth: 340)
-                    // The engine holds the key in memory, so a paste has
-                    // to be handed over; before this it reached nothing
-                    // until the next launch and cinema mode stayed
-                    // hidden with the key sitting right there.
-                    .onChange(of: tmdbKeyInput) { _, _ in AppModel.shared?.applyTmdbKey() }
+                SumiSwitch(isOn: $discordPresence, label: "Discord presence")
             }
 
-            // Required by TMDB's API terms wherever their data is used,
-            // not a courtesy line: the mark and the wording are both
-            // theirs. See `TMDBAttribution`.
-            TMDBAttribution()
-                .padding(.top, 4)
+            // "Private" leaves only "Watching anime" and the time: no title,
+            // cover or link. The switch reads the stored "full" / "private"
+            // rather than adding a key, so the presence code needs no change.
+            SettingField(
+                label: "Show the title, not just that you're watching",
+                description: "With its episode or chapter, cover and AniList or TMDB link"
+            ) {
+                SumiSwitch(isOn: Binding(
+                    get: { discordPresenceDetail != "private" },
+                    set: { discordPresenceDetail = $0 ? "full" : "private" }
+                ), label: "Show the title on Discord")
+                .disabled(!discordPresence)
+                .opacity(discordPresence ? 1 : 0.5)
+            }
         }
     }
-}
-
+    }
 }
 #endif

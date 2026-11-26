@@ -39,6 +39,9 @@ public extension EnvironmentValues {
 /// hover colour and underline that say the name is a destination.
 struct StudioButton: View {
     let name: String
+    /// The colour at rest: muted inside the header's meta line, the accent
+    /// in About's facts, where the name is the only link in its column.
+    var idle: Color? = nil
     let onSelect: () -> Void
 
     @State private var isHovered = false
@@ -46,7 +49,7 @@ struct StudioButton: View {
     var body: some View {
         Button(action: onSelect) {
             Text(name)
-                .foregroundColor(isHovered ? SumiTheme.indigo : SumiTheme.muted)
+                .foregroundColor(isHovered ? SumiTheme.indigo : (idle ?? SumiTheme.muted))
                 .underline(isHovered, color: SumiTheme.indigo.opacity(0.6))
                 .contentShape(Rectangle())
         }

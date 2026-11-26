@@ -38,12 +38,12 @@ public struct ScheduleView: View {
 
     public let items: [ScheduleItem]
     public let onSelectItem: (ScheduleItem) -> Void
-    /// The visible month's airing slots, keyed and fetched by the model.
+    /// The requested month's airing slots, keyed and fetched by the model.
     /// Separate from `items`, which is only the *next* episode of each title
     /// the home page already had — see `CalendarView`'s note.
     public let calendarSlots: [FfiAiringSlot]
     public let isCalendarLoading: Bool
-    /// Fired with a date inside whichever month the calendar wants; the model
+    /// Fired with a date inside whichever month the page wants; the model
     /// deduplicates by month key, so calling it on every appear costs nothing
     /// once the month is cached.
     public let onRequestMonth: (Date) -> Void
@@ -51,16 +51,18 @@ public struct ScheduleView: View {
 
     @AppStorage("anicat_time_format") private var timeFormat: String = "24-hour"
     @State private var watchingOnly: Bool = true
-    /// "week" or "month". Week is the default: it answers "what is on
-    /// tonight", which is what this section is opened for.
+    /// "week" (shown as Days) or "month". Days is the default: it answers
+    /// "what is on tonight", which is what this section is opened for.
     @State private var mode: String = "week"
-    /// Owned here rather than in `CalendarView` so switching to the week tab
-    /// and back returns to the month that was being looked at.
+    /// Owned here rather than in `CalendarView` so switching to Days and back
+    /// returns to the month that was being looked at.
     @State private var calendarMonth: Date = Date()
-
-    // Cached result of the O(n log n) group+sort — rebuilt only when `items`
-    // or `watchingOnly` changes, not on every body re-evaluation.
-    @State private var groupedItems: [(day: String, items: [ScheduleItem])] = []
+    @State private var selectedDay: Date = Calendar.current.startOfDay(for: Date())
+    /// The month `calendarSlots` belongs to. The model holds one month at a
+    /// time, the last one asked for, and Days and Month can each want a
+    /// different one; reading the slots against any other month filled the
+    /// wrong days, or left a week's tail empty when it ran into the next.
+    @State private var requestedMonth: Date?
 
     public init(
         items: [ScheduleItem],
@@ -78,34 +80,101 @@ public struct ScheduleView: View {
         self.onSelectItem = onSelectItem
     }
 
-    private func recomputeGroups() {
-        // AniList's `nextAiringEpisode` schedule already only ever returns
-        // future airings, but for a show with a long-running weekly slot that
-        // window stretches arbitrarily far out — this caps what's shown to a
-        // week so the page reads as "what's airing soon", not the entire
-        // remaining season.
-        let now = Date().timeIntervalSince1970
-        let sevenDaysOut = now + 7 * 24 * 60 * 60
-        let filtered = items
-            .filter { !watchingOnly || $0.isWatching }
-            .filter { Double($0.airingAt) <= sevenDaysOut }
-        let grouped = Dictionary(grouping: filtered, by: { $0.dayGroup })
-        groupedItems = grouped.map { (day: $0.key, items: $0.value) }
-            .sorted(by: { ($0.items.first?.airingAt ?? 0) < ($1.items.first?.airingAt ?? 0) })
+    // MARK: - Data
+
+    /// One line of the day list, from either source.
+    fileprivate struct Row: Identifiable {
+        let id: String
+        let title: String
+        let coverURL: URL?
+        let episode: Int
+        let airingAt: Int64
+        let onList: Bool
+        let status: String?
+        let open: () -> Void
     }
 
-    /// The filter and the list it produces change in one transaction. The
-    /// list used to be rebuilt from an `onChange` on the next update, outside
-    /// the toggle's `withAnimation`, so every row popped in place. Rows keep
-    /// their identity across the filter, so inside the transaction a
-    /// survivor slides to its new slot and the section it left collapses
-    /// under it.
-    private func setWatchingOnly(_ value: Bool) {
-        withAnimation(.sumi(.page)) {
-            watchingOnly = value
-            recomputeGroups()
+    private func isLoaded(_ day: Date) -> Bool {
+        guard let requestedMonth, !calendarSlots.isEmpty else { return false }
+        return Calendar.current.isDate(day, equalTo: requestedMonth, toGranularity: .month)
+    }
+
+    /// A day's rows come from the month slots when that month is loaded, and
+    /// from `items` otherwise, never both: the two overlap on every title in
+    /// the viewer's list, and merging them counted each one twice.
+    private func rows(on day: Date) -> [Row] {
+        if isLoaded(day) {
+            return CalendarView.slots(on: day, from: calendarSlots, watchingOnly: false).map { slot in
+                Row(
+                    id: "s\(slot.catalogId)-\(slot.episode)",
+                    title: slot.title,
+                    coverURL: URL(string: slot.coverImage),
+                    episode: Int(slot.episode),
+                    airingAt: slot.airingAt,
+                    onList: slot.onUserList,
+                    status: Self.statusLabel(slot.userStatus),
+                    open: { onSelectSlot(slot) }
+                )
+            }
+        }
+        let start = Calendar.current.startOfDay(for: day)
+        guard let end = Calendar.current.date(byAdding: .day, value: 1, to: start) else { return [] }
+        let from = Int64(start.timeIntervalSince1970)
+        let to = Int64(end.timeIntervalSince1970)
+        return items
+            .filter { $0.airingAt >= from && $0.airingAt < to }
+            .sorted { $0.airingAt < $1.airingAt }
+            .map { item in
+                Row(
+                    id: "i\(item.id)-\(item.episodeNumber)",
+                    title: item.title,
+                    coverURL: item.coverImageURL,
+                    episode: item.episodeNumber,
+                    airingAt: item.airingAt,
+                    onList: item.isWatching,
+                    // `isWatching` is true for Planning as well, so it cannot
+                    // name the status.
+                    status: item.isWatching ? "On list" : nil,
+                    open: { onSelectItem(item) }
+                )
+            }
+    }
+
+    nonisolated private static func statusLabel(_ status: String?) -> String? {
+        switch status {
+        case "CURRENT": "Watching"
+        case "PLANNING": "Planning"
+        case "COMPLETED": "Completed"
+        case "PAUSED": "Paused"
+        case "DROPPED": "Dropped"
+        case "REPEATING": "Rewatching"
+        case nil: nil
+        default: "On list"
         }
     }
+
+    /// "Times in Amsterdam": the city of the zone the times are drawn in.
+    private var timeZoneMeta: String {
+        let zone = TimeZone.current
+        let parts = zone.identifier.split(separator: "/")
+        if parts.count > 1, let city = parts.last {
+            return "Times in \(city.replacingOccurrences(of: "_", with: " "))"
+        }
+        return "Times in \(zone.localizedName(for: .shortGeneric, locale: .current) ?? zone.identifier)"
+    }
+
+    nonisolated private static let dayTitleFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE d MMMM"
+        return f
+    }()
+
+    private func request(_ month: Date) {
+        requestedMonth = month
+        onRequestMonth(month)
+    }
+
+    // MARK: - Body
 
     public var body: some View {
         // The same frame every other section draws in (see the home page in
@@ -116,50 +185,40 @@ public struct ScheduleView: View {
         GeometryReader { viewport in
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: SumiTheme.spaceLg) {
-                SumiPageHeader(
-                    title: "Schedule",
-                    subtitle: "\(groupedItems.reduce(0) { $0 + $1.items.count }) airing this week"
-                ) {
-                    SumiSlashToggle(
-                        [("global", "All"), ("watching", "Watching")],
-                        selection: watchingOnly ? "watching" : "global"
-                    ) { setWatchingOnly($0 == "watching") }
+                SumiPageHeader(title: "Schedule", subtitle: timeZoneMeta) {
+                    HStack(spacing: SumiTheme.spaceMd) {
+                        SumiSlashToggle(
+                            [("global", "All"), ("watching", "Watching")],
+                            selection: watchingOnly ? "watching" : "global"
+                        ) { key in
+                            withAnimation(.sumi(.page)) { watchingOnly = key == "watching" }
+                        }
+                        SumiSlashToggle(
+                            [("week", "Days"), ("month", "Month")],
+                            selection: mode
+                        ) { key in
+                            withAnimation(.snappy) { mode = key }
+                        }
+                    }
                 }
-                .padding(.horizontal, SumiTheme.spaceMd)
-
-                SumiSegmentedControl(
-                    options: [("week", "Week"), ("month", "Calendar")],
-                    selection: $mode
-                )
-                .fixedSize()
                 .padding(.horizontal, SumiTheme.spaceMd)
 
                 if mode == "month" {
                     CalendarView(
                         month: $calendarMonth,
-                        slots: calendarSlots,
+                        // Until the model answers for this month the slots in
+                        // hand are the Days page's month, which would paint
+                        // onto the grid's pad days.
+                        slots: requestedMonth.map { Calendar.current.isDate($0, equalTo: calendarMonth, toGranularity: .month) } == true ? calendarSlots : [],
                         isLoading: isCalendarLoading,
                         watchingOnly: watchingOnly,
                         timeFormat: timeFormat,
                         onSelectSlot: onSelectSlot
                     )
                     .padding(.horizontal, SumiTheme.spaceMd)
-                } else if groupedItems.isEmpty {
-                    SumiEmptyState(
-                        headline: watchingOnly ? "No watching shows airing soon" : "No airing shows found",
-                        detail: watchingOnly ? "Shows you are currently watching with upcoming episodes will appear here." : "Airing schedules will appear here for ongoing shows."
-                    )
-                    .padding(.top, 40)
                 } else {
-                    // Day Groups rendered lazily
-                    ForEach(groupedItems, id: \.day) { group in
-                        ScheduleDaySection(
-                            group: group,
-                            timeFormat: timeFormat,
-                            onSelectItem: onSelectItem
-                        )
-                        .sumiTransition(.opacity)
-                    }
+                    daysPage
+                        .padding(.horizontal, SumiTheme.spaceMd)
                 }
             }
             .padding(.horizontal, 40 - SumiTheme.spaceMd)
@@ -171,101 +230,132 @@ public struct ScheduleView: View {
         }
         }
         .sumiGround()
-        .onAppear { recomputeGroups() }
-        .onChange(of: items) { _, _ in recomputeGroups() }
-        // Asked for on every entry into the calendar tab and on every page,
-        // not once on appear: the month cache is keyed per month, so the
-        // request that is already answered is dropped by the model rather
-        // than gated by a flag here.
+        // Days reads the month slots too (past airings and the titles not in
+        // the list exist nowhere else), so it asks on appear rather than
+        // only on entering Month.
+        .onAppear { request(mode == "month" ? calendarMonth : selectedDay) }
         .onChange(of: mode) { _, next in
-            if next == "month" { onRequestMonth(calendarMonth) }
+            request(next == "month" ? calendarMonth : selectedDay)
         }
         .onChange(of: calendarMonth) { _, next in
-            if mode == "month" { onRequestMonth(next) }
+            if mode == "month" { request(next) }
+        }
+        .onChange(of: selectedDay) { _, next in
+            if let requestedMonth, Calendar.current.isDate(next, equalTo: requestedMonth, toGranularity: .month) { return }
+            request(next)
         }
     }
-}
 
-private struct ScheduleDaySection: View {
-    let group: (day: String, items: [ScheduleView.ScheduleItem])
-    let timeFormat: String
-    let onSelectItem: (ScheduleView.ScheduleItem) -> Void
+    @ViewBuilder
+    private var daysPage: some View {
+        let dayRows = rows(on: selectedDay)
+        let yours = dayRows.filter(\.onList)
+        let others = watchingOnly ? [] : dayRows.filter { !$0.onList }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: SumiTheme.spaceMd) {
-            Text(group.day)
-                .sumiTabularMono(size: 13, weight: .bold)
-                .foregroundColor(SumiTheme.indigo)
-                .padding(.horizontal, SumiTheme.spaceMd)
+        VStack(alignment: .leading, spacing: SumiTheme.spaceLg) {
+            ScheduleDayStrip(
+                days: ScheduleDayStrip.week(containing: Date()),
+                selected: selectedDay,
+                yoursCount: { rows(on: $0).filter(\.onList).count },
+                onSelect: { day in
+                    SumiHaptics.selection()
+                    withAnimation(.sumi(.page)) { selectedDay = day }
+                }
+            )
 
-            VStack(spacing: 0) {
-                ForEach(group.items) { item in
-                    VStack(spacing: 0) {
-                        ScheduleItemRow(
-                            item: item,
-                            timeFormat: timeFormat,
-                            onSelect: { onSelectItem(item) }
-                        )
-                        Rectangle()
-                            .fill(SumiTheme.border)
-                            .frame(height: 1)
+            VStack(alignment: .leading, spacing: 6) {
+                SumiSectionHeader("In your list", trailing: Self.dayTitleFormatter.string(from: selectedDay))
+                if yours.isEmpty {
+                    Text(isCalendarLoading && !isLoaded(selectedDay) ? "Loading" : "Nothing from your list airs on this day.")
+                        .font(.system(size: 12.5))
+                        .foregroundColor(SumiTheme.muted)
+                        .padding(.vertical, 8)
+                } else {
+                    ForEach(yours) { row in
+                        ScheduleRowView(row: row, muted: false, timeFormat: timeFormat)
+                            .sumiTransition(.opacity)
                     }
-                    // Without a transition a removed row vanished on the
-                    // first frame while its neighbours were still travelling
-                    // into its space.
-                    .sumiTransition(.opacity)
                 }
             }
-            .padding(.horizontal, SumiTheme.spaceMd)
+
+            if !others.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    SumiSectionHeader("Also airing", trailing: "\(others.count) more")
+                    ForEach(others) { row in
+                        ScheduleRowView(row: row, muted: true, timeFormat: timeFormat)
+                            .sumiTransition(.opacity)
+                    }
+                }
+                .sumiTransition(.opacity)
+            }
         }
     }
 }
 
-private struct ScheduleItemRow: View {
-    let item: ScheduleView.ScheduleItem
+/// time | poster | title and episode | status | countdown, on a hairline.
+private struct ScheduleRowView: View {
+    let row: ScheduleView.Row
+    let muted: Bool
     let timeFormat: String
-    let onSelect: () -> Void
+
+    /// "Out in 2 h". Computed from `airingAt` at draw time rather than taken
+    /// from `ScheduleItem.countdownText`, which is rendered once at fetch and
+    /// still said "in 3h" hours after the episode was out.
+    nonisolated static func outText(_ airingAt: Int64, now: Date) -> String {
+        let seconds = Int(airingAt) - Int(now.timeIntervalSince1970)
+        if seconds <= 0 { return "Out" }
+        if seconds < 3600 { return "Out in \(max(1, seconds / 60)) min" }
+        if seconds < 86_400 { return "Out in \(seconds / 3600) h" }
+        return "Out in \(seconds / 86_400) d"
+    }
 
     var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 12) {
-                // Poster Thumbnail
-                CachedAsyncImage(url: item.coverImageURL, maxPixelSize: 150) { img in
-                    img.resizable().aspectRatio(contentMode: .fill)
+        Button(action: row.open) {
+            HStack(spacing: 14) {
+                Text(SumiTheme.formatTime(Date(timeIntervalSince1970: TimeInterval(row.airingAt)), timeFormat: timeFormat))
+                    .sumiTabularMono(size: 13)
+                    .foregroundColor(muted ? SumiTheme.muted : SumiTheme.foreground)
+                    .frame(width: 56, alignment: .leading)
+
+                CachedAsyncImage(url: row.coverURL, maxPixelSize: 120) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    Rectangle().fill(SumiTheme.card)
+                    Rectangle().fill(SumiTheme.foregroundWash)
                 }
-                .frame(width: 55, height: 75)
+                .frame(width: 40, height: 56)
                 .clipShape(SumiRect(cornerRadius: SumiTheme.radiusSm))
 
-                // Meta
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(.sumiHeading(size: 13.5, weight: .semibold))
-                        .foregroundColor(SumiTheme.foreground)
-                        .lineLimit(2)
-
-                    HStack(spacing: 8) {
-                        Text("Ep \(item.episodeNumber)")
-                            .sumiTabularMono(size: 11, weight: .medium)
-                            .foregroundColor(SumiTheme.indigo)
-                            .contentTransition(.numericText())
-
-                        Text(item.airingAt > 0 ? SumiTheme.formatTime(Date(timeIntervalSince1970: TimeInterval(item.airingAt)), timeFormat: timeFormat) : item.airingTimeText)
-                            .sumiTabularMono(size: 11)
-                            .foregroundColor(SumiTheme.muted)
-                    }
-
-                    Text(item.countdownText)
-                        .sumiTabularMono(size: 10.5)
-                        .foregroundColor(SumiTheme.muted.opacity(0.8))
-                        .contentTransition(.numericText())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title)
+                        .font(.system(size: 13, weight: muted ? .regular : .semibold))
+                        .foregroundColor(SumiTheme.foreground.opacity(muted ? 0.8 : 1))
+                        .lineLimit(1)
+                    Text("Episode \(row.episode)")
+                        .sumiTabularMono(size: 11.5)
+                        .foregroundColor(SumiTheme.muted)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(row.status ?? "")
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(SumiTheme.muted)
+                    .frame(width: 120, alignment: .leading)
+
+                // Once a minute is as fine as the label reads.
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(Self.outText(row.airingAt, now: context.date))
+                        .sumiTabularMono(size: 11.5)
+                        .foregroundColor(muted ? SumiTheme.muted : SumiTheme.indigo)
+                }
+                .frame(width: 110, alignment: .trailing)
             }
             .padding(.vertical, 8)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(SumiTheme.border).frame(height: 1)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.sumiPressable)
+        .help(row.title)
     }
 }

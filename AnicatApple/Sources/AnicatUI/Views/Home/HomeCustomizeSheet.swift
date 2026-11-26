@@ -8,20 +8,20 @@ struct HomeCustomizeSheet: View {
     @Binding var isPresented: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Customize home")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(SumiTheme.foreground)
-                .padding(.bottom, 4)
-
-            Text("Drag to reorder.")
-                .font(.system(size: 11))
-                .foregroundColor(SumiTheme.muted)
-                .padding(.bottom, 12)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Customize Up next")
+                    .font(.sumiHeading(size: 19, weight: .semibold))
+                    .tracking(-0.3)
+                    .foregroundColor(SumiTheme.foreground)
+                Text("Drag to reorder. Hidden rows stay one click away here.")
+                    .sumiTabularMono(size: 11.5)
+                    .foregroundColor(SumiTheme.muted)
+            }
 
             List {
                 ForEach(model.homeRowConfig) { row in
-                    HStack(spacing: 8) {
+                    HStack(spacing: 12) {
                         Text(row.title)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(row.visible ? SumiTheme.foreground : SumiTheme.muted)
@@ -29,7 +29,7 @@ struct HomeCustomizeSheet: View {
                         SumiSwitch(isOn: Binding(
                             get: { row.visible },
                             set: { _ in model.toggleHomeRow(id: row.id) }
-                        ))
+                        ), label: row.title)
                     }
                     .padding(.vertical, 4)
                     .listRowBackground(Color.clear)
@@ -53,16 +53,30 @@ struct HomeCustomizeSheet: View {
             // new row (Watching joined as the seventh) is not cut off.
             .frame(height: CGFloat(model.homeRowConfig.count) * 38 + 8)
 
-            HStack {
+            HStack(spacing: 8) {
                 Spacer()
+                // A quiet word, not a second boxed button: the sheet's one
+                // push button is Done.
+                Button {
+                    model.homeRowConfig = AppModel.defaultHomeRows
+                    model.persistHomeRowConfig()
+                } label: {
+                    Text("Reset")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(SumiTheme.muted)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.sumiPressable)
+                .disabled(model.homeRowConfig == AppModel.defaultHomeRows)
                 Button("Done") { isPresented = false }
                     .sumiPrimaryButton()
                     .sumiKeyboardShortcut(.escape, modifiers: [])
             }
-            .padding(.top, 16)
         }
-        .padding(20)
-        .frame(width: 380)
-        .background(SumiTheme.background)
+        .padding(22)
+        .frame(width: 460)
+        .background(SumiTheme.card)
     }
 }

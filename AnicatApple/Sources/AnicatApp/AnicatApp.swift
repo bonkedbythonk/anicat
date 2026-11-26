@@ -302,13 +302,6 @@ struct AnicatApp: App {
                 Button("Close") { NSApp.keyWindow?.performClose(nil) }
                     .keyboardShortcut("w", modifiers: .command)
             }
-            // Settings is a section of the main window, not a scene of its
-            // own; without this the app menu had no Settings item and Cmd-,
-            // did nothing.
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") { showSettings(model) }
-                    .keyboardShortcut(",", modifiers: .command)
-            }
             AppCommands(model: model)
         }
         // First launch, before any autosaved frame exists; after that the
@@ -317,35 +310,19 @@ struct AnicatApp: App {
         // still left the detail page's hero taller than it wanted to be.
         // 1213x754 is the size the app was actually settled at in use.
         .defaultSize(width: 1213, height: 754)
-    }
-}
 
-/// Settings from the app menu's Settings item.
-@MainActor
-private func showSettings(_ model: AppModel) {
-    NSApp.activate(ignoringOtherApps: true)
-    // The actual bug this fixes: `PlayerView` used to render
-    // unconditionally over everything whenever a stream was
-    // active, regardless of `currentNavSection` — so opening
-    // Settings from the menu bar while something was playing
-    // switched the section underneath but the video stayed
-    // covering the whole window with no visible way back to
-    // the app. Minimizing (not stopping) it is what actually
-    // uncovers Settings.
-    // Same as above: the curve lives in `PlayerView`.
-    model.isPlayerMinimized = true
-    // `RootView`'s detail page renders whenever
-    // `selectedMediaDetails` is set, regardless of
-    // `currentNavSection` -- the sidebar's own click handler
-    // already clears it for exactly this reason. This entry
-    // point skipped that, so opening Settings from the menu
-    // bar while a title's detail page was open silently did
-    // nothing: the section changed underneath, but the
-    // detail page kept rendering over it.
-    model.clearPersonPages()
-    model.clearDetail()
-    model.currentNavSection = .settings
-    AppWindow.main?.makeKeyAndOrderFront(nil)
+        // Settings is its own window, the Mac's standard one (Cmd-, and the
+        // app menu item come with the scene). As a section of the main window
+        // it could only open by swapping out whatever page was showing, and
+        // a playing episode had to be minimised to uncover it.
+        Settings {
+            ThemedRoot {
+                AppSettingsPane(model: model)
+                    .frame(width: 720, height: 560)
+                    .background(SumiTheme.background)
+            }
+        }
+    }
 }
 
 /// The Go and Playback menus. Navigation and player keys used to exist only
@@ -365,8 +342,10 @@ private struct AppCommands: Commands {
                 .disabled(!model.canGoForward || model.isPersonPageOpen)
             Divider()
             ForEach(1...9, id: \.self) { number in
-                if let section = SidebarView.NavSection.fromNumberKey(number, mode: model.appMode) {
-                    Button(section.label(for: model.appMode)) {
+                // Not Settings: it is a window now, under the app menu's
+                // Settings… (Cmd-,), and this item opened the old page.
+                if let section = SidebarView.NavSection.fromNumberKey(number, mode: model.appMode), section != .settings {
+                    Button(section.placeName(for: model.appMode)) {
                         withAnimation(.smooth) { model.navigate(to: section) }
                     }
                     .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)

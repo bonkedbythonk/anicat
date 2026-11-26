@@ -41,9 +41,9 @@ struct PlaybackTabSection: View {
         ("0.8", "Small"), ("1.0", "Normal"), ("1.25", "Large"), ("1.5", "Huge"),
     ]
 
-    /// The segmented control speaks strings; the setting is the `Double`
-    /// mpv takes. A stored value between the four steps shows as Normal
-    /// rather than as nothing selected.
+    /// The toggle speaks strings; the setting is the `Double` mpv takes. A
+    /// stored value between the four steps shows as Normal rather than as
+    /// nothing selected.
     private var subtitleSizeBinding: Binding<String> {
         Binding(
             get: {
@@ -57,15 +57,13 @@ struct PlaybackTabSection: View {
         )
     }
 
-    /// The tiles speak `SubtitleStyle`; the setting stores the case name.
-    private var subtitleStyleBinding: Binding<SubtitleStyle> {
-        Binding(
-            get: { SubtitleStyle(rawValue: subtitleStyle) ?? .release },
-            set: { style in
-                subtitleStyle = style.rawValue
-                AppModel.shared?.playerController.onSetSubtitleStyle?(style)
-            }
-        )
+    private var currentSubtitleStyle: SubtitleStyle {
+        SubtitleStyle(rawValue: subtitleStyle) ?? .release
+    }
+
+    private func selectSubtitleStyle(_ style: SubtitleStyle) {
+        subtitleStyle = style.rawValue
+        AppModel.shared?.playerController.onSetSubtitleStyle?(style)
     }
 
     private static let hourOptions = (0...23).map { String(format: "%02d:00", $0) }
@@ -83,151 +81,124 @@ struct PlaybackTabSection: View {
     }
 
     var body: some View {
-    VStack(alignment: .leading, spacing: 28) {
-        SettingsCard(
-            title: "What plays",
-            description: "Which track is chosen, and what happens at the edges of an episode."
-        ) {
+    VStack(alignment: .leading, spacing: 18) {
+        SettingsCard(title: "Subtitles") {
+            // The chosen look, at the chosen size, over a stand-in frame
+            // with a typeset sign in the corner that does not change. The
+            // scene is 16:9 and sizes its text to its own height, so it is
+            // capped by width: full width it stood 360pt tall and pushed
+            // every other row of a 560pt window below the fold.
+            SubtitleScene(style: currentSubtitleStyle, scale: subtitleScale)
+                .frame(maxWidth: 300)
+                .frame(maxWidth: .infinity)
+
+            SettingField(label: "Size") {
+                SumiSegmentedControl(options: Self.subtitleSizes, selection: subtitleSizeBinding)
+            }
+
             SettingField(
-                label: "Sub/Dub",
-                description: "Preferred audio language for streaming. A preference, not a filter: a dub wins where one exists, and nothing is hidden where one does not."
+                label: "Style",
+                description: currentSubtitleStyle == .release
+                    ? currentSubtitleStyle.summary
+                    : "Only the dialogue changes; signs and song lyrics keep the release's look"
             ) {
-                SumiDropdown(
-                    options: ["Subtitled", "Dubbed"],
-                    selected: $subDub
+                SumiSlashToggle(
+                    SubtitleStyle.allCases.map { ($0, $0.label) },
+                    selection: currentSubtitleStyle,
+                    select: selectSubtitleStyle
                 )
             }
+        }
 
+        SettingsCard(title: "Watching") {
             SettingField(
-                label: "Normalize audio",
-                description: "Lifts quiet dialogue and caps loud scenes so an episode plays about as loud as music streaming. Applies from the next episode you start."
+                label: "Audio",
+                description: "A preference, not a filter: nothing is hidden where no dub exists"
             ) {
-                SumiSwitch(isOn: $normalizeAudio)
+                SumiSlashToggle(
+                    [("Subtitled", "Japanese"), ("Dubbed", "English when available")],
+                    selection: subDub
+                ) { subDub = $0 }
             }
 
             SettingField(
-                label: "Auto-skip intros",
-                description: "Automatically skip openings and endings using AniSkip. The video player also displays an on-screen skip button when an intro or outro is detected."
+                label: "Skip intros and recaps automatically",
+                description: "Uses AniSkip; the player still offers a skip button when this is off"
             ) {
-                SumiSwitch(isOn: $autoSkipIntro)
+                SumiSwitch(isOn: $autoSkipIntro, label: "Skip intros and recaps automatically")
             }
 
             SettingField(
                 label: "Play the next episode",
-                description: "Starts the next episode as the current one ends. The player's own button toggles this too."
+                description: "The player's own button toggles this too"
             ) {
-                SumiSwitch(isOn: $autoPlayNext)
+                SumiSwitch(isOn: $autoPlayNext, label: "Play the next episode")
             }
 
             SettingField(
                 label: "Next episode card",
-                description: "Counts down to the next episode over the ending, with the option to start it now or stay where you are. Turning it off does not turn off auto-play; the next episode simply arrives without asking."
+                description: "Counts down over the ending; off, the next episode arrives without asking"
             ) {
-                SumiSwitch(isOn: $nextUpCard)
+                SumiSwitch(isOn: $nextUpCard, label: "Next episode card")
+            }
+
+            SettingField(
+                label: "Normalize audio",
+                description: "Evens out quiet dialogue and loud scenes, from the next episode"
+            ) {
+                SumiSwitch(isOn: $normalizeAudio, label: "Normalize audio")
             }
         }
 
-        SettingsCard(
-            title: "Video",
-            description: "How the picture is decoded and drawn. Both of the first two cost GPU time."
-        ) {
+        SettingsCard(title: "Video") {
             SettingField(
                 label: "GPU upscaling",
-                description: "Anime4K shaders redraw the line art as a 1080p episode is scaled up to your screen. Little to see on a 1080p display; turn it off on battery."
+                description: "Anime4K redraws line art as it scales up; costs GPU, turn off on battery"
             ) {
-                SumiSwitch(isOn: $gpuUpscaling)
+                SumiSwitch(isOn: $gpuUpscaling, label: "GPU upscaling")
             }
 
             SettingField(
                 label: "Hardware decoding",
-                description: "Apple Silicon VideoToolbox acceleration. Reduces CPU usage and battery drain during playback."
+                description: "VideoToolbox; less CPU and battery during playback"
             ) {
-                SumiSwitch(isOn: $hardwareDecoding)
+                SumiSwitch(isOn: $hardwareDecoding, label: "Hardware decoding")
             }
 
             if PlayerController.smoothMotionSupported {
                 SettingField(
                     label: "Smooth motion",
-                    description: "Draws in-between frames during camera pans so they glide instead of stepping. Characters, effects and cuts are left as animated. Uses more GPU while a pan is on screen."
+                    description: "In-between frames during camera pans; characters and cuts stay as animated"
                 ) {
-                    SumiSwitch(isOn: $frameInterpolation)
+                    SumiSwitch(isOn: $frameInterpolation, label: "Smooth motion")
                 }
             }
 
             SettingField(
                 label: "Ambient glow",
-                description: "Lights the black bars in fullscreen with the colours at the picture's edges, like a backlight behind a TV."
+                description: "Lights the black bars in fullscreen with the picture's edge colours"
             ) {
-                SumiSwitch(isOn: $ambientGlow)
+                SumiSwitch(isOn: $ambientGlow, label: "Ambient glow")
             }
 
             if ambientGlow {
-                SettingField(
-                    label: "Glow in windowed mode",
-                    description: "Also light the bars when the player is a window, not only in fullscreen."
-                ) {
-                    SumiSwitch(isOn: $ambientGlowWindowed)
+                SettingField(label: "Glow in windowed mode") {
+                    SumiSwitch(isOn: $ambientGlowWindowed, label: "Glow in windowed mode")
                 }
             }
         }
 
-        SettingsCard(
-            title: "Subtitles",
-            description: "Applied straight away, including to an episode that is playing."
-        ) {
-            SettingField(
-                label: "Size",
-                description: "Scales every subtitle, styled releases included."
-            ) {
-                SumiSegmentedControl(options: Self.subtitleSizes, selection: subtitleSizeBinding)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Style")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(SumiTheme.foreground)
-                // The chosen look, at the chosen size, over a stand-in frame
-                // with a typeset sign in the corner that does not change:
-                // the note below promises exactly that.
-                SubtitleScene(
-                    style: subtitleStyleBinding.wrappedValue,
-                    scale: subtitleScale
-                )
-                .frame(maxWidth: 520)
-
-                SubtitleStyleTiles(selection: subtitleStyleBinding)
-                    .frame(maxWidth: 620)
-
-                Text(subtitleStyleBinding.wrappedValue.summary
-                    + (subtitleStyleBinding.wrappedValue == .release
-                        ? ""
-                        : " Only the dialogue changes: signs, song lyrics and on-screen text keep the look the release gave them."))
-                    .font(.system(size: 12))
-                    .foregroundColor(SumiTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-
-        #if os(macOS)
-        // Its own card rather than four rows on the end of the playback
-        // list: this is the machine's behaviour while an episode runs, not
-        // the episode's.
-        SettingsCard(
-            title: "While watching",
-            description: "What this Mac does with itself during playback."
-        ) {
+        // This Mac's behaviour while an episode runs, not the episode's.
+        SettingsCard(title: "While watching") {
             SettingField(
                 label: "Dim keyboard backlight",
-                description: "Fades the keyboard backlight out after a few idle seconds during playback, and brings it straight back on the first key press, scroll or click."
+                description: "Fades out after a few idle seconds, back on the first key, scroll or click"
             ) {
-                SumiSwitch(isOn: $keyboardDim)
+                SumiSwitch(isOn: $keyboardDim, label: "Dim keyboard backlight")
             }
 
             if keyboardDim {
-                SettingField(
-                    label: "When",
-                    description: "Night only leaves the keyboard alone during the day."
-                ) {
+                SettingField(label: "When") {
                     SumiSegmentedControl(
                         options: [("always", "Always"), ("night", "Night only")],
                         selection: $keyboardDimMode
@@ -235,10 +206,7 @@ struct PlaybackTabSection: View {
                 }
 
                 if keyboardDimMode == "night" {
-                    SettingField(
-                        label: "Night hours",
-                        description: "Local time. The window may cross midnight."
-                    ) {
+                    SettingField(label: "Night hours", description: "Local time; may cross midnight") {
                         HStack(spacing: 8) {
                             Text("From")
                                 .font(.system(size: 12))
@@ -253,15 +221,12 @@ struct PlaybackTabSection: View {
                     }
                 }
             }
-        }
-        #endif
 
-        SettingsCard(title: "Haptics") {
             SettingField(
                 label: "Haptic feedback",
-                description: "A trackpad tick when a back swipe crosses the distance that commits it, and when a seek snaps to a chapter or skip boundary. A Mac without a Force Touch trackpad feels nothing either way."
+                description: "A trackpad tick when a back swipe commits and a seek snaps to a chapter"
             ) {
-                SumiSwitch(isOn: $haptics)
+                SumiSwitch(isOn: $haptics, label: "Haptic feedback")
             }
         }
     }

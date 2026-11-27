@@ -18,8 +18,8 @@
 use serde::Deserialize;
 
 use super::search::{
-    browser_incompatible_codec, magnet_from_infohash, normalize, seeder_score, urlencoding_encode,
-    Candidate, TRACKERS,
+    browser_incompatible_codec, foreign_audio_release, magnet_from_infohash, normalize,
+    seeder_score, urlencoding_encode, Candidate, TRACKERS,
 };
 
 /// The Pirate Bay's JSON search. Chosen over the usual film indexers for two
@@ -159,7 +159,7 @@ fn title_matches(title_norm: &str, name_norm: &str) -> bool {
 /// Score a release for a film. `None` rejects it.
 fn score_movie(name: &str, title_norm: &str, criteria: MovieCriteria, require_year: bool) -> Option<i64> {
     let name_norm = normalize(name);
-    if !title_matches(title_norm, &name_norm) {
+    if !title_matches(title_norm, &name_norm) || foreign_audio_release(&name_norm, title_norm) {
         return None;
     }
 
@@ -439,6 +439,19 @@ mod tests {
 
     fn crit(year: i32) -> MovieCriteria {
         MovieCriteria { year: Some(year), browser_client: false }
+    }
+
+    #[test]
+    fn a_release_that_may_play_a_foreign_dub_is_rejected() {
+        let t = normalize("Dune");
+        assert!(score_movie("Dune.2021.2160p.BluRay.REMUX.Rus.Eng-GROUP", &t, crit(2021), true).is_none());
+        assert!(score_movie("Dune 2021 1080p BluRay Дюна", &t, crit(2021), true).is_none());
+        assert!(score_movie("Dune.2021.MULTi.1080p.BluRay.x264-GROUP", &t, crit(2021), true).is_none());
+        assert!(score_movie("Dune.2021.1080p.WEB-DL.Multi-Subs.x264", &t, crit(2021), true).is_some());
+        assert!(score_movie("Dune.2021.1080p.BluRay.x264-GROUP", &t, crit(2021), true).is_some());
+        let french = normalize("The French Dispatch");
+        assert!(score_movie("The.French.Dispatch.2021.1080p.BluRay", &french, crit(2021), true).is_some());
+        assert!(score_movie("The.French.Dispatch.2021.1080p.BluRay.ITA", &french, crit(2021), true).is_none());
     }
 
     #[test]

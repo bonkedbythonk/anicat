@@ -14,7 +14,9 @@
 
 use serde::Deserialize;
 
-use super::search::{browser_incompatible_codec, normalize, seeder_score, Candidate};
+use super::search::{
+    browser_incompatible_codec, foreign_audio_release, normalize, seeder_score, Candidate,
+};
 
 const KNABEN_URL: &str = "https://api.knaben.org/v1";
 
@@ -130,7 +132,7 @@ fn names_any_episode(name_norm: &str) -> bool {
 /// Score a release for one episode. `None` rejects it.
 fn score_episode(name: &str, title_norm: &str, criteria: EpisodeCriteria) -> Option<(i64, bool)> {
     let name_norm = normalize(name);
-    if !title_matches(title_norm, &name_norm) {
+    if !title_matches(title_norm, &name_norm) || foreign_audio_release(&name_norm, title_norm) {
         return None;
     }
 
@@ -314,6 +316,16 @@ mod tests {
         let t = normalize("Breaking Bad");
         assert!(score_episode("The Bad Guys Breaking In S01E01 XviD-AFG", &t, crit(1, 1)).is_none());
         assert!(score_episode("Breaking.Bad.S01E01.Pilot.1080p.BluRay", &t, crit(1, 1)).is_some());
+    }
+
+    #[test]
+    fn a_release_that_may_play_a_foreign_dub_is_rejected() {
+        let t = normalize("Breaking Bad");
+        assert!(score_episode("Breaking.Bad.S01E01.1080p.BluRay.REMUX.Rus.Eng", &t, crit(1, 1)).is_none());
+        assert!(score_episode("Breaking Bad S01E01 Во все тяжкие 1080p", &t, crit(1, 1)).is_none());
+        assert!(score_episode("Breaking.Bad.S01E01.MULTi.1080p.WEB-DL", &t, crit(1, 1)).is_none());
+        assert!(score_episode("Breaking.Bad.S01E01.1080p.WEB-DL.Multi-Subs", &t, crit(1, 1)).is_some());
+        assert!(score_episode("Breaking.Bad.S01E01.1080p.BluRay.x264", &t, crit(1, 1)).is_some());
     }
 
     #[test]

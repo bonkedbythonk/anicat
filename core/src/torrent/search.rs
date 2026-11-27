@@ -1390,6 +1390,34 @@ pub fn browser_incompatible_codec(name_norm: &str) -> bool {
     name_norm.split(' ').any(|t| t.starts_with("ddp"))
 }
 
+/// A film or series release whose audio is, or may default to, a language
+/// other than English. Without it a high-seeded "Rus.Eng" or "ita eng" remux
+/// won the pick and played the foreign dub by default. Multi-audio releases
+/// that include English are rejected too: which track mpv starts on is the
+/// file's choice, not ours.
+///
+/// Whole tokens of `normalize`d text, which keeps Cyrillic letters and turns
+/// "Multi-Subs" into "multi subs" -- a subtitle note, so it passes. Words of
+/// the title itself are skipped, or "The French Dispatch" would have no
+/// release left to play.
+pub(crate) fn foreign_audio_release(name_norm: &str, title_norm: &str) -> bool {
+    const TOKENS: &[&str] = &[
+        "rus", "russian", "ukr", "mvo", "avo", "dvo", "ita", "italian", "french", "truefrench",
+        "vff", "vfq", "vf2", "hindi", "tamil", "telugu", "malayalam", "kannada", "latino",
+        "castellano", "spanish", "esp", "spa", "german", "ger", "polish", "pol", "dublado", "kor",
+        "korean", "chinese", "chs", "cht", "turkish", "tur", "arabic", "czech", "cze", "nordic",
+        "dual", "turko",
+    ];
+    if name_norm.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)) {
+        return true;
+    }
+    let tokens: Vec<&str> = name_norm.split(' ').collect();
+    tokens.iter().enumerate().any(|(i, t)| {
+        (TOKENS.contains(t) && !title_norm.split(' ').any(|w| w == *t))
+            || (*t == "multi" && !matches!(tokens.get(i + 1), Some(&"sub" | &"subs")))
+    })
+}
+
 /// This entry's own titles alongside those of the franchise's other AniList
 /// entries. Only read for an extras entry, where the two are the difference
 /// between "the OVA" and "the other OVA" — see `names_a_sibling`.

@@ -168,7 +168,7 @@ struct PlaybackTabSection: View {
             if PlayerController.smoothMotionSupported {
                 SettingField(
                     label: "Smooth motion",
-                    description: "In-between frames during camera pans; characters and cuts stay as animated"
+                    description: "Safe to leave on; adds in-between frames only during camera pans, never to characters or cuts"
                 ) {
                     SumiSwitch(isOn: $frameInterpolation, label: "Smooth motion")
                 }

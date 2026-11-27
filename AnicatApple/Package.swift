@@ -40,10 +40,10 @@ let package = Package(
         // Samba, which we do not use, but it is the honest match.
         //
         // Our fork of 1.0.0, not upstream: stock MPVKit builds FFmpeg
-        // without loudnorm, so the player's normalize-audio filter fails to
+        // without dynaudnorm, so the player's normalize-audio filter fails to
         // build its chain and an episode plays in silence. The fork differs
         // by the filter allow-list and a rebuilt Libavfilter-GPL; the
-        // packaging script refuses a bundle that has no loudnorm.
+        // packaging script refuses a bundle that has no dynaudnorm.
         .package(url: "https://github.com/bonkedbythonk/MPVKit.git", exact: "1.0.0-anicat.4")
     ],
     targets: [

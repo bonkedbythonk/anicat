@@ -1946,9 +1946,17 @@ public struct MpvSurface {
         /// Releases are mastered quiet and wide: two cached SubsPlease
         /// episodes measured -24.4 and -22.0 LUFS against the -14 that
         /// Spotify and YouTube sit at, with 3.8 dB of peak headroom, so
-        /// plain gain would clip. Single-pass `loudnorm` lifted the same
-        /// episode to -16.9 LUFS at a -1.5 dBFS true peak; `dynaudnorm`
-        /// overshot to -13.3 with peaks at -0.5. Absent key means on.
+        /// plain gain would clip. Absent key means on.
+        ///
+        /// Not `loudnorm`: it holds 3 s of lookahead and mpv flushes the
+        /// chain on every seek, so after a skip the picture ran on with no
+        /// sound for ~3 s (a tester's report; first output frame measured at
+        /// 2.57 s under `ffmpeg -re`). This `dynaudnorm` answers in 0.40 s
+        /// and brings a Kono Oto Tomare 2 episode from -24.6 to -16.6 LUFS
+        /// with a -3.9 dBFS peak, where `loudnorm` gave -16.7 and -1.5. It
+        /// costs dynamics (5.7 LU of range against 8.7). The defaults
+        /// (f=500, g=31) took 15.5 s to answer; a wider window is slower
+        /// still, and p=0.5 left it 1.5 LU quieter.
         ///
         /// Dialogue boost goes first: a compressor lifts quiet speech against
         /// loud effects and score, then less rumble and more of the speech
@@ -1969,7 +1977,7 @@ public struct MpvSurface {
                           "equalizer=f=2500:t=o:w=2:g=5"]
             }
             if normalize {
-                chain.append("loudnorm=I=-16:TP=-1.5:LRA=11")
+                chain.append("dynaudnorm=f=150:g=5:p=0.6:m=6:s=0")
             } else if boost {
                 chain.append("alimiter=limit=0.89")
             }
